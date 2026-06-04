@@ -1,0 +1,66 @@
+# Desktop + Qirabot
+
+Use Qirabot with pyautogui for OS-level automation — desktop apps, embedded browsers, or sites with anti-bot detection.
+
+## Install
+
+```bash
+pip install qirabot pyautogui pytest
+```
+
+## Run
+
+```bash
+pytest examples/desktop/test_browser_automation.py
+pytest examples/desktop/test_native_app.py
+```
+
+> Note: requires a display. Won't work in headless CI environments.
+
+## How it works
+
+```python
+import pyautogui
+from qirabot import Qirabot
+
+bot = Qirabot(task_name="my-test")
+
+def test_open_app():
+    # Open the app first — pyautogui can't launch apps, so use launch_app
+    # (macOS: app name/bundle id, Windows: exe/name/AUMID, Linux: executable).
+    bot.launch_app("Google Chrome", wait=2)
+
+    # Bolt-on: AI finds and clicks UI elements by description
+    bot.click(pyautogui, "Chrome icon in the taskbar")
+    bot.wait_for(pyautogui, "Browser window is visible", timeout=10.0)
+
+    bot.click(pyautogui, "Address bar")
+    bot.type_text(pyautogui, "Address bar", "https://example.com")
+    pyautogui.press("enter")
+
+    # Bolt-on: AI verifies what's on screen
+    assert bot.verify(pyautogui, "Example Domain page is displayed")
+
+    # Bolt-on: AI extracts text from the screen
+    heading = bot.extract(pyautogui, "What is the main heading?")
+    assert "Example" in heading
+```
+
+## When to use Desktop mode
+
+- Native desktop apps (no web interface)
+- Sites with anti-bot detection (Playwright/Selenium get blocked)
+- Embedded browsers in desktop apps (Electron, etc.)
+- Cross-app workflows (copy from browser, paste into Excel)
+
+## From the CLI
+
+```bash
+# --app launches/activates the app first (--app-wait gives the window time to appear)
+qirabot desktop "Type 42 + 58 = and read the result" --app Calculator --app-wait 3
+```
+
+## Examples
+
+- [test_browser_automation.py](test_browser_automation.py) — Control browser from OS level
+- [test_native_app.py](test_native_app.py) — macOS Calculator via `bot.launch_app` (replace with your app)
