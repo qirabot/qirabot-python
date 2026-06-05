@@ -2,7 +2,7 @@
 
 AI-powered automation SDK that bolts onto your existing browser/mobile automation framework. Let AI see the screen, click, type, extract data, and verify results — with any framework you already use.
 
-Use it three ways: as a **Python library** (launch your own browser or bolt onto Playwright / Selenium / Appium / pyautogui), inside your **pytest suite**, or straight from the **terminal** via the `qirabot` CLI — no code required.
+Use it three ways: as a **Python library** (let qirabot launch a Playwright browser for you via `bot.open()`, or bolt onto a Playwright / Selenium / Appium / pyautogui session you already drive), inside your **pytest suite**, or straight from the **terminal** via the `qirabot` CLI — no code required.
 
 ## Installation
 
@@ -19,12 +19,15 @@ framework you'll drive:
 pip install "qirabot[browser]"   # Playwright (needed for bot.open())
 pip install "qirabot[desktop]"   # pyautogui (native desktop apps)
 pip install "qirabot[appium]"    # Appium (Android / iOS)
-pip install "qirabot[all]"       # everything above + the CLI
+
+pip install selenium             # Selenium is not an extra — bring your own driver
 ```
 
+The `qirabot` CLI ships with the base package — no extra needed.
+
 The Quick Start below uses `bot.open()`, so it needs `qirabot[browser]` plus a
-one-time `playwright install chromium`. Selenium isn't an extra — install it
-yourself (`pip install selenium`) and pass your own driver.
+one-time `playwright install chromium`. With Selenium you create the driver
+yourself and pass it to qirabot — see [examples/selenium/](examples/selenium/).
 
 ## Configuration
 
@@ -55,7 +58,36 @@ Constructor options:
 | `retry` | — | `1` | Retries per action on transient failures |
 | `retry_delay` | — | `1.0` | Seconds between retries |
 
+### Model & language
+
+`model_alias` selects which model backs every operation. The built-in aliases are
+`fast`, `balanced` (the default), and `high_quality` — trading cost for quality.
+Run `qirabot models` for the live list your account can use, then pass the
+`name` as `model_alias`; leave it empty for the default:
+
+```python
+bot = Qirabot(model_alias="high_quality")        # applies to all actions
+bot.click(page, "Login", model_alias="fast")     # or override per call
+```
+
+`language` sets the language of AI responses (extracted text, reasoning). It's a
+short language tag like `"zh"` or `"en"` — empty means the server default:
+
+```python
+bot = Qirabot(language="zh")                      # extract/ai answers in Chinese
+text = bot.extract(page, "获取主标题", language="zh")
+```
+
+Both are also CLI flags: `--model/-m` and `--language/-l`.
+
 ## Quick Start
+
+This uses `bot.open()`, so install the browser extra and Chromium first:
+
+```bash
+pip install "qirabot[browser]"
+playwright install chromium
+```
 
 ```python
 from qirabot import Qirabot
@@ -86,11 +118,11 @@ See [examples/README.md](examples/README.md) for which to pick.
 
 ## CLI
 
-Run AI tasks from the terminal without writing any Python. Installs as the
-`qirabot` command:
+Run AI tasks from the terminal without writing any Python. The `qirabot`
+command ships with the base package — no extra needed:
 
 ```bash
-pip install "qirabot[cli]"   # adds the CLI (included in [all])
+pip install qirabot
 export QIRA_API_KEY="qk_..."
 ```
 
@@ -165,7 +197,7 @@ def on_step(step: StepResult) -> None:
 
 result = bot.ai(
     page,
-    "Search for 'best python libraries 2025', click the first result, and extract the main content",
+    "Search for 'best python libraries 2026', click the first result, and extract the main content",
     max_steps=10,
     on_step=on_step,
 )
