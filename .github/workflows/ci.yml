@@ -14,8 +14,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -e ".[dev,cli]"
-      - run: ruff check src/
+      - run: pip install -e ".[dev,browser]"
+      - run: ruff check .
       - run: mypy src/qirabot/
 
   test:

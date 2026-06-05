@@ -7,7 +7,9 @@ from typing import Any
 
 import click
 
+from qirabot._optional import require
 from qirabot._transport import Transport
+from qirabot.exceptions import MissingDependencyError
 
 
 def _transport(ctx: click.Context) -> Transport:
@@ -323,7 +325,7 @@ def browse(
 @click.pass_context
 def mobile(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, platform: str, device: str, appium_url: str, app_package: str, app_activity: str, bundle_id: str, screenshot_dir: str, screenshot_debug: bool) -> None:
     """Run an AI task on a mobile device via Appium."""
-    from appium import webdriver as appium_webdriver
+    appium_webdriver = require("appium.webdriver", "appium")
 
     if platform == "android":
         from appium.options.android import UiAutomator2Options
@@ -342,13 +344,19 @@ def mobile(ctx: click.Context, instruction: str, name: str, model: str, language
         if bundle_id:
             options.bundle_id = bundle_id
 
-    driver = appium_webdriver.Remote(appium_url, options=options)
+    # Build the bot first: it validates the API key and reaches the server, and
+    # may sys.exit() on failure. Creating the Appium driver before that would
+    # leak the remote session (driver.quit() lives in the finally below, which
+    # never runs if _make_bot exits before the try is entered).
     bot = _make_bot(ctx, model=model, language=language, screenshot_dir=screenshot_dir, screenshot_debug=screenshot_debug, task_name=name)
     try:
-        _run_local(bot, driver, instruction, max_steps, base_url=ctx.obj["base_url"])
+        driver = appium_webdriver.Remote(appium_url, options=options)
+        try:
+            _run_local(bot, driver, instruction, max_steps, base_url=ctx.obj["base_url"])
+        finally:
+            driver.quit()
     finally:
         bot.close()
-        driver.quit()
 
 
 @cli.command()
@@ -367,7 +375,7 @@ def mobile(ctx: click.Context, instruction: str, name: str, model: str, language
 @click.pass_context
 def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, app: str, app_wait: float, screenshot_dir: str, screenshot_debug: bool) -> None:
     """Run an AI task on the desktop screen via pyautogui."""
-    import pyautogui
+    pyautogui = require("pyautogui", "desktop")
 
     if app:
         from qirabot import launch_app
@@ -386,7 +394,14 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
 
 
 def main() -> None:
-    cli()
+    # A missing optional backend can surface here (CLI imports) or deep inside a
+    # command (e.g. playwright loaded lazily by bot.open()); catch it once and print
+    # the install hint without a traceback.
+    try:
+        cli()
+    except MissingDependencyError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

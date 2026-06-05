@@ -1,11 +1,11 @@
 """Tests for Qirabot client, StepResult, and RunResult."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from qirabot.adapters.base import ScreenshotConfig
-from qirabot.client import Qirabot, StepResult, RunResult
+from qirabot.client import Qirabot, StepResult, RunResult, _annotate_screenshot
 
 
 class TestStepResult:
@@ -276,6 +276,55 @@ class TestAdapterCacheSync:
         bot.close()
 
 
+class TestAdapterCacheEviction:
+    """The id()-keyed adapter cache must drop entries when the target dies, so
+    a long session doesn't grow it unbounded and a recycled id() can't return a
+    stale adapter for an unrelated object."""
+
+    def test_entry_evicted_when_target_garbage_collected(self):
+        import gc
+
+        bot = Qirabot(api_key="k", task_id="t")
+
+        class Target:  # plain, weak-referenceable stand-in for a page/driver
+            pass
+
+        target = Target()
+        bot._cache_adapter(target, MagicMock())
+        key = id(target)
+        assert key in bot._adapters
+
+        del target
+        gc.collect()
+
+        assert key not in bot._adapters
+        bot.close()
+
+
+class TestVerifySsl:
+    def test_verify_ssl_forwarded_to_transport(self):
+        import qirabot.client as client_mod
+
+        captured = {}
+
+        class FakeTransport:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            def close(self):
+                pass
+
+        orig = client_mod.Transport
+        client_mod.Transport = FakeTransport
+        try:
+            bot = client_mod.Qirabot(api_key="k", task_id="t", verify_ssl=False)
+            bot.close()
+        finally:
+            client_mod.Transport = orig
+
+        assert captured["verify_ssl"] is False
+
+
 class TestScreenshotConfig:
     def test_default_is_jpeg(self):
         cfg = ScreenshotConfig()
@@ -299,3 +348,42 @@ class TestScreenshotConfig:
     def test_unsupported_format_raises(self, fmt):
         with pytest.raises(ValueError, match="unsupported screenshot_format"):
             ScreenshotConfig(format=fmt)
+
+
+class TestAnnotateScreenshot:
+    """The annotated debug image must be encoded in the configured format so its
+    bytes match the filename extension _save_screenshot derives from the config."""
+
+    def _png_bytes(self, w: int = 200, h: int = 150) -> bytes:
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (w, h), (10, 20, 30)).save(buf, format="PNG")
+        return buf.getvalue()
+
+    def test_jpeg_config_produces_jpeg(self):
+        import io
+
+        from PIL import Image
+
+        out = _annotate_screenshot(self._png_bytes(), 100, 75, ScreenshotConfig(format="jpeg"))
+        assert Image.open(io.BytesIO(out)).format == "JPEG"
+
+    def test_png_config_produces_png(self):
+        import io
+
+        from PIL import Image
+
+        out = _annotate_screenshot(self._png_bytes(), 100, 75, ScreenshotConfig(format="png"))
+        assert Image.open(io.BytesIO(out)).format == "PNG"
+
+    def test_default_config_produces_jpeg(self):
+        import io
+
+        from PIL import Image
+
+        # Default config is jpeg; the annotated bytes must not silently be PNG.
+        out = _annotate_screenshot(self._png_bytes(), 100, 75)
+        assert Image.open(io.BytesIO(out)).format == "JPEG"

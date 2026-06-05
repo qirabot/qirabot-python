@@ -134,9 +134,17 @@ class PyAutoGuiAdapter(DeviceAdapter):
             self._pag.hscroll(clicks, x=lx, y=ly)
 
     def device_info(self) -> DeviceInfo:
+        # Report screenshot (physical) pixels, not pyautogui's logical points, so
+        # the dimensions match the captured image and the screenshot-pixel
+        # coordinate convention every adapter method consumes. Otherwise on a 2x
+        # Retina display Qirabot.scroll()'s default center anchor (info.width / 2,
+        # in logical points) would be divided by the scale factor a second time
+        # inside _to_logical and land at a quarter position. Reuses the cached
+        # scale probe; == 1.0 (unchanged) on non-scaled displays.
+        s = self._scale_factor()
         size = self._pag.size()
         return DeviceInfo(
             platform="desktop",
-            width=size.width,
-            height=size.height,
+            width=int(size.width * s),
+            height=int(size.height * s),
         )

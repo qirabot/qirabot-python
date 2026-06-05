@@ -72,12 +72,12 @@ source = ["qirabot"]
 python_version = "3.10"
 strict = true
 
-# Optional automation backends are extras, not installed in the lint job.
-# Their adapter modules import them lazily; ignore the missing stubs so the
-# type check passes without pulling browser/desktop/mobile deps into CI.
+# The lint job installs the browser extra so the Playwright adapter + client get
+# real type-checking. The other backends (desktop/mobile/selenium) stay out of
+# CI — their stubs are poor/untyped and would only add noise — so their lazily
+# imported modules are ignored here.
 [[tool.mypy.overrides]]
 module = [
-    "playwright.*",
     "selenium.*",
     "appium.*",
     "pyautogui",

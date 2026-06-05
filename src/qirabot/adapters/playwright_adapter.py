@@ -25,10 +25,22 @@ class PlaywrightAdapter(DeviceAdapter):
     def __init__(self, page: Any) -> None:
         self._page = page
         self._new_page: Any | None = None
-        self._page.context.on("page", self._on_page)
+        # Keep the context we hooked and the exact handler object so close()
+        # can unhook it. Re-deriving self._page.context later may yield a
+        # different (or closed) context after tab switches.
+        self._context = page.context
+        self._context.on("page", self._on_page)
 
     def _on_page(self, page: Any) -> None:
         self._new_page = page
+
+    def close(self) -> None:
+        # Remove the "page" listener we registered in __init__; without this it
+        # outlives the adapter and accumulates on the (longer-lived) context.
+        try:
+            self._context.remove_listener("page", self._on_page)
+        except Exception:
+            pass
 
     @classmethod
     def accepts(cls, target: Any) -> bool:

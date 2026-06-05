@@ -1,7 +1,5 @@
 """Tests for transport layer."""
 
-import pytest
-from unittest.mock import MagicMock, patch
 
 from qirabot._transport import Transport
 

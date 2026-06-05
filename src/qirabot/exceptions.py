@@ -41,6 +41,14 @@ class QirabotTimeoutError(QirabotError):
     """Operation timed out (client-side)."""
 
 
+class MissingDependencyError(QirabotError, ImportError):
+    """An optional backend dependency (e.g. playwright, pyautogui) is not installed.
+
+    Raised by :func:`qirabot._optional.require` with an actionable ``pip install
+    "qirabot[<extra>]"`` hint instead of a bare ``ModuleNotFoundError`` traceback.
+    """
+
+
 _ERROR_CODE_MAP: dict[str, type[QirabotError]] = {
     "auth.api_key_missing": AuthenticationError,
     "auth.api_key_invalid": AuthenticationError,

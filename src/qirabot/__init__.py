@@ -9,6 +9,7 @@ from qirabot.exceptions import (
     ActionError,
     AuthenticationError,
     InsufficientBalanceError,
+    MissingDependencyError,
     QirabotError,
     QirabotTimeoutError,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "DeviceInfo",
     "ScreenshotConfig",
     "InsufficientBalanceError",
+    "MissingDependencyError",
     "Qirabot",
     "QirabotError",
     "QirabotTimeoutError",

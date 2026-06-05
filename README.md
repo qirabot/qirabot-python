@@ -408,7 +408,7 @@ finally:
 
 Each `Qirabot` instance manages a server-side task that tracks all operations:
 
-- **Task creation**: automatically created on the first AI operation (lazy init)
+- **Task creation**: created when the `Qirabot` instance is constructed (pass an existing `task_id` to attach to one instead)
 - **Step recording**: each `click()`, `extract()`, `ai()` call is recorded as a step on the server
 - **Task completion**: call `bot.close()` or use a context manager — the task is marked as completed
 - **Auto-cleanup**: if `close()` is not called, `atexit` ensures cleanup on script exit. The server also has a 30-minute timeout for orphaned SDK tasks.

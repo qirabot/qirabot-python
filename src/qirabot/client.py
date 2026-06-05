@@ -8,14 +8,19 @@ import json
 import logging
 import os
 import time
+import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
+from qirabot._optional import require
 from qirabot._transport import Transport
 from qirabot.adapters import auto
 from qirabot.adapters.base import DeviceAdapter, ScreenshotConfig
-from qirabot.exceptions import QirabotError, _is_retryable
+from qirabot.exceptions import ActionError, QirabotError, _is_retryable
+
+if TYPE_CHECKING:
+    from playwright.sync_api import ViewportSize
 
 logger = logging.getLogger("qirabot")
 
@@ -79,6 +84,7 @@ class Qirabot:
         api_key: str = "",
         base_url: str = "",
         timeout: float = 120.0,
+        verify_ssl: bool = True,
         model_alias: str = "",
         language: str = "",
         task_name: str = "",
@@ -93,7 +99,7 @@ class Qirabot:
     ):
         api_key = api_key or os.environ.get("QIRA_API_KEY", "")
         base_url = base_url or os.environ.get("QIRA_BASE_URL", "https://app.qirabot.com")
-        self._transport = Transport(base_url=base_url, api_key=api_key, timeout=timeout)
+        self._transport = Transport(base_url=base_url, api_key=api_key, timeout=timeout, verify_ssl=verify_ssl)
         self._adapters: dict[int, DeviceAdapter] = {}
         self._pw_instances: list[Any] = []
         self._cdp_pages: list[Any] = []
@@ -164,7 +170,7 @@ class Qirabot:
 
         Returns a playwright Page object that can be passed to other methods.
         """
-        from playwright.sync_api import sync_playwright
+        sync_playwright = require("playwright.sync_api", "browser").sync_playwright
 
         if cdp_url and (user_data_dir or channel or args or headless):
             raise ValueError(
@@ -175,7 +181,7 @@ class Qirabot:
         pw = sync_playwright().start()
         self._pw_instances.append(pw)
 
-        viewport_dict = {"width": viewport[0], "height": viewport[1]}
+        viewport_dict: ViewportSize = {"width": viewport[0], "height": viewport[1]}
 
         if cdp_url:
             browser = pw.chromium.connect_over_cdp(cdp_url)
@@ -343,7 +349,6 @@ class Qirabot:
         language: str = "",
     ) -> bool:
         """Wait until a visual condition is met. Returns True if met within timeout."""
-        import time
         deadline = time.monotonic() + timeout
         while True:
             met = self.verify(target, assertion, model_alias=model_alias, language=language)
@@ -411,8 +416,7 @@ class Qirabot:
                     self._screenshot_config.mime_type,
                 )
 
-            result = self._transport.post_multipart(
-                f"/tasks/{self._task_id}/act",
+            result = self._post_act_retrying(
                 files=files,
                 data={"request": json.dumps(request_body)},
             )
@@ -422,7 +426,7 @@ class Qirabot:
                 if result.get("finished"):
                     logger.error("failed: %s", error_msg)
                     return RunResult(success=False, output=error_msg, steps=steps)
-                raise QirabotError(error_msg)
+                raise ActionError(error_msg)
 
             action_type = result.get("actionType")
             action_params = result.get("params") or {}
@@ -573,7 +577,7 @@ class Qirabot:
         self._screenshot_counter += 1
 
         if coords is not None and self._screenshot_config.annotate:
-            data = _annotate_screenshot(data, coords[0], coords[1])
+            data = _annotate_screenshot(data, coords[0], coords[1], self._screenshot_config)
             label = f"{label}_x{int(coords[0])}_y{int(coords[1])}"
 
         filename = f"{self._screenshot_counter:03d}_{label}.{self._screenshot_config.extension}"
@@ -587,12 +591,32 @@ class Qirabot:
         return self._result(self._get_adapter(target))
 
     def _get_adapter(self, target: Any) -> DeviceAdapter:
-        key = id(target)
-        adapter = self._adapters.get(key)
+        adapter = self._adapters.get(id(target))
         if adapter is None:
             adapter = auto.detect(target)
-            self._adapters[key] = adapter
+            self._cache_adapter(target, adapter)
         return adapter
+
+    def _cache_adapter(self, target: Any, adapter: DeviceAdapter) -> None:
+        """Cache ``adapter`` under ``id(target)``, evicting the entry when the
+        target is garbage-collected.
+
+        The cache is keyed by ``id()`` because targets aren't always hashable.
+        Without eviction that has two failure modes: the dict grows unbounded
+        as a long session churns through tabs/pages, and — worse — once a target
+        is collected CPython can hand its ``id()`` to an unrelated object, so a
+        stale adapter would be returned for it. A weakref finalizer drops the
+        entry the moment the target dies, which bounds the cache and closes the
+        id-reuse window. Targets that don't support weak references (rare) fall
+        back to plain, un-evicted caching.
+        """
+        key = id(target)
+        if key not in self._adapters:
+            try:
+                weakref.finalize(target, self._adapters.pop, key, None)
+            except TypeError:
+                pass  # target not weak-referenceable; keep plain caching
+        self._adapters[key] = adapter
 
     def _result(self, adapter: DeviceAdapter) -> Any:
         """Return the adapter's current target, keeping the cache in sync.
@@ -606,8 +630,37 @@ class Qirabot:
         this same adapter keeps exactly one adapter following the active tab.
         """
         target = adapter.current_target
-        self._adapters[id(target)] = adapter
+        self._cache_adapter(target, adapter)
         return target
+
+    def _post_act_retrying(
+        self, files: dict[str, tuple[str, bytes, str]], data: dict[str, str]
+    ) -> dict[str, Any]:
+        """POST to /act, retrying transient errors with exponential backoff.
+
+        The ai() loop allocates ``step_seq`` once per iteration and keeps it
+        constant inside ``data`` across attempts, so a retry after a 5xx or
+        network blip hits the server's idempotency cache and replays the prior
+        response instead of triggering a second LLM call + credit charge. This
+        gives the multi-step loop the same resilience the single-action path
+        already gets from _ai_action.
+        """
+        max_attempts = self._retry + 1
+        for attempt in range(max_attempts):
+            try:
+                return self._transport.post_multipart(
+                    f"/tasks/{self._task_id}/act", files=files, data=data,
+                )
+            except QirabotError as e:
+                if not _is_retryable(e) or attempt >= max_attempts - 1:
+                    raise
+                delay = self._retry_delay * (2 ** attempt)
+                logger.warning(
+                    "attempt %d/%d failed: %s, retrying in %.1fs...",
+                    attempt + 1, max_attempts, e, delay,
+                )
+                time.sleep(delay)
+        raise RuntimeError("unreachable")
 
     def _ai_action(
         self,
@@ -686,7 +739,7 @@ class Qirabot:
         )
 
         if not result.get("success"):
-            raise QirabotError(result.get("error", "AI request failed"))
+            raise ActionError(result.get("error", "AI request failed"))
 
         coords = _extract_coords(result.get("params"))
         self._save_screenshot(screenshot_bytes, action.get("type", "action"), coords)
@@ -756,6 +809,19 @@ class Qirabot:
                 self._transport.post(f"/tasks/{self._task_id}/complete")
             except Exception:
                 logger.debug("failed to complete task %s on close", self._task_id)
+        # Let adapters unhook framework listeners (e.g. Playwright's "page"
+        # event) before we tear down the contexts they're attached to. Several
+        # cache keys can map to one adapter, so de-dup by identity.
+        seen: set[int] = set()
+        for adapter in self._adapters.values():
+            if id(adapter) in seen:
+                continue
+            seen.add(id(adapter))
+            try:
+                adapter.close()
+            except Exception:
+                pass
+        self._adapters.clear()
         for page in self._cdp_pages:
             try:
                 page.close()
@@ -803,7 +869,9 @@ def _extract_coords(params: dict[str, Any] | None) -> tuple[float, float] | None
     return None
 
 
-def _annotate_screenshot(data: bytes, x: float, y: float) -> bytes:
+def _annotate_screenshot(
+    data: bytes, x: float, y: float, config: ScreenshotConfig | None = None
+) -> bytes:
     from PIL import Image, ImageDraw
 
     img = Image.open(io.BytesIO(data)).convert("RGBA")
@@ -826,6 +894,12 @@ def _annotate_screenshot(data: bytes, x: float, y: float) -> bytes:
     draw.line([(cx, cy - gap - line_len), (cx, cy - gap)], fill=color, width=width)
     draw.line([(cx, cy + gap), (cx, cy + gap + line_len)], fill=color, width=width)
 
+    # Re-encode in the configured format so the bytes match the filename
+    # extension (jpeg has no alpha channel, so flatten RGBA → RGB first).
+    cfg = config or ScreenshotConfig()
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    if cfg.format == "jpeg":
+        img.convert("RGB").save(buf, format="JPEG", quality=cfg.quality)
+    else:
+        img.save(buf, format="PNG")
     return buf.getvalue()

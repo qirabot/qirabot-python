@@ -1,10 +1,10 @@
 """Tests for adapter base execute() dispatch logic."""
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
-from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
+from qirabot.adapters.base import DeviceAdapter, DeviceInfo
 
 
 class FakeAdapter(DeviceAdapter):
@@ -199,6 +199,19 @@ class TestPyAutoGuiScaling:
         # drag receives the logical delta: (150-50, 250-50)
         a._pag.drag.assert_called_once_with(100, 200, duration=0.5)
 
+    def test_device_info_reports_physical_pixels_on_retina(self):
+        # device_info must match the screenshot dimensions (physical), not
+        # pyautogui's logical points, so callers that derive coordinates from it
+        # (e.g. Qirabot.scroll's center anchor) stay in screenshot-pixel space.
+        a = self._adapter(screenshot_w=2880, logical_w=1440, logical_h=900)
+        info = a.device_info()
+        assert (info.width, info.height) == (2880, 1800)
+
+    def test_device_info_unchanged_on_non_retina(self):
+        a = self._adapter(screenshot_w=1440, logical_w=1440, logical_h=900)
+        info = a.device_info()
+        assert (info.width, info.height) == (1440, 900)
+
     def test_ascii_text_uses_typewrite(self):
         a = self._adapter(screenshot_w=1440, logical_w=1440)
         a.type_text(10, 20, "hello")
@@ -215,3 +228,35 @@ class TestPyAutoGuiScaling:
         a._pag.typewrite.assert_not_called()
         # paste hotkey fired with the platform modifier + 'v'
         assert a._pag.hotkey.call_args[0][-1] == "v"
+
+
+class TestPlaywrightAdapterListener:
+    """The adapter hooks the context's "page" event in __init__; close() must
+    unhook it so the listener doesn't outlive the adapter and accumulate on the
+    longer-lived context."""
+
+    def test_close_removes_page_listener(self):
+        from qirabot.adapters.playwright_adapter import PlaywrightAdapter
+
+        page = MagicMock()
+        context = MagicMock()
+        page.context = context
+
+        adapter = PlaywrightAdapter(page)
+        assert context.on.call_count == 1
+        event, handler = context.on.call_args.args
+        assert event == "page"
+
+        adapter.close()
+        context.remove_listener.assert_called_once_with("page", handler)
+
+    def test_close_swallows_remove_listener_errors(self):
+        from qirabot.adapters.playwright_adapter import PlaywrightAdapter
+
+        page = MagicMock()
+        context = MagicMock()
+        context.remove_listener.side_effect = Exception("context closed")
+        page.context = context
+
+        adapter = PlaywrightAdapter(page)
+        adapter.close()  # must not raise even if the context is already gone

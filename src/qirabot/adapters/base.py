@@ -131,6 +131,14 @@ class DeviceAdapter(ABC):
     def device_info(self) -> DeviceInfo:
         ...
 
+    def close(self) -> None:
+        """Release any resources/listeners the adapter registered.
+
+        No-op by default; adapters that hook into their framework (e.g. the
+        Playwright context's ``page`` event) override this to unhook. Called by
+        ``Qirabot.close()``.
+        """
+
     def execute(self, action_type: str, params: dict[str, Any]) -> None:
         """Dispatch an action by type."""
         x = float(params.get("x", 0))

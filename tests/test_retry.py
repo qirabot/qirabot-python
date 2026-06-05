@@ -1,6 +1,6 @@
 """Tests for retry logic in Qirabot client."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -201,4 +201,57 @@ class TestStepSeqIdempotency:
         bot._ai_action("target", {"type": "click", "params": {"locate": "a"}})
         bot._ai_action("target", {"type": "click", "params": {"locate": "b"}})
         assert seen_seqs == [1, 1, 2]
+        bot.close()
+
+
+class TestAiLoopRetry:
+    """The multi-step ai() loop must be as resilient to transient errors as the
+    single-action path, retrying each /act post while holding step_seq constant
+    so the server's idempotency cache replays instead of re-charging."""
+
+    def _make_bot(self, retry=2, retry_delay=0.01):
+        return Qirabot(api_key="k", task_id="t", retry=retry, retry_delay=retry_delay)
+
+    def _fake_adapter(self):
+        adapter = MagicMock()
+        adapter.screenshot.return_value = b"img"
+        adapter.device_info.return_value.to_dict.return_value = {
+            "platform": "web", "width": 10, "height": 10,
+        }
+        return adapter
+
+    def test_loop_retries_transient_then_succeeds(self):
+        bot = self._make_bot(retry=2)
+        bot._get_adapter = MagicMock(return_value=self._fake_adapter())
+        calls = []
+
+        def fake_post(path=None, files=None, data=None, **kw):
+            calls.append(data)
+            if len(calls) < 3:
+                raise QirabotError("server error", status_code=500)
+            return {"success": True, "finished": True, "output": "done", "actionType": "done"}
+
+        bot._transport.post_multipart = MagicMock(side_effect=fake_post)
+        result = bot.ai("target", "do it", max_steps=5)
+
+        assert result.success is True
+        # 2 transient failures + 1 success, all within a single step...
+        assert len(calls) == 3
+        # ...so every attempt carried the SAME body (same step_seq).
+        assert calls[0] == calls[1] == calls[2]
+        bot.close()
+
+    def test_loop_does_not_retry_non_retryable(self):
+        bot = self._make_bot(retry=3)
+        bot._get_adapter = MagicMock(return_value=self._fake_adapter())
+        calls = []
+
+        def fake_post(path=None, files=None, data=None, **kw):
+            calls.append(1)
+            raise AuthenticationError("bad key", status_code=401)
+
+        bot._transport.post_multipart = MagicMock(side_effect=fake_post)
+        with pytest.raises(AuthenticationError):
+            bot.ai("target", "do it")
+        assert len(calls) == 1  # no retries on an auth error
         bot.close()
