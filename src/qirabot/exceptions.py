@@ -41,6 +41,14 @@ class QirabotTimeoutError(QirabotError):
     """Operation timed out (client-side)."""
 
 
+class QirabotConnectionError(QirabotError):
+    """Could not reach the Qirabot server (DNS failure, refused connection, etc.).
+
+    Distinct from :class:`QirabotTimeoutError`: the request never completed a
+    round-trip because the host was unreachable, not because it was slow.
+    """
+
+
 class MissingDependencyError(QirabotError, ImportError):
     """An optional backend dependency (e.g. playwright, pyautogui) is not installed.
 

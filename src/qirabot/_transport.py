@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import httpx
 
-from qirabot.exceptions import QirabotTimeoutError, raise_for_error
+from qirabot.exceptions import QirabotConnectionError, QirabotTimeoutError, raise_for_error
 
 logger = logging.getLogger("qirabot")
 
@@ -34,14 +36,29 @@ class Transport:
             verify=verify_ssl,
         )
 
+    @contextmanager
+    def _mapped_errors(self) -> Iterator[None]:
+        """Translate httpx transport errors into friendly Qirabot exceptions.
+
+        Uses ``from None`` so the noisy httpcore/httpx traceback chain is hidden;
+        the original message is preserved in the exception text.
+        """
+        try:
+            yield
+        except httpx.TimeoutException as e:
+            raise QirabotTimeoutError(f"Request to {self._base_url} timed out: {e}") from None
+        except httpx.ConnectError as e:
+            raise QirabotConnectionError(
+                f"Could not connect to {self._base_url}. "
+                f"Check that the server is running and QIRA_BASE_URL is correct. ({e})"
+            ) from None
+        except httpx.RequestError as e:
+            raise QirabotConnectionError(f"Network error talking to {self._base_url}: {e}") from None
+
     def request(self, method: str, path: str, json_data: dict[str, Any] | None = None) -> Any:
         """Send an HTTP request and return parsed JSON response."""
-        try:
+        with self._mapped_errors():
             response = self._client.request(method, path, json=json_data)
-        except httpx.TimeoutException as e:
-            raise QirabotTimeoutError(f"Request timed out: {e}") from e
-        except httpx.ConnectError as e:
-            raise QirabotTimeoutError(f"Connection failed: {e}") from e
         if response.status_code >= 400:
             try:
                 data = response.json()
@@ -72,12 +89,8 @@ class Transport:
             # requires multipart. A no-op part forces multipart encoding —
             # the server reads named fields and ignores extras.
             files = {"_": ("", b"", "application/octet-stream")}
-        try:
+        with self._mapped_errors():
             response = self._client.post(path, files=files, data=data)
-        except httpx.TimeoutException as e:
-            raise QirabotTimeoutError(f"Request timed out: {e}") from e
-        except httpx.ConnectError as e:
-            raise QirabotTimeoutError(f"Connection failed: {e}") from e
         if response.status_code >= 400:
             try:
                 resp_data = response.json()
@@ -97,12 +110,8 @@ class Transport:
 
     def get_bytes(self, path: str) -> bytes:
         """Send a GET request and return raw bytes."""
-        try:
+        with self._mapped_errors():
             response = self._client.get(path)
-        except httpx.TimeoutException as e:
-            raise QirabotTimeoutError(f"Request timed out: {e}") from e
-        except httpx.ConnectError as e:
-            raise QirabotTimeoutError(f"Connection failed: {e}") from e
         if response.status_code >= 400:
             try:
                 data = response.json()

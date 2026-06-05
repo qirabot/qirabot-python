@@ -6,6 +6,7 @@ from qirabot.exceptions import (
     ActionError,
     AuthenticationError,
     InsufficientBalanceError,
+    QirabotConnectionError,
     QirabotError,
     QirabotTimeoutError,
     raise_for_error,
@@ -68,6 +69,7 @@ class TestExceptionHierarchy:
         InsufficientBalanceError,
         ActionError,
         QirabotTimeoutError,
+        QirabotConnectionError,
     ])
     def test_subclass_of_qirabot_error(self, cls):
         assert issubclass(cls, QirabotError)
@@ -77,6 +79,7 @@ class TestExceptionHierarchy:
         InsufficientBalanceError,
         ActionError,
         QirabotTimeoutError,
+        QirabotConnectionError,
     ])
     def test_subclass_of_exception(self, cls):
         assert issubclass(cls, Exception)
