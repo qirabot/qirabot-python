@@ -22,6 +22,14 @@ no pytest, no fixtures, no webdriver setup. Run with `python`.
 
 - [automation/](automation/) — `bot.open()`, `bot.ai()`, scraping, CDP connect
 
+## 3. Run desktop scripts on a dedicated machine
+
+Run desktop (pyautogui) automation on a separate, always-on machine (e.g. a
+Windows VM) so screenshots never capture your editor and the bot never steals
+your local mouse. Write/test locally, then POST the script to the remote runner.
+
+- [runner/](runner/) — tiny HTTP runner + dedicated-machine deployment guide (Windows / macOS)
+
 ## Setup
 
 ```bash

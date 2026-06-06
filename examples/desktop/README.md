@@ -53,6 +53,14 @@ def test_open_app():
 - Embedded browsers in desktop apps (Electron, etc.)
 - Cross-app workflows (copy from browser, paste into Excel)
 
+## Running on a dedicated machine
+
+Desktop mode captures the *whole* screen and drives the *real* mouse, so running
+it on your own laptop sends your editor to the AI and fights you for the cursor.
+To write/test scripts locally but run them on a separate machine (e.g. a Windows
+VM), see [../runner/](../runner/) — a tiny HTTP runner plus a dedicated-VM
+deployment guide.
+
 ## From the CLI
 
 ```bash

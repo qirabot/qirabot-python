@@ -95,8 +95,7 @@ from qirabot import Qirabot
 bot = Qirabot()
 page = bot.open("https://google.com")
 
-bot.type_text(page, "Search input", "SpaceX")
-bot.click(page, "Search button")
+bot.type_text(page, "Search input", "SpaceX", press_enter=True)
 
 summary = bot.extract(page, "Get the first search result title")
 print(f"Result: {summary}")
