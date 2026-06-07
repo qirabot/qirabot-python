@@ -11,7 +11,7 @@ Run:
 
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="test-ecommerce", screenshot_dir="./screenshots")
+bot = Qirabot(task_name="test-ecommerce")
 
 
 def test_login(page):

@@ -227,8 +227,9 @@ You can't see the remote desktop, so:
   it runs; print whatever you need and you'll see it in real time.
 - **`on_step`** — `bot.ai(..., on_step=lambda s: print(s.step, s.decision, s.action_type))`
   streams per-step progress into that output.
-- **screenshots on disk** — pass `Qirabot(screenshot_dir=...)` in your script to
-  also keep per-step images on the VM.
+- **run report on disk** — on by default; `Qirabot(report_dir=...)` in your
+  script controls where `report.html` + per-step screenshots land on the VM
+  (`Qirabot(report=False)` to disable).
 
 ## 8. Reliability checklist
 

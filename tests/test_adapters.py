@@ -382,11 +382,15 @@ def fake_airtest(monkeypatch):
     return NoDeviceError
 
 
-def _fake_device(platform="android", w=320, h=640):
+def _fake_device(platform="android", w=320, h=640, orientation=0):
     dev = MagicMock()
     dev.platform = platform
     dev.get_current_resolution.return_value = (w, h)
     dev.snapshot.return_value = "<bgr-ndarray>"  # cv2_2_pil fake ignores it
+    # Real airtest exposes display_info as a dict; without this the MagicMock
+    # makes int(display_info.get("orientation")) == 1, spuriously triggering the
+    # landscape-rotation path in AirtestAdapter._ensure_upright.
+    dev.display_info = {"orientation": orientation, "width": w, "height": h}
     return dev
 
 
@@ -559,7 +563,7 @@ class TestBind:
         bot.click.return_value = "T"
         self._bound(bot).click("Login", retry=2)
         bot.click.assert_called_once_with(
-            "T", "Login", retry=2, model_alias="", language=""
+            "T", "Login", timeout=0.0, interval=2.0, wait="", retry=2, model_alias="", language=""
         )
 
     def test_type_text_injects_target(self):
@@ -572,6 +576,9 @@ class TestBind:
             "a@b.com",
             press_enter=True,
             clear_before_typing=False,
+            timeout=0.0,
+            interval=2.0,
+            wait="",
             retry=None,
             model_alias="",
             language="",

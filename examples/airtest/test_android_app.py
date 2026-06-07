@@ -27,7 +27,7 @@ start_app(APP)  # open the app under test
 # bind(G) once: G resolves the *current* Airtest device lazily, so calls below
 # drop the repeated first argument and automatically follow set_current() if you
 # switch devices. Your original Airtest style (touch(), Template, ...) still works.
-bot = Qirabot(task_name="airtest-android", screenshot_dir="./screenshots").bind(G)
+bot = Qirabot(task_name="airtest-android").bind(G)
 
 
 def teardown_module(module):

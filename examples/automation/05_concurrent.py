@@ -53,7 +53,7 @@ def process_url(index: int, url: str) -> str:
             ignore=shutil.ignore_patterns("Singleton*", "*.lock", "lockfile"),
         )
 
-    bot = Qirabot(task_name=f"concurrent-{index}", screenshot_dir="./screenshots")
+    bot = Qirabot(task_name=f"concurrent-{index}")
     try:
         page = bot.open(url, headless=True, user_data_dir=worker_profile)
         bot.wait_for(page, "The page has finished loading", timeout=15.0)

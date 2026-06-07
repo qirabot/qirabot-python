@@ -15,7 +15,7 @@ Run:
 
 from qirabot import Qirabot, StepResult
 
-bot = Qirabot(task_name="multi-step-ai", screenshot_dir="./screenshots")
+bot = Qirabot(task_name="multi-step-ai")
 page = bot.open("https://news.ycombinator.com", headless=False)
 
 

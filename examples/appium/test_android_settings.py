@@ -22,7 +22,7 @@ driver = webdriver.Remote(appium_url, options=options)
 
 # bind(driver) once: the Appium driver is the single, stable target for the
 # whole session, so calls below drop the repeated first argument.
-bot = Qirabot(task_name="test-android-settings", screenshot_dir="./screenshots").bind(driver)
+bot = Qirabot(task_name="test-android-settings").bind(driver)
 
 
 def test_open_display():

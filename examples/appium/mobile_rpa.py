@@ -44,7 +44,7 @@ def on_step(step: StepResult) -> None:
 # The with-block reports the task as failed (or cancelled on Ctrl+C) if anything
 # raises, and completed otherwise — so the run shows the right status in Qirabot.
 try:
-    with Qirabot(task_name="mobile-rpa", screenshot_dir="./screenshots", model_alias="balanced-pro").bind(driver) as bot:
+    with Qirabot(task_name="mobile-rpa", model_alias="balanced-pro").bind(driver) as bot:
         result = bot.ai(TASK, max_steps=12, on_step=on_step)
 
     print(f"\nSuccess: {result.success}")

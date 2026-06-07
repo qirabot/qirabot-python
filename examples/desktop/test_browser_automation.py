@@ -10,7 +10,7 @@ import pyautogui
 from qirabot import Qirabot
 
 # bind(pyautogui) once so calls below drop the repeated first argument.
-bot = Qirabot(task_name="test-desktop-browser", screenshot_dir="./screenshots").bind(pyautogui)
+bot = Qirabot(task_name="test-desktop-browser").bind(pyautogui)
 
 
 def test_open_browser():

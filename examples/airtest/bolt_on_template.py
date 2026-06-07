@@ -21,7 +21,7 @@ APP = "com.example.myapp"  # <-- replace with your app's package / bundle id
 
 connect_device(os.environ.get("AIRTEST_DEVICE", "Android:///"))
 start_app(APP)                               # open the app
-bot = Qirabot(task_name="airtest-mixed", screenshot_dir="./screenshots").bind(G)
+bot = Qirabot(task_name="airtest-mixed").bind(G)
 
 try:
     # --- native Airtest: keep the stable image-based steps you already have ---

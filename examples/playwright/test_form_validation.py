@@ -10,7 +10,7 @@ Run:
 
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="test-form", screenshot_dir="./screenshots")
+bot = Qirabot(task_name="test-form")
 
 URL = "https://demoqa.com/automation-practice-form"
 

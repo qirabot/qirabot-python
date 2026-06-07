@@ -24,7 +24,7 @@ appium_url = os.environ.get("APPIUM_URL", "http://localhost:4723")
 driver = webdriver.Remote(appium_url, options=options)
 
 # bind(driver) once so AI calls drop the repeated first argument.
-bot = Qirabot(task_name="test-my-app", screenshot_dir="./screenshots").bind(driver)
+bot = Qirabot(task_name="test-my-app").bind(driver)
 
 
 def test_login():

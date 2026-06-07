@@ -77,20 +77,6 @@ def test_login():
     assert result.success
 ```
 
-## From the CLI
-
-Launch a specific app as part of the run — Android via `--app-package`/`--app-activity`,
-iOS via `--bundle-id`:
-
-```bash
-# Android
-qirabot mobile "Enable notifications" --platform android \
-  --app-package com.example.myapp --app-activity .MainActivity
-
-# iOS
-qirabot mobile "Send 'hi' to honey" --platform ios --bundle-id com.tencent.xin
-```
-
 ## Examples
 
 Bolt-on to your existing tests (run with `pytest`):

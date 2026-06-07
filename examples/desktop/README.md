@@ -61,13 +61,6 @@ To write/test scripts locally but run them on a separate machine (e.g. a Windows
 VM), see [../runner/](../runner/) — a tiny HTTP runner plus a dedicated-VM
 deployment guide.
 
-## From the CLI
-
-```bash
-# --app launches/activates the app first (--app-wait gives the window time to appear)
-qirabot desktop "Type 42 + 58 = and read the result" --app Calculator --app-wait 3
-```
-
 ## Examples
 
 - [test_browser_automation.py](test_browser_automation.py) — Control browser from OS level

@@ -36,7 +36,7 @@ connect_device("Windows:///")
 # The finally closes the app whether the run succeeds or not. Windows' stop_app()
 # needs a PID, so close the focused window with Alt+F4 (pywinauto syntax).
 try:
-    with Qirabot(task_name="airtest-windows-rpa", screenshot_dir="./screenshots").bind(G) as bot:
+    with Qirabot(task_name="airtest-windows-rpa").bind(G) as bot:
         bot.launch_app("calc", wait=2)  # open the app
         result = bot.ai(TASK, max_steps=12, on_step=on_step)
 

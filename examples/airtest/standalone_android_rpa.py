@@ -40,7 +40,7 @@ def on_step(step: StepResult) -> None:
 # bind(G) means the ai() call below doesn't repeat the device target. The finally
 # closes the app whether the run succeeds or not.
 try:
-    with Qirabot(task_name="airtest-rpa", screenshot_dir="./screenshots").bind(G) as bot:
+    with Qirabot(task_name="airtest-rpa").bind(G) as bot:
         result = bot.ai(TASK, max_steps=12, on_step=on_step)
 
     print(f"\nSuccess: {result.success}")

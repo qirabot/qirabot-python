@@ -95,10 +95,11 @@ class Qirabot:
         task_name: str = "",
         task_id: str = "",
         source: str = "sdk",
-        screenshot_dir: str = "",
+        report: bool = True,
+        report_dir: str = "",
         screenshot_format: str = "jpeg",
         screenshot_quality: int = 80,
-        screenshot_annotate: bool = False,
+        screenshot_annotate: bool = True,
         retry: int = 1,
         retry_delay: float = 1.0,
     ):
@@ -127,7 +128,22 @@ class Qirabot:
                 create_body["modelAlias"] = model_alias
             result = self._transport.post("/tasks/create", json_data=create_body)
             self._task_id = result["taskId"]
-        self._screenshot_dir = screenshot_dir or os.environ.get("QIRA_SCREENSHOT_DIR", "")
+        # Per-run output directory, bucketed by date to avoid one flat pile:
+        #   <root>/<YYYY-MM-DD>/<HHMMSS>-<task_id[:8]>/
+        # report_dir / QIRA_REPORT_DIR set only the root; the date/run subdirs
+        # are added automatically so one env var works across many runs.
+        self._report = report
+        root = report_dir or os.environ.get("QIRA_REPORT_DIR", "") or "./qira_runs"
+        short = (self._task_id or "run")[:8]
+        self._report_dir = (
+            Path(root) / time.strftime("%Y-%m-%d") / f"{time.strftime('%H%M%S')}-{short}"
+        )
+        # Session-wide action timeline for the report, and the current task
+        # section ai() runs are grouped under (standalone actions = "setup").
+        self._log: list[dict[str, Any]] = []
+        self._current_section = "setup"
+        # ai() instruction -> success, for per-section PASS/FAIL in the report.
+        self._section_outcomes: dict[str, bool] = {}
         self._screenshot_counter = 0
         self._screenshot_config = ScreenshotConfig(
             format=screenshot_format,
@@ -138,6 +154,15 @@ class Qirabot:
         self._retry_delay = retry_delay
         self._step_seq = 0
         atexit.register(self.close)
+
+    @property
+    def report_dir(self) -> str:
+        """The per-run output directory (report.html + screenshots/ + recording.mp4).
+
+        Point your screen recorder here so the report can embed it, e.g.
+        ``dev.start_recording(output=os.path.join(bot.report_dir, "recording.mp4"))``.
+        """
+        return str(self._report_dir)
 
     @property
     def task_id(self) -> str | None:
@@ -240,22 +265,64 @@ class Qirabot:
             page.goto(url)
         return page
 
+    def _maybe_wait(
+        self,
+        target: Any,
+        locate: str,
+        timeout: float,
+        interval: float,
+        wait: str,
+        model_alias: str = "",
+        language: str = "",
+    ) -> None:
+        """Auto-wait before an action: poll until the target looks present.
+
+        When ``timeout > 0``, block until a visual assertion holds (or raise
+        :class:`QirabotTimeoutError`). The assertion is ``wait`` if given, else
+        one derived from ``locate``. This is qirabot's framework-agnostic
+        analogue of Playwright's auto-waiting — but it can only check *visible*
+        (a vision yes/no), not stable/enabled/receives-events. It deliberately
+        polls an **assertion** (verify is honest) rather than the action's
+        locate (which fabricates coordinates for absent elements).
+        """
+        if not timeout or timeout <= 0:
+            return
+        assertion = wait or f"the element/button for '{locate}' is visible on screen"
+        self.wait_for(
+            target,
+            assertion,
+            timeout=timeout,
+            interval=interval,
+            model_alias=model_alias,
+            language=language,
+        )
+
     def click(
         self,
         target: Any,
         locate: str,
         *,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
         language: str = "",
     ) -> Any:
         """AI-powered click: locate element by description and click it.
 
+        When ``timeout > 0``, auto-waits until the element looks present before
+        clicking (polling a visual assertion every ``interval`` seconds), and
+        raises :class:`QirabotTimeoutError` if it never appears. ``wait`` lets
+        you supply that assertion explicitly; otherwise it is derived from
+        ``locate``. With the default ``timeout=0`` the click is immediate.
+
         Returns the current target (the same kind you passed in: a Playwright
         Page, Selenium/Appium driver, or the pyautogui module). If the click
         opened a link in a new tab, this is that new tab — reassign it
         (``page = bot.click(page, ...)``) to keep operating on the active page.
         """
+        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
         adapter = self._get_adapter(target)
         self._ai_action(
             target,
@@ -274,15 +341,23 @@ class Qirabot:
         *,
         press_enter: bool = False,
         clear_before_typing: bool = False,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
         language: str = "",
     ) -> Any:
         """AI-powered type: locate input field and type text.
 
+        When ``timeout > 0``, auto-waits until the field looks present before
+        typing (see :meth:`click` for the ``timeout``/``interval``/``wait``
+        semantics). With the default ``timeout=0`` it types immediately.
+
         Returns the current target (same kind you passed in); reassign it
         (``page = bot.type_text(page, ...)``) to follow any tab switch.
         """
+        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
         adapter = self._get_adapter(target)
         params: dict[str, Any] = {"locate": locate, "text": text}
         if press_enter:
@@ -303,15 +378,23 @@ class Qirabot:
         target: Any,
         locate: str,
         *,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
         language: str = "",
     ) -> Any:
         """AI-powered double-click: locate element by description and double-click it.
 
+        When ``timeout > 0``, auto-waits until the element looks present before
+        acting (see :meth:`click` for the ``timeout``/``interval``/``wait``
+        semantics). With the default ``timeout=0`` it acts immediately.
+
         Returns the current target (same kind you passed in); reassign it
         (``page = bot.double_click(page, ...)``) to follow any tab switch.
         """
+        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
         adapter = self._get_adapter(target)
         self._ai_action(
             target,
@@ -400,8 +483,39 @@ class Qirabot:
         model_alias: str = "",
         language: str = "",
     ) -> RunResult:
-        """AI-powered multi-step operation."""
+        """AI-powered multi-step operation.
 
+        Steps run by this call are grouped under ``instruction`` in the report.
+        """
+        prev_section = self._current_section
+        self._current_section = instruction or "ai"
+        try:
+            result = self._ai_loop(
+                target,
+                instruction,
+                max_steps,
+                on_step=on_step,
+                model_alias=model_alias,
+                language=language,
+            )
+            self._section_outcomes[self._current_section] = result.success
+            return result
+        except Exception:
+            self._section_outcomes[self._current_section] = False
+            raise
+        finally:
+            self._current_section = prev_section
+
+    def _ai_loop(
+        self,
+        target: Any,
+        instruction: str,
+        max_steps: int = 20,
+        *,
+        on_step: Callable[[StepResult], None] | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> RunResult:
         adapter = self._get_adapter(target)
         steps: list[StepResult] = []
         last_action_result = ""
@@ -466,8 +580,14 @@ class Qirabot:
             decision = result.get("decision", "")
 
             coords = _extract_coords(action_params)
-            if screenshot_bytes:
-                self._save_screenshot(screenshot_bytes, action_type or "ai", coords)
+            self._record_step(
+                screenshot_bytes,
+                action_type or "ai",
+                action_params,
+                coords,
+                output=result.get("output", ""),
+                finished=finished,
+            )
 
             if logger.isEnabledFor(logging.INFO):
                 parts = [f"step {step_num}/{max_steps}"]
@@ -517,14 +637,14 @@ class Qirabot:
         return RunResult(success=False, output="max steps reached", steps=steps)
 
     def screenshot(self, target: Any) -> Path | None:
-        """Take a screenshot and save it to ``screenshot_dir``.
+        """Take a screenshot and save it to ``report_dir/screenshots/``.
 
-        Returns the saved file path, or ``None`` if no ``screenshot_dir`` is
-        configured. No AI, no billing.
+        Returns the saved file path, or ``None`` when ``report=False``. No AI,
+        no billing.
         """
         adapter = self._get_adapter(target)
         data = adapter.screenshot(self._screenshot_config)
-        return self._save_screenshot(data, "manual")
+        return self._save_frame(data, "manual")
 
     def launch_app(self, app: str, *, wait: float = 2.0) -> None:
         """Launch (or activate) a desktop application before driving it.
@@ -603,19 +723,68 @@ class Qirabot:
             y = info.height / 2 if y is None else y
         adapter.scroll(float(x), float(y), direction, int(distance))
 
-    def _save_screenshot(self, data: bytes, label: str, coords: tuple[float, float] | None = None) -> Path | None:
-        if not self._screenshot_dir:
+    def _record_step(
+        self,
+        data: bytes,
+        action_type: str,
+        params: dict[str, Any] | None,
+        coords: tuple[float, float] | None = None,
+        *,
+        output: str = "",
+        finished: bool = False,
+        success: bool = True,
+    ) -> None:
+        """Save the screenshot (if reporting) and append a step to the timeline.
+
+        ``assert`` actions (verify / wait_for polls) are control-flow, not visual
+        steps, so they are skipped — otherwise an auto-wait would spam the report
+        and disk with a dozen identical poll frames.
+        """
+        # Reporting off → zero overhead. ``assert`` actions (verify / wait_for
+        # polls) are control-flow, not visual steps, so they are skipped too —
+        # otherwise an auto-wait would spam the report and disk with poll frames.
+        if not self._report or action_type == "assert":
+            return
+        # Annotation and thumbnailing decode the image with PIL; never let a
+        # malformed/unexpected screenshot break the actual action — degrade to
+        # the raw bytes / no thumbnail instead.
+        annotated = data
+        if data and coords is not None and self._screenshot_config.annotate:
+            try:
+                annotated = _annotate_screenshot(
+                    data, coords[0], coords[1], self._screenshot_config
+                )
+            except Exception:
+                logger.debug("annotate failed", exc_info=True)
+        frame = self._save_frame(annotated, action_type or "action") if data else None
+        thumb = ""
+        if data:
+            try:
+                thumb = _thumbnail_b64(annotated)
+            except Exception:
+                logger.debug("thumbnail failed", exc_info=True)
+        self._log.append(
+            {
+                "section": self._current_section,
+                "action_type": action_type or "",
+                "params": params or {},
+                "output": output or "",
+                "finished": bool(finished),
+                "success": bool(success),
+                "coords": list(coords) if coords else None,
+                # relative to report_dir so the html can link it directly
+                "screenshot": f"screenshots/{frame.name}" if frame else "",
+                "thumb": thumb,
+            }
+        )
+
+    def _save_frame(self, data: bytes, label: str) -> Path | None:
+        """Write a full-resolution screenshot to ``report_dir/screenshots/``."""
+        if not self._report:
             return None
-        dir_path = Path(self._screenshot_dir)
-        if self._task_id:
-            dir_path = dir_path / self._task_id
+        dir_path = self._report_dir / "screenshots"
         dir_path.mkdir(parents=True, exist_ok=True)
         self._screenshot_counter += 1
-
-        if coords is not None and self._screenshot_config.annotate:
-            data = _annotate_screenshot(data, coords[0], coords[1], self._screenshot_config)
-            label = f"{label}_x{int(coords[0])}_y{int(coords[1])}"
-
         filename = f"{self._screenshot_counter:03d}_{label}.{self._screenshot_config.extension}"
         path = dir_path / filename
         path.write_bytes(data)
@@ -778,7 +947,15 @@ class Qirabot:
             raise ActionError(result.get("error", "AI request failed"))
 
         coords = _extract_coords(result.get("params"))
-        self._save_screenshot(screenshot_bytes, action.get("type", "action"), coords)
+        self._record_step(
+            screenshot_bytes,
+            result.get("actionType") or action.get("type", "action"),
+            result.get("params") or action.get("params") or {},
+            coords,
+            output=result.get("output", ""),
+            finished=result.get("finished", False),
+            success=result.get("success", True),
+        )
 
         if execute_result and result.get("actionType"):
             self._execute_action(adapter, result)
@@ -793,9 +970,9 @@ class Qirabot:
     def fail(self, error_message: str = "") -> None:
         """Report a client-side failure so the task is recorded as failed.
 
-        Use this when the run is aborted by an error on the client (e.g. the CLI
-        catches an exception): without it, the default close() would complete the
-        still-running task as succeeded. Idempotent and a no-op for externally
+        Use this when the run is aborted by an error on the client (e.g. your
+        script catches an exception): without it, the default close() would
+        complete the still-running task as succeeded. Idempotent and a no-op for externally
         owned tasks. The server's state machine rejects a later success-complete
         once the task is failed, so a subsequent close() cannot override it.
         """
@@ -832,11 +1009,46 @@ class Qirabot:
             except Exception:
                 logger.debug("failed to report cancellation for task %s", self._task_id)
 
+    def report(self, path: str | None = None) -> Path | None:
+        """Write the run report HTML now and return its path.
+
+        Auto-called on :meth:`close` when ``report=True``; call manually only to
+        force a custom location or an early snapshot. Returns ``None`` when there
+        is nothing to report.
+        """
+        out = Path(path) if path else (self._report_dir / "report.html")
+        return self._write_report(out)
+
+    def _write_report(self, out: Path | None = None) -> Path | None:
+        if not self._report or not self._log:
+            return None
+        from qirabot import report as _report
+
+        out = out or (self._report_dir / "report.html")
+        recording = self._report_dir / "recording.mp4"
+        try:
+            _report.write_html(
+                self._log,
+                out,
+                title=self._task_name or "",
+                task_id=self._task_id or "",
+                outcomes=self._section_outcomes,
+                recording="recording.mp4" if recording.exists() else "",
+            )
+            logger.info("report written: %s", out)
+            return out
+        except Exception:
+            logger.debug("failed to write report", exc_info=True)
+            return None
+
     def close(self) -> None:
         """Clean up all resources."""
         if self._closed:
             return
         self._closed = True
+        # Emit the run report before tearing down (best-effort; never block
+        # cleanup). Runs on normal exit, exception (via __exit__), and atexit.
+        self._write_report()
         # Only auto-complete (as success) when no terminal status was reported
         # yet — an errored run reports failure via fail() first.
         if self._task_id is not None and not self._external_task and not self._terminalized:
@@ -887,7 +1099,7 @@ class Qirabot:
     ) -> None:
         # An exception leaving the with-block means the run aborted: report it
         # instead of letting close() complete it as a success. A KeyboardInterrupt
-        # (Ctrl+C) is a deliberate cancel, not a failure — mirror the CLI.
+        # (Ctrl+C) is a deliberate cancel, not a failure.
         if isinstance(exc_val, KeyboardInterrupt):
             self.cancel("aborted by user")
         elif exc_val is not None:
@@ -941,6 +1153,26 @@ def _annotate_screenshot(
     return buf.getvalue()
 
 
+def _thumbnail_b64(data: bytes, max_edge: int = 800, quality: int = 60) -> str:
+    """Downscale screenshot bytes to a compact base64 data URI for the report.
+
+    Keeps reports self-contained (and bounds memory) regardless of whether
+    full-resolution frames are kept on disk.
+    """
+    import base64
+
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    longest = max(img.width, img.height)
+    if longest > max_edge:
+        scale = max_edge / longest
+        img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 class _BoundQirabot:
     """A :class:`Qirabot` proxy with a target pre-bound (see ``Qirabot.bind``).
 
@@ -972,13 +1204,23 @@ class _BoundQirabot:
         self,
         locate: str,
         *,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
         language: str = "",
     ) -> Any:
         return self._rebind(
             self._bot.click(
-                self._target, locate, retry=retry, model_alias=model_alias, language=language
+                self._target,
+                locate,
+                timeout=timeout,
+                interval=interval,
+                wait=wait,
+                retry=retry,
+                model_alias=model_alias,
+                language=language,
             )
         )
 
@@ -989,6 +1231,9 @@ class _BoundQirabot:
         *,
         press_enter: bool = False,
         clear_before_typing: bool = False,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
         language: str = "",
@@ -1000,6 +1245,9 @@ class _BoundQirabot:
                 text,
                 press_enter=press_enter,
                 clear_before_typing=clear_before_typing,
+                timeout=timeout,
+                interval=interval,
+                wait=wait,
                 retry=retry,
                 model_alias=model_alias,
                 language=language,
@@ -1010,13 +1258,23 @@ class _BoundQirabot:
         self,
         locate: str,
         *,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
         language: str = "",
     ) -> Any:
         return self._rebind(
             self._bot.double_click(
-                self._target, locate, retry=retry, model_alias=model_alias, language=language
+                self._target,
+                locate,
+                timeout=timeout,
+                interval=interval,
+                wait=wait,
+                retry=retry,
+                model_alias=model_alias,
+                language=language,
             )
         )
 

@@ -3,8 +3,8 @@
 pyautogui can drive the mouse and keyboard but has no ability to launch an
 application, so desktop automation has to shell out to the OS. This module
 isolates that platform-specific logic behind a single ``launch_app`` call,
-reused by the CLI's ``desktop --app`` option, ``Qirabot.launch_app``, and
-available to SDK users directly.
+exposed both as ``Qirabot.launch_app`` and as a standalone ``launch_app``
+import for SDK users.
 """
 
 from __future__ import annotations

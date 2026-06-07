@@ -16,7 +16,7 @@ from qirabot import Qirabot
 driver = webdriver.Chrome()
 # bind(driver) once so AI calls drop the repeated first argument.
 bot = Qirabot(
-    task_name="test-ecommerce-selenium", screenshot_dir="./screenshots", model_alias="fast"
+    task_name="test-ecommerce-selenium", model_alias="fast"
 ).bind(driver)
 
 

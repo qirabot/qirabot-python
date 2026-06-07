@@ -83,16 +83,17 @@ class TestQirabotInit:
         assert bot._transport._base_url == "http://env-host:9090"
         bot.close()
 
-    def test_screenshot_dir_from_env(self, monkeypatch):
-        monkeypatch.setenv("QIRA_SCREENSHOT_DIR", "/tmp/shots")
+    def test_report_dir_root_from_env(self, monkeypatch):
+        monkeypatch.setenv("QIRA_REPORT_DIR", "/tmp/shots")
         bot = Qirabot(api_key="k", task_id="t")
-        assert bot._screenshot_dir == "/tmp/shots"
+        # env sets only the root; date/run subdirs are appended automatically.
+        assert str(bot._report_dir).startswith("/tmp/shots/")
         bot.close()
 
-    def test_screenshot_dir_param_overrides_env(self, monkeypatch):
-        monkeypatch.setenv("QIRA_SCREENSHOT_DIR", "/tmp/shots")
-        bot = Qirabot(api_key="k", screenshot_dir="./local", task_id="t")
-        assert bot._screenshot_dir == "./local"
+    def test_report_dir_param_overrides_env(self, monkeypatch):
+        monkeypatch.setenv("QIRA_REPORT_DIR", "/tmp/shots")
+        bot = Qirabot(api_key="k", report_dir="./local", task_id="t")
+        assert str(bot._report_dir).startswith("local/")
         bot.close()
 
 
@@ -352,7 +353,7 @@ class TestScreenshotConfig:
 
 class TestAnnotateScreenshot:
     """The annotated debug image must be encoded in the configured format so its
-    bytes match the filename extension _save_screenshot derives from the config."""
+    bytes match the filename extension _save_frame derives from the config."""
 
     def _png_bytes(self, w: int = 200, h: int = 150) -> bytes:
         import io

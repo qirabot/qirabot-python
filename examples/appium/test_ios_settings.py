@@ -20,7 +20,7 @@ appium_url = os.environ.get("APPIUM_URL", "http://localhost:4723")
 driver = webdriver.Remote(appium_url, options=options)
 
 # bind(driver) once so calls below drop the repeated first argument.
-bot = Qirabot(task_name="test-ios-settings", screenshot_dir="./screenshots").bind(driver)
+bot = Qirabot(task_name="test-ios-settings").bind(driver)
 
 
 def test_open_wifi():

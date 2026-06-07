@@ -10,7 +10,7 @@ Run:
 
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="test-todo", screenshot_dir="./screenshots")
+bot = Qirabot(task_name="test-todo")
 
 URL = "https://todomvc.com/examples/react/dist/"
 

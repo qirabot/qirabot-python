@@ -15,7 +15,7 @@ driver = webdriver.Chrome()
 
 # bind(driver) once: the Selenium driver is stable across the session (tab/window
 # focus moves via switch_to, the object stays the same), so calls drop the target.
-bot = Qirabot(task_name="test-wikipedia-selenium", screenshot_dir="./screenshots").bind(driver)
+bot = Qirabot(task_name="test-wikipedia-selenium").bind(driver)
 
 
 def test_search_and_extract():

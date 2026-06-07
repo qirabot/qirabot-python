@@ -17,7 +17,7 @@ if sys.platform != "darwin":
 # bind(pyautogui) once: desktop has a single fixed target (the pyautogui module),
 # so calls below drop the repeated first argument. launch_app still works on the
 # bound proxy (it delegates to the underlying Qirabot).
-bot = Qirabot(task_name="test-calculator", screenshot_dir="./screenshots").bind(pyautogui)
+bot = Qirabot(task_name="test-calculator").bind(pyautogui)
 
 # Open Calculator before tests. bot.launch_app is cross-platform: on Windows use
 # "calc", and it handles the launch + a short wait for the window to appear.

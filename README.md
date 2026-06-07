@@ -2,7 +2,7 @@
 
 AI-powered automation SDK that bolts onto your existing browser/mobile automation framework. Let AI see the screen, click, type, extract data, and verify results — with any framework you already use.
 
-Use it three ways: as a **Python library** (let qirabot launch a Playwright browser for you via `bot.open()`, or bolt onto a Playwright / Selenium / Appium / Airtest / pyautogui session you already drive), inside your **pytest suite**, or straight from the **terminal** via the `qirabot` CLI — no code required.
+Use it two ways: as a **Python library** (let qirabot launch a Playwright browser for you via `bot.open()`, or bolt onto a Playwright / Selenium / Appium / Airtest / pyautogui session you already drive), or inside your **pytest suite**.
 
 ## Installation
 
@@ -27,8 +27,6 @@ pip install selenium             # Selenium is not an extra — bring your own d
 > The `airtest` extra pulls in Airtest, which pins `numpy<2.0` and
 > `opencv-contrib-python` 4.4–4.6. Installing it into an env that already has
 > `numpy>=2` may downgrade or conflict — prefer a dedicated virtualenv.
-
-The `qirabot` CLI ships with the base package — no extra needed.
 
 The Quick Start below uses `bot.open()`, so it needs `qirabot[browser]` plus a
 one-time `playwright install chromium`. With Selenium you create the driver
@@ -56,8 +54,9 @@ Constructor options:
 | `model_alias` | — | `""` | Default model alias for all operations |
 | `language` | — | `""` | Default response language |
 | `task_name` | — | `""` | Optional name for the task (visible in dashboard) |
-| `screenshot_dir` | `QIRA_SCREENSHOT_DIR` | `""` | Save screenshots locally for debugging |
-| `screenshot_annotate` | — | `False` | Draw a red crosshair at click/type coordinates |
+| `report` | — | `True` | Write an HTML run report (+ screenshots) on close |
+| `report_dir` | `QIRA_REPORT_DIR` | `""` | Output root; default `./qira_runs/<date>/<time-id>/` |
+| `screenshot_annotate` | — | `True` | Draw a red crosshair at click/type coordinates |
 | `screenshot_format` | — | `"jpeg"` | Saved screenshot format (`"jpeg"` or `"png"`) |
 | `screenshot_quality` | — | `80` | JPEG quality, 1–100 |
 | `retry` | — | `1` | Retries per action on transient failures |
@@ -67,7 +66,7 @@ Constructor options:
 
 `model_alias` selects which model backs every operation. The built-in aliases are
 `fast`, `balanced` (the default), and `high_quality` — trading cost for quality.
-Run `qirabot models` for the live list your account can use, then pass the
+Check your dashboard for the live list your account can use, then pass the
 `name` as `model_alias`; leave it empty for the default:
 
 ```python
@@ -82,8 +81,6 @@ short language tag like `"zh"` or `"en"` — empty means the server default:
 bot = Qirabot(language="zh")                      # extract/ai answers in Chinese
 text = bot.extract(page, "获取主标题", language="zh")
 ```
-
-Both are also CLI flags: `--model/-m` and `--language/-l`.
 
 ## Quick Start
 
@@ -141,40 +138,6 @@ Runnable examples live in [examples/](examples/), in two styles:
 
 See [examples/README.md](examples/README.md) for which to pick.
 
-## CLI
-
-Run AI tasks from the terminal without writing any Python. The `qirabot`
-command ships with the base package — no extra needed:
-
-```bash
-pip install qirabot
-export QIRA_API_KEY="qk_..."
-```
-
-```bash
-# Drive a local browser with a natural-language task
-qirabot browse "Search Hacker News for 'rust' and list the top 3 titles"
-qirabot browse "Extract the trending repos" --url https://github.com/trending --headless
-
-# Connect to a Chrome you already have open (started with --remote-debugging-port=9222)
-qirabot browse "Summarize this page" --cdp http://localhost:9222
-
-# Mobile (Appium) and desktop (pyautogui)
-qirabot mobile "Open Display settings and turn on dark mode" --platform android
-qirabot mobile "Send 'hi' to honey" --platform ios --bundle-id com.tencent.xin
-qirabot desktop "Type 42 + 58 = in Calculator and read the result"
-qirabot desktop "Send 'hi' to honey in WeChat" --app WeChat --app-wait 3
-
-# Inspect tasks and account
-qirabot task <task_id>                       # status + steps
-qirabot screenshot <task_id> -s 2 -o shot.png
-qirabot models                               # list available model aliases
-```
-
-`browse` needs `qirabot[browser]`, `mobile` needs `qirabot[appium]`, `desktop`
-needs `qirabot[desktop]`. Run `qirabot --help` or `qirabot <command> --help` for
-all options.
-
 ## API Reference
 
 ### Simple Actions
@@ -184,6 +147,11 @@ These actions use lightweight vision-based element location — fast and low-cos
 ```python
 # Click on an element by description
 bot.click(page, "Login button")
+
+# Auto-wait: poll until the element looks present (up to timeout) before
+# clicking, else raise QirabotTimeoutError. Works on every framework.
+# `wait` overrides the auto-derived assertion. (Also on type_text/double_click.)
+bot.click(page, "Login button", timeout=15.0, interval=2.0)
 
 # Type text into an input field
 bot.type_text(page, "Email input", "user@example.com")
@@ -235,8 +203,8 @@ bot.close()
 
 ### Screenshot (No AI)
 
-Saves to `screenshot_dir` and returns the saved path (or `None` if no
-`screenshot_dir` is configured):
+Saves to `report_dir/screenshots/` and returns the saved path (or `None` when
+`report=False`):
 
 ```python
 path = bot.screenshot(page)
@@ -331,34 +299,47 @@ On macOS it uses `open -a`/`open -b` (activating an already-running app), on
 Windows `os.startfile`/`start`/`explorer.exe shell:AppsFolder`, on Linux the
 executable directly.
 
-## Debugging Screenshots
+## Reports
 
-Save screenshots locally to see exactly what the AI sees at each step:
+By default every run writes a self-contained HTML report (with per-step
+screenshots) when the bot closes — including on error or Ctrl+C, so you can see
+where it stopped. No model calls, no network; it's built from data captured
+during the run.
 
 ```python
-# Save raw screenshots
-bot = Qirabot(screenshot_dir="./screenshots")
+# Default: report on, written to ./qira_runs/<date>/<time-id>/
+bot = Qirabot(task_name="checkout")
 
-# Save screenshots with red crosshair markers at click/type coordinates
-bot = Qirabot(screenshot_dir="./screenshots", screenshot_annotate=True)
+# Custom output root (date/run subdirs are still added automatically)
+bot = Qirabot(report_dir="./artifacts")        # or export QIRA_REPORT_DIR=./artifacts
 
-# Or via environment variable
-# export QIRA_SCREENSHOT_DIR=./screenshots
+# Turn it off entirely (nothing written to disk) — e.g. CI / library use
+bot = Qirabot(report=False)
 ```
 
-With `screenshot_annotate=True`, click/type_text screenshots include a red crosshair at the resolved coordinates, making it easy to verify targeting accuracy.
-
-Screenshots are saved as sequentially numbered files:
+Output layout per run:
 
 ```
-screenshots/
-  001_click_x245_y112.jpg
-  002_type_text_x500_y300.jpg
-  003_extract.jpg
-  004_ai_step1.jpg
-  005_ai_step2.png
-  ...
+qira_runs/2026-06-07/192335-3f9ab2c1/
+  report.html          # self-contained: embedded thumbnails + PASS/FAIL per ai() task
+  screenshots/         # full-resolution frames (click a thumbnail to open)
+    001_click.jpg
+    002_type_text.jpg
+    ...
+  recording.mp4        # embedded in the report if you record into report_dir
 ```
+
+`screenshot_annotate=True` (default) draws a red crosshair at the resolved
+click/type coordinates. To embed a screen recording, point your recorder at
+`bot.report_dir`:
+
+```python
+dev.start_recording(output=os.path.join(bot.report_dir, "recording.mp4"))
+```
+
+Call `bot.report("path.html")` to also write the report to a custom location on
+demand. Use `bot.screenshot(target)` for a one-off frame (saved under
+`report_dir/screenshots/`).
 
 ## Bolt-On to Any Framework
 

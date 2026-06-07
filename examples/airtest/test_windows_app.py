@@ -23,7 +23,7 @@ if sys.platform != "win32":
 # Connect to the whole desktop. You can also target one window, e.g.
 # connect_device("Windows:///?title_re='.*Calculator.*'").
 connect_device("Windows:///")
-bot = Qirabot(task_name="airtest-windows", screenshot_dir="./screenshots").bind(G)
+bot = Qirabot(task_name="airtest-windows").bind(G)
 
 # Open the app. pyautogui can't, but Qirabot's launch_app shells out
 # cross-platform; on the bound proxy it delegates to the underlying Qirabot.
