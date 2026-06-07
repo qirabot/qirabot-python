@@ -112,6 +112,26 @@ class SeleniumAdapter(DeviceAdapter):
         elif direction == "left":
             self._driver.execute_script(f"window.scrollBy({-delta}, 0)")
 
+    # Actions that don't change the screen (or handle their own timing), so the
+    # next screenshot needs no settle delay after them.
+    _NO_SETTLE = frozenset({"wait", "done", "save_note", "hover"})
+
+    # Seconds to let the page settle (navigation, AJAX, DOM updates, smooth-scroll
+    # animation) after a screen-changing action before the ai() loop screenshots
+    # again. Selenium's coordinate-level actions don't wait for the effects they
+    # trigger (implicit waits only cover find_element), so without this fixed
+    # delay the next shot can catch the pre-update frame and the model wrongly
+    # concludes the action did nothing. navigate()/go_back() already block on page
+    # load, but the extra delay is harmless and keeps every action uniform.
+    _SETTLE_SECONDS = 0.6
+
+    def execute(self, action_type: str, params: dict[str, Any]) -> None:
+        super().execute(action_type, params)
+        if action_type not in self._NO_SETTLE:
+            import time
+
+            time.sleep(self._SETTLE_SECONDS)
+
     def device_info(self) -> DeviceInfo:
         # Report the viewport (what the screenshot captures and what click
         # coordinates are measured against), NOT the outer window size from

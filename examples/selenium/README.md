@@ -25,8 +25,8 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="my-test")
 driver = webdriver.Chrome()
+bot = Qirabot(task_name="my-test").bind(driver)   # bind once; driver is stable
 
 def test_search():
     driver.get("https://myapp.com")
@@ -36,10 +36,10 @@ def test_search():
     driver.find_element(By.ID, "submit").click()
 
     # Bolt-on: AI checks the result
-    assert bot.verify(driver, "Search results are displayed")
+    assert bot.verify("Search results are displayed")
 
     # Bolt-on: AI extracts data
-    first = bot.extract(driver, "What is the first search result?")
+    first = bot.extract("What is the first search result?")
     assert first
 ```
 

@@ -162,10 +162,18 @@ class DeviceAdapter(ABC):
             self.clear_text(x, y)
         elif action_type == "press_key":
             self.press_key(str(params.get("key", "")))
-        elif action_type == "scroll":
-            self.scroll(x, y, str(params.get("direction", "down")), int(params.get("distance", 3)))
-        elif action_type == "scroll_at":
-            self.scroll(x, y, str(params.get("direction", "down")), int(params.get("distance", 3)))
+        elif action_type in ("scroll", "scroll_at"):
+            # The server sends scroll distance as `amount` in pixels (e.g. 500);
+            # direct/legacy callers may pass `distance` in scroll units
+            # (~amount/100, since adapters scale distance*100 -> px). Honor
+            # `amount` first so the model's requested distance isn't silently
+            # dropped to the default of 3.
+            raw_amount = params.get("amount")
+            if raw_amount not in (None, ""):
+                distance = max(1, round(int(raw_amount) / 100))
+            else:
+                distance = int(params.get("distance", 3))
+            self.scroll(x, y, str(params.get("direction", "down")), distance)
         elif action_type == "drag":
             self.drag(
                 float(params.get("start_x", 0)), float(params.get("start_y", 0)),

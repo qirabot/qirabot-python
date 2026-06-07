@@ -13,8 +13,11 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="test-ecommerce-selenium", screenshot_dir="./screenshots", model_alias="fast")
 driver = webdriver.Chrome()
+# bind(driver) once so AI calls drop the repeated first argument.
+bot = Qirabot(
+    task_name="test-ecommerce-selenium", screenshot_dir="./screenshots", model_alias="fast"
+).bind(driver)
 
 
 def login():
@@ -40,7 +43,7 @@ def test_login():
     login()
 
     # Bolt-on: AI visual check
-    assert bot.verify(driver, "Product listing is displayed")
+    assert bot.verify("Product listing is displayed")
 
 
 def test_extract_products():
@@ -51,7 +54,7 @@ def test_extract_products():
     assert len(items) == 6
 
     # Bolt-on: AI extracts product info
-    info = bot.extract(driver, "List the first 3 product names and prices")
+    info = bot.extract("List the first 3 product names and prices")
     assert "Sauce Labs" in info
 
 
@@ -64,7 +67,6 @@ def test_checkout():
 
     # Bolt-on: AI finishes checkout
     result = bot.ai(
-        driver,
         "Click checkout, fill name 'Jane Doe', zip '90210', complete the order",
         max_steps=10,
     )

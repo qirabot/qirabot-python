@@ -11,6 +11,7 @@ Organized by the framework you already use:
 - [playwright/](playwright/) — `page` fixture from pytest-playwright
 - [selenium/](selenium/) — your own `webdriver.Chrome()`
 - [appium/](appium/) — Android / iOS via `webdriver.Remote`
+- [airtest/](airtest/) — Android / iOS / Windows via `connect_device` (image-based)
 - [desktop/](desktop/) — native apps via pyautogui
 
 Run with `pytest examples/<framework>/`.

@@ -17,7 +17,12 @@ from qirabot._optional import require
 from qirabot._transport import Transport
 from qirabot.adapters import auto
 from qirabot.adapters.base import DeviceAdapter, ScreenshotConfig
-from qirabot.exceptions import ActionError, QirabotError, _is_retryable
+from qirabot.exceptions import (
+    ActionError,
+    QirabotError,
+    QirabotTimeoutError,
+    _is_retryable,
+)
 
 if TYPE_CHECKING:
     from playwright.sync_api import ViewportSize
@@ -138,6 +143,25 @@ class Qirabot:
     def task_id(self) -> str | None:
         return self._task_id
 
+    def bind(self, target: Any) -> _BoundQirabot:
+        """Bind a target once and drop it from subsequent calls.
+
+        Returns a drop-in proxy you use exactly like this ``Qirabot``: action
+        methods (``click``/``type_text``/``ai``/…) no longer take ``target`` as
+        their first argument, and lifecycle/context-manager methods delegate to
+        this instance::
+
+            with Qirabot().bind(driver) as bot:
+                bot.click("Login")
+                bot.type_text("Email", "a@b.com")
+
+        Best for frameworks that drive a single, stable target for the whole
+        session (Airtest, pyautogui, Appium, Selenium). For Playwright's
+        new-tab flows the explicit ``page = bot.click(page, ...)`` form keeps
+        the returned (possibly new) page visible; with a bound proxy, reach the
+        live page via ``bot.current_page()`` for native Playwright interop.
+        """
+        return _BoundQirabot(self, target)
 
     def open(
         self,
@@ -347,15 +371,23 @@ class Qirabot:
         *,
         model_alias: str = "",
         language: str = "",
-    ) -> bool:
-        """Wait until a visual condition is met. Returns True if met within timeout."""
+    ) -> None:
+        """Wait until a visual condition holds, polling every ``interval`` seconds.
+
+        Acts as an assertion/gate: returns once the condition is met, or raises
+        :class:`QirabotTimeoutError` if it is still not met after ``timeout``
+        seconds. For a non-raising one-shot check use :meth:`verify`, which
+        returns a bool.
+        """
         deadline = time.monotonic() + timeout
         while True:
             met = self.verify(target, assertion, model_alias=model_alias, language=language)
             if met:
-                return True
+                return
             if time.monotonic() >= deadline:
-                return False
+                raise QirabotTimeoutError(
+                    f"wait_for timed out after {timeout:g}s: {assertion}"
+                )
             time.sleep(interval)
 
     def ai(
@@ -461,7 +493,11 @@ class Qirabot:
 
             if finished:
                 output = result.get("output", "")
-                logger.info("completed: %s", output)
+                # Log a short completion marker, not the full output: the result
+                # text is the caller's to surface via result.output, and dumping
+                # it here duplicates that for any caller that prints the result
+                # (and is out of step with the short per-step progress lines).
+                logger.info("completed in %d step(s)", len(steps))
                 return RunResult(
                     success=True,
                     output=output,
@@ -903,3 +939,208 @@ def _annotate_screenshot(
     else:
         img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+class _BoundQirabot:
+    """A :class:`Qirabot` proxy with a target pre-bound (see ``Qirabot.bind``).
+
+    Action methods drop the leading ``target`` argument; everything else
+    (lifecycle, context manager, unknown attributes) delegates to the wrapped
+    ``Qirabot``. Methods that return the current target (tab-following) update
+    the bound target in place, so the proxy keeps following the active page on
+    Playwright while staying a no-op on single-target frameworks.
+    """
+
+    def __init__(self, bot: Qirabot, target: Any) -> None:
+        self._bot = bot
+        self._target = target
+
+    @property
+    def bot(self) -> Qirabot:
+        """The underlying :class:`Qirabot` (rarely needed)."""
+        return self._bot
+
+    def _rebind(self, result: Any) -> Any:
+        # Follow tab/window switches: the action's return value is the current
+        # target, which may differ from the one we sent (Playwright new tab).
+        self._target = result
+        return result
+
+    # -- action methods: inject the bound target ---------------------------
+
+    def click(
+        self,
+        locate: str,
+        *,
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> Any:
+        return self._rebind(
+            self._bot.click(
+                self._target, locate, retry=retry, model_alias=model_alias, language=language
+            )
+        )
+
+    def type_text(
+        self,
+        locate: str,
+        text: str,
+        *,
+        press_enter: bool = False,
+        clear_before_typing: bool = False,
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> Any:
+        return self._rebind(
+            self._bot.type_text(
+                self._target,
+                locate,
+                text,
+                press_enter=press_enter,
+                clear_before_typing=clear_before_typing,
+                retry=retry,
+                model_alias=model_alias,
+                language=language,
+            )
+        )
+
+    def double_click(
+        self,
+        locate: str,
+        *,
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> Any:
+        return self._rebind(
+            self._bot.double_click(
+                self._target, locate, retry=retry, model_alias=model_alias, language=language
+            )
+        )
+
+    def extract(
+        self,
+        instruction: str,
+        *,
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> str:
+        return self._bot.extract(
+            self._target, instruction, retry=retry, model_alias=model_alias, language=language
+        )
+
+    def verify(
+        self,
+        assertion: str,
+        *,
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> bool:
+        return self._bot.verify(
+            self._target, assertion, retry=retry, model_alias=model_alias, language=language
+        )
+
+    def wait_for(
+        self,
+        assertion: str,
+        timeout: float = 30.0,
+        interval: float = 2.0,
+        *,
+        model_alias: str = "",
+        language: str = "",
+    ) -> "_BoundQirabot":
+        """Wait until ``assertion`` holds, else raise :class:`QirabotTimeoutError`.
+
+        Returns the bound handle (unchanged target) so calls can be chained, e.g.
+        ``bot.wait_for("公告出现").click("关闭公告")``.
+        """
+        self._bot.wait_for(
+            self._target,
+            assertion,
+            timeout,
+            interval,
+            model_alias=model_alias,
+            language=language,
+        )
+        return self
+
+    def ai(
+        self,
+        instruction: str,
+        max_steps: int = 20,
+        *,
+        on_step: Callable[[StepResult], None] | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> RunResult:
+        return self._bot.ai(
+            self._target,
+            instruction,
+            max_steps,
+            on_step=on_step,
+            model_alias=model_alias,
+            language=language,
+        )
+
+    def screenshot(self) -> Path | None:
+        return self._bot.screenshot(self._target)
+
+    def go_back(self) -> Any:
+        return self._rebind(self._bot.go_back(self._target))
+
+    def close_tab(self) -> Any:
+        return self._rebind(self._bot.close_tab(self._target))
+
+    def navigate(self, url: str) -> Any:
+        return self._rebind(self._bot.navigate(self._target, url))
+
+    def scroll(
+        self,
+        direction: str = "down",
+        distance: int = 3,
+        *,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> None:
+        self._bot.scroll(self._target, direction, distance, x=x, y=y)
+
+    def current_page(self) -> Any:
+        """The live current target (always fresh — use for native interop)."""
+        return self._rebind(self._bot.current_page(self._target))
+
+    # -- high-frequency lifecycle: explicit for typing/IDE -----------------
+
+    def close(self) -> None:
+        self._bot.close()
+
+    def open(self, *args: Any, **kwargs: Any) -> Any:
+        return self._bot.open(*args, **kwargs)
+
+    @property
+    def task_id(self) -> str | None:
+        return self._bot.task_id
+
+    # -- everything else (launch_app/fail/cancel/…) delegates --------------
+
+    def __getattr__(self, name: str) -> Any:
+        # __getattr__ runs only when normal lookup fails; guard _bot to avoid
+        # recursion before __init__ has set it.
+        if name == "_bot":
+            raise AttributeError(name)
+        return getattr(self._bot, name)
+
+    def __enter__(self) -> _BoundQirabot:
+        self._bot.__enter__()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        self._bot.__exit__(exc_type, exc_val, exc_tb)

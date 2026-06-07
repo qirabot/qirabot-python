@@ -122,6 +122,13 @@ class PyAutoGuiAdapter(DeviceAdapter):
         self._pag.drag(ltx - lfx, lty - lfy, duration=0.5)
 
     def scroll(self, x: float, y: float, direction: str, distance: int) -> None:
+        # The server's plain `scroll` sends no x/y, so they arrive as 0 and the
+        # scroll would anchor at the top-left corner (menu bar / non-scrollable
+        # region) and do nothing. Fall back to the screen center, matching the
+        # default anchor used elsewhere.
+        if not x and not y:
+            info = self.device_info()
+            x, y = info.width / 2.0, info.height / 2.0
         lx, ly = self._to_logical(x, y)
         clicks = distance * 3
         if direction == "up":
@@ -132,6 +139,25 @@ class PyAutoGuiAdapter(DeviceAdapter):
             self._pag.hscroll(-clicks, x=lx, y=ly)
         elif direction == "right":
             self._pag.hscroll(clicks, x=lx, y=ly)
+
+    # Actions that don't change the screen (or handle their own timing), so the
+    # next screenshot needs no settle delay after them.
+    _NO_SETTLE = frozenset({"wait", "done", "save_note", "hover"})
+
+    # Seconds to let the desktop UI settle (scroll inertia, window transitions,
+    # page loads) after a screen-changing action before the ai() loop screenshots
+    # again. pyautogui fires OS input events and returns immediately with no
+    # "wait until stable" primitive, so a fixed delay is the pragmatic floor --
+    # without it the next shot can catch the pre-repaint / mid-animation frame and
+    # the model wrongly concludes the action did nothing.
+    _SETTLE_SECONDS = 1.0
+
+    def execute(self, action_type: str, params: dict[str, Any]) -> None:
+        super().execute(action_type, params)
+        if action_type not in self._NO_SETTLE:
+            import time
+
+            time.sleep(self._SETTLE_SECONDS)
 
     def device_info(self) -> DeviceInfo:
         # Report screenshot (physical) pixels, not pyautogui's logical points, so

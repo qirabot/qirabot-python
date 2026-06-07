@@ -9,19 +9,29 @@ Anything you print goes to the job's .log next to the runner; printing the
 task_id lets you open the run in the web console without watching the screen.
 """
 
+import logging
+
 import pyautogui
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="sample-notepad-job")
-print("task_id:", bot.task_id)  # -> results/<name>.log, view this run in the web console
+# The SDK logs each step ("step 3/10 <decision> -> click ...") at INFO level, but
+# Python emits nothing until logging is configured. Turn it on so the runner can
+# stream live progress back to you; without this you'd only see the prints below.
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+# basicConfig turns on INFO for every library; quiet httpx so only the SDK's
+# "step N/10 ..." lines show, not a "HTTP Request: ..." line per call.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+bot = Qirabot(task_name="sample-notepad-job", model_alias="balanced_pro")
+print("task_id:", bot.task_id, flush=True)  # open this run in the web console
 
 # pyautogui can't launch apps, so open the target first. On Windows use "notepad";
 # on macOS "TextEdit"; on Linux the editor's executable name.
-bot.launch_app("notes", wait=2)
+bot.launch_app("google chrome", wait=2)
 
 result = bot.ai(
     pyautogui,
-    "Type the sentence 'Hello from the remote runner.' into the editor.",
+    "What are the top trending projects on GitHub today, output in Markdown format",
     max_steps=10,
 )
 

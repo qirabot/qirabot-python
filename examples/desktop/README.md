@@ -23,7 +23,7 @@ pytest examples/desktop/test_native_app.py
 import pyautogui
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="my-test")
+bot = Qirabot(task_name="my-test").bind(pyautogui)   # bind once; the target is fixed
 
 def test_open_app():
     # Open the app first — pyautogui can't launch apps, so use launch_app
@@ -31,18 +31,18 @@ def test_open_app():
     bot.launch_app("Google Chrome", wait=2)
 
     # Bolt-on: AI finds and clicks UI elements by description
-    bot.click(pyautogui, "Chrome icon in the taskbar")
-    bot.wait_for(pyautogui, "Browser window is visible", timeout=10.0)
+    bot.click("Chrome icon in the taskbar")
+    bot.wait_for("Browser window is visible", timeout=10.0)
 
-    bot.click(pyautogui, "Address bar")
-    bot.type_text(pyautogui, "Address bar", "https://example.com")
+    bot.click("Address bar")
+    bot.type_text("Address bar", "https://example.com")
     pyautogui.press("enter")
 
     # Bolt-on: AI verifies what's on screen
-    assert bot.verify(pyautogui, "Example Domain page is displayed")
+    assert bot.verify("Example Domain page is displayed")
 
     # Bolt-on: AI extracts text from the screen
-    heading = bot.extract(pyautogui, "What is the main heading?")
+    heading = bot.extract("What is the main heading?")
     assert "Example" in heading
 ```
 

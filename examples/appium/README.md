@@ -56,8 +56,6 @@ from appium import webdriver
 from appium.options.android import UiAutomator2Options
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="my-test")
-
 options = UiAutomator2Options()
 options.platform_name = "Android"
 options.device_name = "emulator-5554"
@@ -65,16 +63,17 @@ options.app_package = "com.example.myapp"
 options.app_activity = ".MainActivity"
 
 driver = webdriver.Remote("http://localhost:4723", options=options)
+bot = Qirabot(task_name="my-test").bind(driver)   # bind once; driver is stable
 
 def test_login():
-    # Your existing Appium code
+    # Your existing Appium code (native driver calls unchanged)
     driver.find_element("id", "com.example.myapp:id/login_btn").click()
 
     # Bolt-on: AI verifies — works on any Android version
-    assert bot.verify(driver, "Home screen is displayed")
+    assert bot.verify("Home screen is displayed")
 
     # Bolt-on: AI navigates when IDs are unreliable
-    result = bot.ai(driver, "Go to Settings and enable notifications", max_steps=8)
+    result = bot.ai("Go to Settings and enable notifications", max_steps=8)
     assert result.success
 ```
 

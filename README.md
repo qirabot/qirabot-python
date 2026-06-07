@@ -2,7 +2,7 @@
 
 AI-powered automation SDK that bolts onto your existing browser/mobile automation framework. Let AI see the screen, click, type, extract data, and verify results — with any framework you already use.
 
-Use it three ways: as a **Python library** (let qirabot launch a Playwright browser for you via `bot.open()`, or bolt onto a Playwright / Selenium / Appium / pyautogui session you already drive), inside your **pytest suite**, or straight from the **terminal** via the `qirabot` CLI — no code required.
+Use it three ways: as a **Python library** (let qirabot launch a Playwright browser for you via `bot.open()`, or bolt onto a Playwright / Selenium / Appium / Airtest / pyautogui session you already drive), inside your **pytest suite**, or straight from the **terminal** via the `qirabot` CLI — no code required.
 
 ## Installation
 
@@ -19,9 +19,14 @@ framework you'll drive:
 pip install "qirabot[browser]"   # Playwright (needed for bot.open())
 pip install "qirabot[desktop]"   # pyautogui (native desktop apps)
 pip install "qirabot[appium]"    # Appium (Android / iOS)
+pip install "qirabot[airtest]"   # Airtest (Android / iOS / Windows, image-based)
 
 pip install selenium             # Selenium is not an extra — bring your own driver
 ```
+
+> The `airtest` extra pulls in Airtest, which pins `numpy<2.0` and
+> `opencv-contrib-python` 4.4–4.6. Installing it into an env that already has
+> `numpy>=2` may downgrade or conflict — prefer a dedicated virtualenv.
 
 The `qirabot` CLI ships with the base package — no extra needed.
 
@@ -103,6 +108,27 @@ print(f"Result: {summary}")
 bot.close()
 ```
 
+## Bind a target (optional)
+
+Every action takes the framework object (`page` / `driver` / device / module) as
+its first argument: `bot.click(target, "Login")`. When you drive a **single,
+stable target** for the whole session, call `bot.bind(target)` once to get a
+drop-in proxy that drops the repeated first argument:
+
+```python
+bot = Qirabot().bind(driver)     # Selenium/Appium driver, pyautogui, Airtest G/device
+bot.click("Login")
+bot.type_text("Email", "a@b.com")
+with Qirabot().bind(driver) as bot:   # works as a context manager too
+    ...
+```
+
+`bind()` is recommended for **Airtest, pyautogui, Appium, Selenium**. For
+**Playwright** keep the explicit form `page = bot.click(page, ...)` so new-tab
+follows stay visible (a click can open a new tab; the returned page is the one
+your native `page.fill(...)` calls should use). With a bound proxy, reach the
+live page via `bot.current_page()`.
+
 ## Examples
 
 Runnable examples live in [examples/](examples/), in two styles:
@@ -165,11 +191,12 @@ bot.type_text(page, "Email input", "user@example.com")
 # Extract data from the screen
 text = bot.extract(page, "Get the main heading")
 
-# Verify a visual assertion (returns True/False)
+# Verify a visual assertion (returns True/False, never raises)
 ok = bot.verify(page, "The success message is visible")
 
-# Wait for a condition with timeout
-ready = bot.wait_for(page, "Page has finished loading", timeout=15.0, interval=2.0)
+# Wait for a condition (acts as a gate): returns when met, else raises
+# QirabotTimeoutError. Use verify() for a non-raising bool check.
+bot.wait_for(page, "Page has finished loading", timeout=15.0, interval=2.0)
 ```
 
 `click`, `type_text`, and `double_click` return the current target (the same
@@ -246,19 +273,40 @@ for i in range(4):
 Reach for `close_tab` directly when you want to force-close the current tab
 regardless of history.
 
-Platform support:
+Platform support (all actions):
 
-| Method      | Playwright | Selenium | Appium (mobile) | pyautogui (desktop) |
-| ----------- | :--------: | :------: | :-------------: | :-----------------: |
-| `navigate`  |     ✅     |    ✅    |       ✅        |         ❌          |
-| `go_back`   |     ✅     |    ✅    |       ✅        |         ❌          |
-| `close_tab` |     ✅     |    ❌    |       ❌        |         ❌          |
-| `scroll`    |     ✅     |    ✅    |       ✅        |         ✅          |
+| Action         | Playwright | Selenium | Appium (mobile) | pyautogui (desktop) | Airtest |
+| -------------- | :--------: | :------: | :-------------: | :-----------------: | :-----: |
+| `click`        |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
+| `double_click` |     ✅     |    ✅    |      ✅ ᵃ       |         ✅          |  ✅ ᵃ   |
+| `right_click`  |     ✅     |    ✅    |    = tap ᵇ      |         ✅          | Windows / = tap ᵇ |
+| `hover`        |     ✅     |    ✅    |    no-op ᶜ      |         ✅          | no-op ᶜ |
+| `type_text`    |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
+| `clear_text`   |     ✅     |    ✅    |       ✅        |         ✅          | Android ᵈ |
+| `press_key`    |     ✅     |    ✅    |       ✅        |         ✅          |  ✅ ᵉ   |
+| `scroll`       |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
+| `drag`         |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
+| `navigate`     |     ✅     |    ✅    |       ✅        |         ❌          |   ❌    |
+| `go_back`      |     ✅     |    ✅    |       ✅        |         ❌          | Android |
+| `close_tab`    |     ✅     |    ❌    |       ❌        |         ❌          |   ❌    |
+| `screenshot`   |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
 
-`navigate`/`go_back` raise `NotImplementedError` on desktop (pyautogui), which
-has no browser-style navigation. `close_tab` is Playwright-only (other targets
-raise `NotImplementedError`); the new-tab fallback inside `go_back` therefore
-applies to Playwright only — on Selenium/Appium `go_back` is always history-back.
+AI-located actions (`click`, `type_text`, `double_click`) and the AI operations
+(`extract`, `verify`, `wait_for`, `ai`) work on **every** framework — the matrix
+shows how each underlying action maps per platform.
+
+- ᵃ Appium/Airtest emulate `double_click` as two quick taps.
+- ᵇ Mobile has no right-click: Appium taps; Airtest right-clicks on Windows only, taps elsewhere.
+- ᶜ Touch targets have no hover: Appium/Airtest treat `hover` as a no-op.
+- ᵈ Airtest has no element model; `clear_text` is best-effort on Android (caret-to-end + repeated delete).
+- ᵉ Airtest key names are Android-first (adb); Windows (pywinauto) / iOS use different names.
+
+`navigate`/`go_back` raise `NotImplementedError` where unsupported (pyautogui has
+no browser-style navigation; Airtest has no URL concept). `close_tab` is
+Playwright-only (other targets raise `NotImplementedError`); the new-tab fallback
+inside `go_back` therefore applies to Playwright only — on Selenium/Appium
+`go_back` is always history-back, and on Airtest it maps to `keyevent("BACK")`
+(Android only; iOS/Windows raise).
 
 ### Launch a Desktop App (No AI)
 
@@ -343,11 +391,11 @@ bot.close()
 from selenium import webdriver
 from qirabot import Qirabot
 
-bot = Qirabot()
 driver = webdriver.Chrome()
 driver.get("https://www.wikipedia.org")
+bot = Qirabot().bind(driver)   # bind once; the driver is stable for the session
 
-summary = bot.extract(driver, "Get the first paragraph of the article")
+summary = bot.extract("Get the first paragraph of the article")
 print(summary)
 
 driver.quit()
@@ -361,20 +409,44 @@ from appium import webdriver
 from appium.options.android import UiAutomator2Options
 from qirabot import Qirabot
 
-bot = Qirabot()
 options = UiAutomator2Options()
 options.platform_name = "Android"
 options.device_name = "emulator-5554"
 options.app_package = "com.android.settings"
 options.app_activity = ".Settings"
 driver = webdriver.Remote("http://localhost:4723", options=options)
+bot = Qirabot().bind(driver)
 
-bot.click(driver, "Wi-Fi settings")
-result = bot.ai(driver, "Open Display settings and change font size to Large")
+bot.click("Wi-Fi settings")
+result = bot.ai("Open Display settings and change font size to Large")
 print(f"Success: {result.success}")
 bot.close()
 driver.quit()
 ```
+
+### Android / iOS / Windows (Airtest)
+
+Airtest connects to the device itself (no Appium server). `G` resolves the
+current device, so `bind(G)` keeps your usual Airtest style and adds AI on top.
+
+```python
+from airtest.core.api import *       # your usual Airtest imports
+from qirabot import Qirabot
+
+auto_setup(__file__)                 # your usual Airtest setup, unchanged
+bot = Qirabot().bind(G)
+
+bot.click("Login button")            # AI-located — replaces brittle Template images
+result = bot.ai("Open Settings and turn on dark mode")
+print(f"Success: {result.success}")
+touch(Template("native.png"))        # native Airtest still works side by side
+bot.close()
+```
+
+Trade-offs and capability notes (e.g. `navigate` unsupported, `go_back` Android-only)
+are in [examples/airtest/](examples/airtest/). You can also pass `G`, the
+`airtest.core.api` module, or an explicit `connect_device(...)` handle directly
+without `bind()`.
 
 ## Error Handling
 
