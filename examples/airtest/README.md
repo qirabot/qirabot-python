@@ -98,5 +98,6 @@ Bolt-on to assertions (run with `pytest`):
 Standalone scripts (run with `python`):
 
 - [standalone_rpa.py](standalone_rpa.py) — Android: hand a whole task to `bot.ai()`, no pytest
+- [record_android_app.py](record_android_app.py) — Android: full run with `on_step` logging and a screen recording embedded in the report
 - [standalone_windows_rpa.py](standalone_windows_rpa.py) — Windows desktop: same, driving Calculator
 - [bolt_on_template.py](bolt_on_template.py) — mix native Airtest `Template` with qirabot AI (incremental migration)
