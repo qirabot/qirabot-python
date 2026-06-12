@@ -11,7 +11,6 @@ multi-device switches for free.
 from __future__ import annotations
 
 import io
-import time
 from typing import Any
 
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
@@ -49,10 +48,9 @@ class AirtestAdapter(DeviceAdapter):
     # next screenshot needs no settle delay after them.
     _NO_SETTLE = frozenset({"wait", "done", "save_note", "hover"})
 
-    # Seconds to let the UI settle after a screen-changing action before the
-    # ai() loop screenshots again. Airtest's device methods don't carry the
-    # api-layer ``delay_after_operation()``, so a fixed delay is the pragmatic
-    # floor (mirrors the Appium adapter).
+    # Airtest's device methods don't carry the api-layer ``delay_after_operation()``,
+    # so a fixed floor is needed (mirrors the Appium adapter). See
+    # ``DeviceAdapter.settle_seconds`` for the override mechanism.
     _SETTLE_SECONDS = 1
 
     def __init__(self, target: Any) -> None:
@@ -288,11 +286,8 @@ class AirtestAdapter(DeviceAdapter):
         )
         return DeviceInfo(platform=mapped, width=width, height=height)
 
-    def execute(self, action_type: str, params: dict[str, Any]) -> None:
+    def _dispatch(self, action_type: str, params: dict[str, Any]) -> None:
         if action_type in ("scroll", "scroll_at"):
             self._scroll_action(action_type, params or {})
         else:
-            super().execute(action_type, params)
-
-        if action_type not in self._NO_SETTLE:
-            time.sleep(self._SETTLE_SECONDS)
+            super()._dispatch(action_type, params)

@@ -144,20 +144,9 @@ class PyAutoGuiAdapter(DeviceAdapter):
     # next screenshot needs no settle delay after them.
     _NO_SETTLE = frozenset({"wait", "done", "save_note", "hover"})
 
-    # Seconds to let the desktop UI settle (scroll inertia, window transitions,
-    # page loads) after a screen-changing action before the ai() loop screenshots
-    # again. pyautogui fires OS input events and returns immediately with no
-    # "wait until stable" primitive, so a fixed delay is the pragmatic floor --
-    # without it the next shot can catch the pre-repaint / mid-animation frame and
-    # the model wrongly concludes the action did nothing.
+    # Desktop UI (scroll inertia, window transitions) needs a generous floor; see
+    # ``DeviceAdapter.settle_seconds`` for the rationale and override mechanism.
     _SETTLE_SECONDS = 1.0
-
-    def execute(self, action_type: str, params: dict[str, Any]) -> None:
-        super().execute(action_type, params)
-        if action_type not in self._NO_SETTLE:
-            import time
-
-            time.sleep(self._SETTLE_SECONDS)
 
     def device_info(self) -> DeviceInfo:
         # Report screenshot (physical) pixels, not pyautogui's logical points, so

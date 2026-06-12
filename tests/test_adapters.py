@@ -169,6 +169,42 @@ class TestExecuteDispatch:
             a.execute("nonexistent", {})
 
 
+class TestSettleOverride:
+    """settle_seconds resolution: instance override beats the class default,
+    and a screen-changing action sleeps that effective value."""
+
+    def test_default_is_class_constant(self):
+        a = FakeAdapter()
+        assert a.settle_seconds == FakeAdapter._SETTLE_SECONDS
+
+    def test_override_takes_precedence(self):
+        a = FakeAdapter()
+        a._SETTLE_SECONDS = 0.6  # pretend a platform default
+        a._settle_override = 0.2
+        assert a.settle_seconds == 0.2
+
+    def test_override_zero_disables_settle(self, monkeypatch):
+        import time
+
+        a = FakeAdapter()
+        a._SETTLE_SECONDS = 0.6
+        a._settle_override = 0
+        sleeps: list[float] = []
+        monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+        a.execute("click", {"x": 1, "y": 2})
+        assert sleeps == []  # 0 is falsy -> no sleep call
+
+    def test_override_applied_on_screen_changing_action(self, monkeypatch):
+        import time
+
+        a = FakeAdapter()
+        a._settle_override = 0.25
+        sleeps: list[float] = []
+        monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+        a.execute("click", {"x": 1, "y": 2})
+        assert sleeps == [0.25]
+
+
 def _fake_pyautogui(*, screenshot_w: int, logical_w: int, logical_h: int | None = None):
     """Build a MagicMock standing in for the pyautogui module.
 

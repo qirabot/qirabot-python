@@ -4,8 +4,42 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from qirabot.adapters.base import ScreenshotConfig
+from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
 from qirabot.client import Qirabot, StepResult, RunResult, _annotate_screenshot
+
+
+class _SettleFakeAdapter(DeviceAdapter):
+    """Minimal adapter with a non-zero settle default, for client wiring tests."""
+
+    _SETTLE_SECONDS = 0.6
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def accepts(cls, target):
+        return False
+
+    def screenshot(self, config=None):
+        return b""
+
+    def click(self, x, y):
+        pass
+
+    def double_click(self, x, y):
+        pass
+
+    def type_text(self, x, y, text):
+        pass
+
+    def press_key(self, key):
+        pass
+
+    def scroll(self, x, y, direction, distance):
+        pass
+
+    def device_info(self):
+        return DeviceInfo(platform="test", width=100, height=100)
 
 
 class TestStepResult:
@@ -94,6 +128,64 @@ class TestQirabotInit:
         monkeypatch.setenv("QIRA_REPORT_DIR", "/tmp/shots")
         bot = Qirabot(api_key="k", report_dir="./local", task_id="t")
         assert str(bot._report_dir).startswith("local/")
+        bot.close()
+
+    def test_settle_seconds_default_none(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        assert bot._settle_seconds is None
+        bot.close()
+
+    def test_settle_seconds_param(self):
+        bot = Qirabot(api_key="k", task_id="t", settle_seconds=0.3)
+        assert bot._settle_seconds == 0.3
+        bot.close()
+
+    def test_settle_seconds_zero_allowed(self):
+        bot = Qirabot(api_key="k", task_id="t", settle_seconds=0)
+        assert bot._settle_seconds == 0
+        bot.close()
+
+    def test_settle_seconds_negative_rejected(self):
+        with pytest.raises(ValueError, match="settle_seconds must be >= 0"):
+            Qirabot(api_key="k", task_id="t", settle_seconds=-1)
+
+    def test_settle_seconds_from_env(self, monkeypatch):
+        monkeypatch.setenv("QIRA_SETTLE_SECONDS", "1.5")
+        bot = Qirabot(api_key="k", task_id="t")
+        assert bot._settle_seconds == 1.5
+        bot.close()
+
+    def test_settle_seconds_param_overrides_env(self, monkeypatch):
+        monkeypatch.setenv("QIRA_SETTLE_SECONDS", "1.5")
+        bot = Qirabot(api_key="k", task_id="t", settle_seconds=0.2)
+        assert bot._settle_seconds == 0.2
+        bot.close()
+
+    def test_settle_seconds_env_invalid_rejected(self, monkeypatch):
+        monkeypatch.setenv("QIRA_SETTLE_SECONDS", "soon")
+        with pytest.raises(ValueError, match="QIRA_SETTLE_SECONDS must be a number"):
+            Qirabot(api_key="k", task_id="t")
+
+    def test_settle_seconds_applied_to_adapter(self, monkeypatch):
+        import qirabot.client as client_mod
+
+        adapter = _SettleFakeAdapter()
+        monkeypatch.setattr(client_mod.auto, "detect", lambda target: adapter)
+        bot = Qirabot(api_key="k", task_id="t", settle_seconds=0.25)
+        got = bot._get_adapter(object())
+        assert got is adapter
+        assert adapter.settle_seconds == 0.25
+        bot.close()
+
+    def test_settle_seconds_none_keeps_adapter_default(self, monkeypatch):
+        import qirabot.client as client_mod
+
+        adapter = _SettleFakeAdapter()
+        monkeypatch.setattr(client_mod.auto, "detect", lambda target: adapter)
+        bot = Qirabot(api_key="k", task_id="t")
+        bot._get_adapter(object())
+        assert adapter._settle_override is None
+        assert adapter.settle_seconds == adapter._SETTLE_SECONDS
         bot.close()
 
 

@@ -25,8 +25,11 @@ pip install selenium             # Selenium is not an extra — bring your own d
 ```
 
 > The `airtest` extra pulls in Airtest, which pins `numpy<2.0` and
-> `opencv-contrib-python` 4.4–4.6. Installing it into an env that already has
-> `numpy>=2` may downgrade or conflict — prefer a dedicated virtualenv.
+> `opencv-contrib-python` 4.4–4.6. These have prebuilt wheels only up to
+> **Python 3.12** — on Python 3.13/3.14 pip falls back to building them from
+> source and fails without a C/C++ compiler (e.g. MSVC on Windows). **For the
+> `airtest` extra, use Python 3.10–3.12.** Installing into an env that already
+> has `numpy>=2` may also downgrade or conflict — prefer a dedicated virtualenv.
 
 The Quick Start below uses `bot.open()`, so it needs `qirabot[browser]` plus a
 one-time `playwright install chromium`. With Selenium you create the driver
@@ -61,6 +64,7 @@ Constructor options:
 | `screenshot_quality` | — | `80` | JPEG quality, 1–100 |
 | `retry` | — | `1` | Retries per action on transient failures |
 | `retry_delay` | — | `1.0` | Seconds between retries |
+| `settle_seconds` | `QIRA_SETTLE_SECONDS` | per-platform | Fixed pause after each action so the UI repaints before the next screenshot |
 
 ### Model & language
 
@@ -174,6 +178,29 @@ value is that new tab, so reassign it to keep operating on the active page:
 ```python
 page = bot.click(page, "Open the first video")  # may switch to a new tab
 ```
+
+### Settle delay
+
+After every screen-changing action each adapter pauses briefly so the UI repaints
+before the next screenshot — without it the model can capture a mid-animation frame
+and wrongly conclude the action did nothing. The defaults are tuned per platform
+(desktop `1.0`s, mobile/browser `0.6`s, Airtest `1`s; Playwright relies on its own
+auto-waiting and adds none).
+
+Override the floor globally with `settle_seconds` — useful to slow down for a laggy
+remote device, or speed up a snappy local app. `0` disables it (rely on `wait_for`
+/ `timeout=` polling instead, which is more precise):
+
+```python
+bot = Qirabot(settle_seconds=1.5)   # laggy environment: wait longer
+bot = Qirabot(settle_seconds=0.3)   # fast local app: go quicker
+bot = Qirabot(settle_seconds=0)     # disable; lean on wait_for() instead
+# or, without touching code:  export QIRA_SETTLE_SECONDS=1.5
+```
+
+This is a blunt fixed delay. For "wait until X appears" prefer the auto-wait
+`timeout=`/`wait_for()` polling shown above — it returns as soon as the condition
+holds instead of always sleeping the full interval.
 
 ### Multi-Step AI (`bot.ai()`)
 
@@ -326,15 +353,33 @@ qira_runs/2026-06-07/192335-3f9ab2c1/
     001_click.jpg
     002_type_text.jpg
     ...
-  recording.mp4        # embedded in the report if you record into report_dir
+  recording.mp4        # or recording.webm — embedded in the report if present
 ```
 
 `screenshot_annotate=True` (default) draws a red crosshair at the resolved
-click/type coordinates. To embed a screen recording, point your recorder at
-`bot.report_dir`:
+click/type coordinates. To embed a screen recording, put a file named
+`recording.mp4` or `recording.webm` into `bot.report_dir`. With an external
+recorder, point it there directly:
 
 ```python
 dev.start_recording(output=os.path.join(bot.report_dir, "recording.mp4"))
+```
+
+For a browser run, the SDK does not record for you — use Playwright's native
+recording and save into `report_dir`. Create your own context with
+`record_video_dir`, drive it through the bot, then rename the emitted file:
+
+```python
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as pw:
+    browser = pw.chromium.launch()
+    context = browser.new_context(record_video_dir=bot.report_dir)
+    page = context.new_page()
+    page.goto("https://example.com")
+    bot.ai(page, "do the thing")               # drive the recorded page
+    context.close()                            # flushes the .webm
+    os.rename(page.video.path(), os.path.join(bot.report_dir, "recording.webm"))
 ```
 
 Call `bot.report("path.html")` to also write the report to a custom location on
@@ -409,6 +454,7 @@ driver.quit()
 
 Airtest connects to the device itself (no Appium server). `G` resolves the
 current device, so `bind(G)` keeps your usual Airtest style and adds AI on top.
+The minimal form:
 
 ```python
 from airtest.core.api import *       # your usual Airtest imports
@@ -423,6 +469,79 @@ print(f"Success: {result.success}")
 touch(Template("native.png"))        # native Airtest still works side by side
 bot.close()
 ```
+
+#### Full Android example
+
+A real run usually drives a specific app, streams steps, and records the screen.
+This connects to an emulator/device over ADB, runs an AI task in Chinese, and
+saves an Airtest screen recording into `bot.report_dir` so the HTML report embeds
+it automatically:
+
+```python
+# -*- encoding=utf8 -*-
+import os
+from airtest.core.api import *
+from airtest.cli.parser import cli_setup
+
+from qirabot import Qirabot, StepResult
+
+# When launched outside `airtest run ...`, set up the device ourselves.
+# The connection string selects the device and touch backend (MAXTOUCH here).
+if not cli_setup():
+    auto_setup(
+        __file__,
+        logdir=True,
+        devices=["android://127.0.0.1:5037/127.0.0.1:5555?touch_method=MAXTOUCH&"],
+    )
+
+# Credentials — prefer setting these in the environment, not in source.
+# QIRA_BASE_URL is optional: it defaults to https://app.qirabot.com. Set it only
+# for a self-hosted or regional deployment (the URL below is one such example).
+os.environ.setdefault("QIRA_BASE_URL", "https://app.gcp.qirabot.com")
+os.environ.setdefault("QIRA_API_KEY", "qk_...your_key...")
+
+def on_step(step: StepResult) -> None:
+    label = "done" if step.finished else step.action_type
+    print(f"  step {step.step}: {label} {step.params}")
+
+APP = "com.pokercity.lobby"
+TASK = "Check that the UI controls at the top of the poker lobby work correctly"
+
+start_app(APP)
+
+# balanced_pro = stronger model; screenshot_annotate draws a crosshair at each tap.
+bot = Qirabot(model_alias="balanced_pro", screenshot_annotate=True).bind(G)
+
+# Record into the per-run dir so the report embeds it
+# (qira_runs/<date>/<run>/recording.mp4).
+video = os.path.join(bot.report_dir, "recording.mp4")
+device().start_recording(output=video, max_time=1800)
+try:
+    result = bot.ai(TASK, max_steps=25, on_step=on_step, language="en")
+    print(f" Result: {result.output}")
+    sleep(5.0)
+finally:
+    saved = device().stop_recording(output=video)
+    print(f" Recording saved: {saved}")
+    bot.close()                       # writes report.html with the video embedded
+
+stop_app(APP)
+```
+
+Notes on this example:
+
+- **`cli_setup()` guard** lets the same file run both via `airtest run ...` (IDE /
+  CI, which calls `cli_setup()` for you) and as a plain `python script.py`.
+- **`bind(G)`** binds the bot to the current device, so `bot.ai(TASK, ...)` takes
+  the instruction directly (no `target` argument). Bound calls accept
+  `max_steps`, `on_step`, `model_alias`, and `language`.
+- **`on_step`** fires after every action — use it for live logging or to push
+  progress somewhere. `step.finished` marks the terminal step.
+- **Recording** is done by Airtest's native `device().start_recording(...)`, not
+  the SDK. Aim it at `bot.report_dir` and name it `recording.mp4` (or
+  `recording.webm`) and the report picks it up — see [Reports](#reports).
+- **`result.output`** is the model's final answer; `result.success` is the
+  pass/fail verdict.
 
 Trade-offs and capability notes (e.g. `navigate` unsupported, `go_back` Android-only)
 are in [examples/airtest/](examples/airtest/). You can also pass `G`, the

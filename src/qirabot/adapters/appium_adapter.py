@@ -126,23 +126,15 @@ class AppiumAdapter(DeviceAdapter):
     # next screenshot needs no settle delay after them.
     _NO_SETTLE = frozenset({"wait", "done", "save_note", "hover"})
 
-    # Seconds to let the UI settle (transitions, animations, app launches) after
-    # a screen-changing action before the ai() loop screenshots again. Appium has
-    # no "wait until stable" primitive, so a fixed delay is the pragmatic floor —
-    # without it the next shot can catch the pre-transition frame and the model
-    # wrongly concludes the action did nothing.
+    # Mobile transitions/animations/app launches; see
+    # ``DeviceAdapter.settle_seconds`` for the rationale and override mechanism.
     _SETTLE_SECONDS = 0.6
 
-    def execute(self, action_type: str, params: dict[str, Any]) -> None:
+    def _dispatch(self, action_type: str, params: dict[str, Any]) -> None:
         if action_type in ("scroll", "scroll_at"):
             self._scroll_action(action_type, params or {})
         else:
-            super().execute(action_type, params)
-
-        if action_type not in self._NO_SETTLE:
-            import time
-
-            time.sleep(self._SETTLE_SECONDS)
+            super()._dispatch(action_type, params)
 
     def _scroll_action(self, action_type: str, params: dict[str, Any]) -> None:
         # The server sends scroll as {direction, amount} with no x/y, so the

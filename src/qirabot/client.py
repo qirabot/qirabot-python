@@ -102,6 +102,7 @@ class Qirabot:
         screenshot_annotate: bool = True,
         retry: int = 1,
         retry_delay: float = 1.0,
+        settle_seconds: float | None = None,
     ):
         api_key = api_key or os.environ.get("QIRA_API_KEY", "")
         base_url = base_url or os.environ.get("QIRA_BASE_URL", "https://app.qirabot.com")
@@ -152,15 +153,37 @@ class Qirabot:
         )
         self._retry = retry
         self._retry_delay = retry_delay
+        # Fixed delay (seconds) each adapter sleeps after a screen-changing action
+        # so the next screenshot lands on the repainted frame. ``None`` keeps each
+        # platform's built-in default (desktop 1.0 / mobile 0.6 / browser 0.6 /
+        # airtest 1); an explicit value (incl. 0 to disable) overrides all of them.
+        # Falls back to the QIRA_SETTLE_SECONDS env var when the arg is omitted.
+        if settle_seconds is None:
+            env_settle = os.environ.get("QIRA_SETTLE_SECONDS", "")
+            if env_settle:
+                try:
+                    settle_seconds = float(env_settle)
+                except ValueError:
+                    raise ValueError(
+                        f"QIRA_SETTLE_SECONDS must be a number, got {env_settle!r}"
+                    )
+        if settle_seconds is not None and settle_seconds < 0:
+            raise ValueError(f"settle_seconds must be >= 0, got {settle_seconds}")
+        self._settle_seconds = settle_seconds
         self._step_seq = 0
         atexit.register(self.close)
 
     @property
     def report_dir(self) -> str:
-        """The per-run output directory (report.html + screenshots/ + recording.mp4).
+        """The per-run output directory (report.html + screenshots/ + recording).
 
-        Point your screen recorder here so the report can embed it, e.g.
-        ``dev.start_recording(output=os.path.join(bot.report_dir, "recording.mp4"))``.
+        Drop a file named ``recording.mp4`` or ``recording.webm`` here and the
+        report embeds it automatically. Use an external screen recorder, e.g.
+        ``dev.start_recording(output=os.path.join(bot.report_dir, "recording.mp4"))``,
+        or Playwright's native recording: create your own context with
+        ``record_video_dir=bot.report_dir``, wrap its page with the bot, and on
+        ``page.context.close()`` rename the emitted ``.webm`` to
+        ``recording.webm``.
         """
         return str(self._report_dir)
 
@@ -799,6 +822,8 @@ class Qirabot:
         adapter = self._adapters.get(id(target))
         if adapter is None:
             adapter = auto.detect(target)
+            if self._settle_seconds is not None:
+                adapter._settle_override = self._settle_seconds
             self._cache_adapter(target, adapter)
         return adapter
 
@@ -1025,7 +1050,14 @@ class Qirabot:
         from qirabot import report as _report
 
         out = out or (self._report_dir / "report.html")
-        recording = self._report_dir / "recording.mp4"
+        # Embed a screen recording if one was dropped into report_dir. We accept
+        # .mp4 (external recorders) and .webm (Playwright's native recording —
+        # point its record_video_dir at report_dir); first match wins.
+        recording = ""
+        for name in ("recording.mp4", "recording.webm"):
+            if (self._report_dir / name).exists():
+                recording = name
+                break
         try:
             _report.write_html(
                 self._log,
@@ -1033,7 +1065,7 @@ class Qirabot:
                 title=self._task_name or "",
                 task_id=self._task_id or "",
                 outcomes=self._section_outcomes,
-                recording="recording.mp4" if recording.exists() else "",
+                recording=recording,
             )
             logger.info("report written: %s", out)
             return out

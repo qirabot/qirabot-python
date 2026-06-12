@@ -65,6 +65,30 @@ class DeviceInfo:
 class DeviceAdapter(ABC):
     """Abstract adapter for any automation framework."""
 
+    # Seconds to let the UI settle (animations, navigation, scroll inertia, app
+    # launches) after a screen-changing action before the next screenshot. Most
+    # frameworks fire input events and return immediately with no "wait until
+    # stable" primitive, so a fixed delay is the pragmatic floor -- without it the
+    # next shot can catch a pre-repaint / mid-animation frame and the model wrongly
+    # concludes the action did nothing. Subclasses override with a per-platform
+    # default (0.0 = no settle, e.g. Playwright, which auto-waits on its own).
+    _SETTLE_SECONDS: float = 0.0
+
+    # Actions that don't change the screen (or handle their own timing), so the
+    # next screenshot needs no settle delay after them.
+    _NO_SETTLE: frozenset[str] = frozenset()
+
+    # Per-instance override of ``_SETTLE_SECONDS``; set by the client when the user
+    # passes ``settle_seconds``. ``None`` falls back to the class default.
+    _settle_override: float | None = None
+
+    @property
+    def settle_seconds(self) -> float:
+        """Effective settle delay: user override if set, else the class default."""
+        if self._settle_override is not None:
+            return self._settle_override
+        return self._SETTLE_SECONDS
+
     @abstractmethod
     def __init__(self, target: Any) -> None:
         """Wrap a framework target (page, driver, or module)."""
@@ -140,7 +164,18 @@ class DeviceAdapter(ABC):
         """
 
     def execute(self, action_type: str, params: dict[str, Any]) -> None:
-        """Dispatch an action by type."""
+        """Dispatch an action by type, then let the UI settle.
+
+        After a screen-changing action (anything not in ``_NO_SETTLE``) we sleep
+        ``settle_seconds`` so the next screenshot lands on the repainted frame.
+        """
+        self._dispatch(action_type, params)
+        if action_type not in self._NO_SETTLE and self.settle_seconds:
+            import time
+
+            time.sleep(self.settle_seconds)
+
+    def _dispatch(self, action_type: str, params: dict[str, Any]) -> None:
         x = float(params.get("x", 0))
         y = float(params.get("y", 0))
 
