@@ -746,6 +746,24 @@ class Qirabot:
             y = info.height / 2 if y is None else y
         adapter.scroll(float(x), float(y), direction, int(distance))
 
+    def press_key(self, target: Any, key: str) -> Any:
+        """Press a key or key combo. No AI, no billing.
+
+        ``key`` is a single key (``"Enter"``, ``"Escape"``, ``"ArrowDown"``) or a
+        combo joined with ``+`` (``"ctrl+c"``, ``"alt+tab"``). Each backend maps
+        the name to its own vocabulary, so the same call works across Playwright,
+        Selenium, Appium, Airtest and pyautogui — Android/iOS take single keycodes
+        (``"Back"``/``"Home"``/``"Enter"``); ctrl-style combos are desktop/browser
+        only.
+
+        Returns the current target (same kind you passed in). On Playwright a
+        combo that opens/closes a tab (``ctrl+t``/``ctrl+w``) switches the active
+        page, so reassign it (``page = bot.press_key(page, "ctrl+t")``).
+        """
+        adapter = self._get_adapter(target)
+        adapter.execute("press_key", {"key": key})
+        return self._result(adapter)
+
     def _record_step(
         self,
         data: bytes,
@@ -1381,6 +1399,9 @@ class _BoundQirabot:
 
     def go_back(self) -> Any:
         return self._rebind(self._bot.go_back(self._target))
+
+    def press_key(self, key: str) -> Any:
+        return self._rebind(self._bot.press_key(self._target, key))
 
     def close_tab(self) -> Any:
         return self._rebind(self._bot.close_tab(self._target))

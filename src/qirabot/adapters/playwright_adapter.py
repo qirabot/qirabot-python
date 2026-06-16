@@ -148,9 +148,16 @@ class PlaywrightAdapter(DeviceAdapter):
         self._switch_if_tab_closed()
 
     def drag(self, from_x: float, from_y: float, to_x: float, to_y: float) -> None:
+        # A single move from source to target often fails to fire HTML5
+        # dragstart/dragover (native DnD and sortable libs need the pointer to
+        # travel). Nudge first to start the drag, then move in steps so the
+        # intermediate dragover events land on the target.
         self._page.mouse.move(from_x, from_y)
         self._page.mouse.down()
-        self._page.mouse.move(to_x, to_y)
+        self._page.mouse.move(
+            (from_x + to_x) / 2, (from_y + to_y) / 2, steps=5
+        )
+        self._page.mouse.move(to_x, to_y, steps=5)
         self._page.mouse.up()
 
     def scroll(self, x: float, y: float, direction: str, distance: int) -> None:

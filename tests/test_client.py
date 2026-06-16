@@ -329,6 +329,37 @@ class TestQirabotTypeTextParams:
         bot.close()
 
 
+class TestPressKey:
+    """press_key is a deterministic (no-AI) action: it routes through
+    adapter.execute (reusing tab-switch + settle) and returns the current
+    target so a tab-opening combo like ctrl+t is followed."""
+
+    def test_executes_action_and_returns_current_target(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        target, switched = object(), object()  # e.g. ctrl+t opens a new tab
+        adapter = MagicMock()
+        adapter.current_target = switched
+        bot._adapters[id(target)] = adapter
+
+        out = bot.press_key(target, "ctrl+t")
+
+        adapter.execute.assert_called_once_with("press_key", {"key": "ctrl+t"})
+        assert out is switched
+        bot.close()
+
+    def test_bound_press_key_delegates(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        target = object()
+        adapter = MagicMock()
+        adapter.current_target = target
+        bot._adapters[id(target)] = adapter
+
+        bot.bind(target).press_key("Enter")
+
+        adapter.execute.assert_called_once_with("press_key", {"key": "Enter"})
+        bot.close()
+
+
 class TestAdapterCacheSync:
     """A tab switch makes current_target a *new* page object. The cache must
     re-register it against the same adapter so passing it back doesn't spawn a

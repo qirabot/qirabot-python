@@ -123,8 +123,10 @@ class AppiumAdapter(DeviceAdapter):
         actions.perform()
 
     # Actions that don't change the screen (or handle their own timing), so the
-    # next screenshot needs no settle delay after them.
-    _NO_SETTLE = frozenset({"wait", "done", "save_note", "hover"})
+    # next screenshot needs no settle delay after them. hover is deliberately NOT
+    # here: its whole purpose is to reveal delayed UI (tooltips/submenus), so it
+    # needs the settle more than most actions, not less.
+    _NO_SETTLE = frozenset({"wait", "done", "save_note"})
 
     # Mobile transitions/animations/app launches; see
     # ``DeviceAdapter.settle_seconds`` for the rationale and override mechanism.

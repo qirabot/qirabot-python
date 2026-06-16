@@ -13,7 +13,7 @@ from __future__ import annotations
 import io
 from typing import Any
 
-from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
+from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig, split_combo
 
 
 class AirtestAdapter(DeviceAdapter):
@@ -45,8 +45,10 @@ class AirtestAdapter(DeviceAdapter):
     }
 
     # Actions that don't change the screen (or handle their own timing), so the
-    # next screenshot needs no settle delay after them.
-    _NO_SETTLE = frozenset({"wait", "done", "save_note", "hover"})
+    # next screenshot needs no settle delay after them. hover is deliberately NOT
+    # here: its whole purpose is to reveal delayed UI (tooltips/submenus), so it
+    # needs the settle more than most actions, not less.
+    _NO_SETTLE = frozenset({"wait", "done", "save_note"})
 
     # Airtest's device methods don't carry the api-layer ``delay_after_operation()``,
     # so a fixed floor is needed (mirrors the Appium adapter). See
@@ -182,6 +184,16 @@ class AirtestAdapter(DeviceAdapter):
         else:
             self.click(x, y)
 
+    def hover(self, x: float, y: float) -> None:
+        # Hover is a cursor concept: only Windows has one here (the server never
+        # offers hover to touch platforms, so Android/iOS keep the base no-op).
+        # Use mouse_move (move only the cursor) — NOT device.move, which
+        # relocates the window. hover settles like other actions (it is NOT in
+        # _NO_SETTLE), giving hover-triggered UI (submenus, tooltips) time to
+        # render before the next screenshot.
+        if self._platform == "windows":
+            self._device.mouse_move((int(x), int(y)))
+
     def type_text(self, x: float, y: float, text: str) -> None:
         self._device.touch((int(x), int(y)))
         # enter=False: Android/iOS text() auto-appends Enter by default; the
@@ -204,8 +216,29 @@ class AirtestAdapter(DeviceAdapter):
         else:
             super().clear_text(x, y)
 
+    # Windows keyevent() forwards to pywinauto keyboard.SendKeys() (verified in
+    # airtest/core/win/win.py), whose syntax is: ^ = ctrl, % = alt, + = shift,
+    # and named keys in braces ({ENTER}, {TAB}, ...). A bare "ENTER" there would
+    # type the letters E-N-T-E-R, so single special keys must be braced too.
+    _WIN_MODS = {"ctrl": "^", "control": "^", "alt": "%", "option": "%", "shift": "+"}
+    _WIN_KEYS = {
+        "enter": "{ENTER}", "return": "{ENTER}", "tab": "{TAB}", "escape": "{ESC}",
+        "esc": "{ESC}", "backspace": "{BACKSPACE}", "delete": "{DELETE}", "del": "{DELETE}",
+        "space": "{SPACE}", "arrowup": "{UP}", "arrowdown": "{DOWN}",
+        "arrowleft": "{LEFT}", "arrowright": "{RIGHT}", "pageup": "{PGUP}",
+        "pagedown": "{PGDN}", "home": "{HOME}", "end": "{END}",
+    }
+
     def press_key(self, key: str) -> None:
-        name = self._KEY_MAP.get(key.lower(), key)
+        mods, base = split_combo(key)
+        # Windows speaks pywinauto SendKeys syntax for BOTH single keys and
+        # combos. Android/iOS use adb-style keycode names and have no ctrl-style
+        # combos (the server only sends single keycodes there).
+        if self._platform == "windows":
+            prefix = "".join(self._WIN_MODS.get(m.lower(), "") for m in mods)
+            self._device.keyevent(prefix + self._WIN_KEYS.get(base.lower(), base))
+            return
+        name = self._KEY_MAP.get(base.lower(), base)
         self._device.keyevent(name)
 
     def drag(self, from_x: float, from_y: float, to_x: float, to_y: float) -> None:

@@ -5,7 +5,18 @@ from __future__ import annotations
 import platform
 from typing import Any
 
-from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
+from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig, split_combo
+
+# Wire key names -> pyautogui key names. pyautogui's keys are lowercase and use
+# short forms (esc, down, pageup), so the server's CamelCase/Arrow* names must be
+# translated or press()/hotkey() silently no-op on an unknown key name.
+_PYAUTOGUI_KEYS = {
+    "enter": "enter", "return": "enter", "escape": "esc", "esc": "esc",
+    "backspace": "backspace", "delete": "delete", "del": "delete",
+    "tab": "tab", "space": "space",
+    "arrowup": "up", "arrowdown": "down", "arrowleft": "left", "arrowright": "right",
+    "pageup": "pageup", "pagedown": "pagedown", "home": "home", "end": "end",
+}
 
 
 class PyAutoGuiAdapter(DeviceAdapter):
@@ -112,8 +123,27 @@ class PyAutoGuiAdapter(DeviceAdapter):
         self._pag.hotkey(self._primary_modifier(), "a")
         self._pag.press("backspace")
 
+    def _norm_key(self, k: str) -> str:
+        kl = k.lower()
+        if kl in ("ctrl", "control"):
+            return "ctrl"
+        if kl in ("alt", "option"):
+            return "alt"
+        if kl == "shift":
+            return "shift"
+        if kl in ("cmd", "command", "meta", "win", "super"):
+            return "command" if platform.system() == "Darwin" else "win"
+        return _PYAUTOGUI_KEYS.get(kl, kl)
+
     def press_key(self, key: str) -> None:
-        self._pag.press(key)
+        # "ctrl+c" must go through hotkey() (press() takes a single key and
+        # silently no-ops on a combo); a lone key goes through press().
+        mods, base = split_combo(key)
+        keys = [self._norm_key(m) for m in mods] + [self._norm_key(base)]
+        if len(keys) > 1:
+            self._pag.hotkey(*keys)
+        else:
+            self._pag.press(keys[0])
 
     def drag(self, from_x: float, from_y: float, to_x: float, to_y: float) -> None:
         lfx, lfy = self._to_logical(from_x, from_y)
@@ -141,8 +171,10 @@ class PyAutoGuiAdapter(DeviceAdapter):
             self._pag.hscroll(clicks, x=lx, y=ly)
 
     # Actions that don't change the screen (or handle their own timing), so the
-    # next screenshot needs no settle delay after them.
-    _NO_SETTLE = frozenset({"wait", "done", "save_note", "hover"})
+    # next screenshot needs no settle delay after them. hover is deliberately NOT
+    # here: its whole purpose is to reveal delayed UI (tooltips/submenus), so it
+    # needs the settle more than most actions, not less.
+    _NO_SETTLE = frozenset({"wait", "done", "save_note"})
 
     # Desktop UI (scroll inertia, window transitions) needs a generous floor; see
     # ``DeviceAdapter.settle_seconds`` for the rationale and override mechanism.

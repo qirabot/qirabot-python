@@ -6,7 +6,7 @@ import base64
 import io
 from typing import Any
 
-from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
+from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig, split_combo
 
 
 class SeleniumAdapter(DeviceAdapter):
@@ -86,7 +86,37 @@ class SeleniumAdapter(DeviceAdapter):
 
     def press_key(self, key: str) -> None:
         from selenium.webdriver.common.action_chains import ActionChains
-        ActionChains(self._driver).send_keys(key).perform()
+        from selenium.webdriver.common.keys import Keys
+
+        # send_keys() treats its argument as literal characters, so "ctrl+c" or
+        # "Enter" would be typed verbatim. Map modifiers to held keys and the
+        # final key to its Keys.* code (plain characters pass through unchanged).
+        modifiers = {
+            "ctrl": Keys.CONTROL, "control": Keys.CONTROL, "alt": Keys.ALT,
+            "option": Keys.ALT, "shift": Keys.SHIFT, "cmd": Keys.META,
+            "command": Keys.META, "meta": Keys.META, "win": Keys.META,
+        }
+        special = {
+            "enter": Keys.ENTER, "return": Keys.ENTER, "tab": Keys.TAB,
+            "escape": Keys.ESCAPE, "esc": Keys.ESCAPE, "backspace": Keys.BACK_SPACE,
+            "delete": Keys.DELETE, "del": Keys.DELETE, "space": Keys.SPACE,
+            "arrowup": Keys.ARROW_UP, "arrowdown": Keys.ARROW_DOWN,
+            "arrowleft": Keys.ARROW_LEFT, "arrowright": Keys.ARROW_RIGHT,
+            "pageup": Keys.PAGE_UP, "pagedown": Keys.PAGE_DOWN,
+            "home": Keys.HOME, "end": Keys.END,
+        }
+        # NOTE: browser-level shortcuts like ctrl+w / ctrl+t generally do not work
+        # through WebDriver's synthetic key events; only page-level combos do.
+        mods, base = split_combo(key)
+        held = [modifiers[m.lower()] for m in mods if m.lower() in modifiers]
+        base_key = special.get(base.lower(), base)
+        actions = ActionChains(self._driver)
+        for m in held:
+            actions.key_down(m)
+        actions.send_keys(base_key)
+        for m in reversed(held):
+            actions.key_up(m)
+        actions.perform()
 
     def drag(self, from_x: float, from_y: float, to_x: float, to_y: float) -> None:
         ab = self._pointer()
@@ -113,8 +143,10 @@ class SeleniumAdapter(DeviceAdapter):
             self._driver.execute_script(f"window.scrollBy({-delta}, 0)")
 
     # Actions that don't change the screen (or handle their own timing), so the
-    # next screenshot needs no settle delay after them.
-    _NO_SETTLE = frozenset({"wait", "done", "save_note", "hover"})
+    # next screenshot needs no settle delay after them. hover is deliberately NOT
+    # here: its whole purpose is to reveal delayed UI (tooltips/submenus), so it
+    # needs the settle more than most actions, not less.
+    _NO_SETTLE = frozenset({"wait", "done", "save_note"})
 
     # Page navigation/AJAX/DOM updates/smooth-scroll; Selenium's coordinate-level
     # actions don't wait for the effects they trigger (implicit waits only cover

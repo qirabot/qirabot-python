@@ -303,6 +303,30 @@ class TestPyAutoGuiScaling:
         a.execute("scroll", {"direction": "down", "amount": 500})
         a._pag.scroll.assert_called_once_with(-15, x=720, y=450)
 
+    def test_press_key_single_special_is_normalized(self):
+        # "Enter"/"ArrowDown" aren't pyautogui key names; press() would no-op.
+        a = self._adapter(screenshot_w=1440, logical_w=1440)
+        a.press_key("Enter")
+        a._pag.press.assert_called_once_with("enter")
+        a._pag.hotkey.assert_not_called()
+
+    def test_press_key_arrow_normalized(self):
+        a = self._adapter(screenshot_w=1440, logical_w=1440)
+        a.press_key("ArrowDown")
+        a._pag.press.assert_called_once_with("down")
+
+    def test_press_key_combo_uses_hotkey(self):
+        # press() can't do combos; "ctrl+c" must go through hotkey().
+        a = self._adapter(screenshot_w=1440, logical_w=1440)
+        a.press_key("ctrl+c")
+        a._pag.hotkey.assert_called_once_with("ctrl", "c")
+        a._pag.press.assert_not_called()
+
+    def test_press_key_alt_tab_combo(self):
+        a = self._adapter(screenshot_w=1440, logical_w=1440)
+        a.press_key("alt+tab")
+        a._pag.hotkey.assert_called_once_with("alt", "tab")
+
     def test_screen_changing_action_settles(self, monkeypatch):
         import time
 
@@ -318,8 +342,19 @@ class TestPyAutoGuiScaling:
         sleeps: list[float] = []
         monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
         a = self._adapter(screenshot_w=1440, logical_w=1440)
-        a.execute("hover", {"x": 10, "y": 20})
+        a.execute("save_note", {"content": "x"})
         assert sleeps == []
+
+    def test_hover_settles(self, monkeypatch):
+        # hover reveals delayed UI (tooltip/submenu), so it must settle before the
+        # next screenshot — it is NOT a _NO_SETTLE action.
+        import time
+
+        sleeps: list[float] = []
+        monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+        a = self._adapter(screenshot_w=1440, logical_w=1440)
+        a.execute("hover", {"x": 10, "y": 20})
+        assert sleeps == [a._SETTLE_SECONDS]
 
 
 class TestSeleniumAdapterSettle:
@@ -350,6 +385,101 @@ class TestSeleniumAdapterSettle:
         a = self._adapter()
         a.execute("done", {"success": True})
         assert sleeps == []
+
+
+class TestSeleniumPressKey:
+    """send_keys() treats its argument as literal text, so combos and special
+    keys must be mapped to Keys.* and held modifiers via ActionChains."""
+
+    def _adapter(self):
+        from qirabot.adapters.selenium_adapter import SeleniumAdapter
+
+        return SeleniumAdapter(MagicMock())
+
+    def _patch_action_chains(self, monkeypatch):
+        import selenium.webdriver.common.action_chains as acm
+
+        fake = MagicMock()
+        monkeypatch.setattr(acm, "ActionChains", fake)
+        return fake
+
+    def test_combo_holds_modifier(self, monkeypatch):
+        from selenium.webdriver.common.keys import Keys
+
+        fake = self._patch_action_chains(monkeypatch)
+        self._adapter().press_key("ctrl+a")
+        inst = fake.return_value
+        inst.key_down.assert_called_once_with(Keys.CONTROL)
+        inst.send_keys.assert_called_once_with("a")
+        inst.key_up.assert_called_once_with(Keys.CONTROL)
+        inst.perform.assert_called_once()
+
+    def test_special_key_maps_to_keys_enum(self, monkeypatch):
+        from selenium.webdriver.common.keys import Keys
+
+        fake = self._patch_action_chains(monkeypatch)
+        self._adapter().press_key("Enter")
+        inst = fake.return_value
+        inst.key_down.assert_not_called()
+        inst.send_keys.assert_called_once_with(Keys.ENTER)
+        inst.perform.assert_called_once()
+
+
+class TestAirtestPressKey:
+    """Windows speaks pywinauto SendKeys syntax (braces + ^%+ modifiers) for both
+    single keys and combos; Android/iOS use adb keycode names. Verifies the
+    string-building per platform, not pywinauto/adb themselves."""
+
+    def _adapter(self, platform: str):
+        from qirabot.adapters.airtest_adapter import AirtestAdapter
+
+        dev = MagicMock()  # has snapshot/get_current_resolution -> concrete-device path
+        dev.platform = platform
+        return AirtestAdapter(dev), dev
+
+    def test_windows_combo_to_pywinauto(self):
+        a, dev = self._adapter("windows")
+        a.press_key("ctrl+c")
+        dev.keyevent.assert_called_once_with("^c")
+
+    def test_windows_alt_tab(self):
+        a, dev = self._adapter("windows")
+        a.press_key("alt+tab")
+        dev.keyevent.assert_called_once_with("%{TAB}")
+
+    def test_windows_single_special_is_braced(self):
+        # Bare "ENTER" would type the letters via SendKeys; the key needs braces.
+        a, dev = self._adapter("windows")
+        a.press_key("Enter")
+        dev.keyevent.assert_called_once_with("{ENTER}")
+
+    def test_android_single_key_is_adb_keycode(self):
+        a, dev = self._adapter("android")
+        a.press_key("Enter")
+        dev.keyevent.assert_called_once_with("ENTER")
+
+
+class TestAirtestHover:
+    """Hover is a cursor concept: Windows moves the cursor (mouse_move, NOT the
+    window-moving device.move); touch platforms keep the base no-op."""
+
+    def _adapter(self, platform: str):
+        from qirabot.adapters.airtest_adapter import AirtestAdapter
+
+        dev = MagicMock()  # has snapshot/get_current_resolution -> concrete-device path
+        dev.platform = platform
+        return AirtestAdapter(dev), dev
+
+    def test_windows_moves_cursor(self):
+        a, dev = self._adapter("windows")
+        a.hover(10.6, 20.4)
+        dev.mouse_move.assert_called_once_with((10, 20))
+        dev.move.assert_not_called()  # device.move relocates the window, not the cursor
+
+    def test_android_is_noop(self):
+        a, dev = self._adapter("android")
+        a.hover(10, 20)
+        dev.mouse_move.assert_not_called()
 
 
 class TestPlaywrightAdapterListener:
@@ -584,8 +714,20 @@ class TestAirtestAdapter:
         sleeps: list[float] = []
         monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
         a = self._adapter(_fake_device())
-        a.execute("hover", {"x": 1, "y": 2})
+        a.execute("save_note", {"content": "x"})
         assert sleeps == []
+
+    def test_hover_settles(self, fake_airtest, monkeypatch):
+        # hover reveals delayed UI (tooltip/submenu), so it must settle before the
+        # next screenshot — it is NOT a _NO_SETTLE action. (Settle is independent
+        # of platform; the cursor move itself only happens on Windows.)
+        import time
+
+        sleeps: list[float] = []
+        monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+        a = self._adapter(_fake_device())
+        a.execute("hover", {"x": 1, "y": 2})
+        assert sleeps == [a._SETTLE_SECONDS]
 
 
 class TestBind:

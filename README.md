@@ -246,11 +246,11 @@ path = bot.screenshot(page)
 print(f"saved to {path}")
 ```
 
-### Navigation & Scrolling (No AI)
+### Navigation, Scrolling & Keys (No AI)
 
 Direct, non-billed actions that don't need AI element location. `go_back`,
-`navigate`, and `close_tab` return the current page/target (may differ after the
-navigation); `scroll` returns `None`.
+`navigate`, `close_tab`, and `press_key` return the current page/target (may
+differ after the action); `scroll` returns `None`.
 
 ```python
 bot.navigate(page, "example.com")   # scheme optional; "https://" prepended
@@ -258,7 +258,24 @@ bot.go_back(page)                   # back to the previous page (smart, see belo
 page = bot.close_tab(page)          # close current tab, return to previous tab
 bot.scroll(page, "down", 3)         # scroll at viewport center
 bot.scroll(page, "up", distance=5, x=640, y=400)  # scroll at a point
+bot.press_key(page, "Enter")        # a single key
+bot.press_key(page, "ctrl+c")       # a combo (join with "+")
+page = bot.press_key(page, "ctrl+t")  # ctrl+t/ctrl+w switch the active tab — reassign
 ```
+
+**`press_key` — what you can pass.** One name works on every backend; each maps
+it to its own vocabulary.
+
+| Category | Examples | Notes |
+| --- | --- | --- |
+| Single keys | `Enter` `Escape` `Tab` `Backspace` `Delete` `Space` | |
+| Arrows / paging | `ArrowUp/Down/Left/Right` `PageUp` `PageDown` `Home` `End` | |
+| Combos (desktop/browser) | `ctrl+c` `ctrl+a` `alt+tab` `ctrl+shift+t` | modifiers `ctrl` `alt` `shift` `cmd` (= meta/win); join with `+` |
+| Mobile (Android/iOS) | `Back` `Home` `Menu` `Enter` | single keys only, no combos |
+
+So `bot.press_key(t, "Enter")` becomes an adb keycode on Android and a `{ENTER}`
+SendKeys on Airtest Windows automatically; `ctrl+t`/`ctrl+w` switch the active
+tab on Playwright (reassign the returned page).
 
 **Smart `go_back` (Playwright):** if the current page has back history it goes
 back in place; if it doesn't — e.g. a click opened a link in a **new tab**,
@@ -283,7 +300,7 @@ Platform support (all actions):
 | `click`        |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
 | `double_click` |     ✅     |    ✅    |      ✅ ᵃ       |         ✅          |  ✅ ᵃ   |
 | `right_click`  |     ✅     |    ✅    |    = tap ᵇ      |         ✅          | Windows / = tap ᵇ |
-| `hover`        |     ✅     |    ✅    |    no-op ᶜ      |         ✅          | no-op ᶜ |
+| `hover`        |     ✅     |    ✅    |    no-op ᶜ      |         ✅          | Windows / no-op ᶜ |
 | `type_text`    |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
 | `clear_text`   |     ✅     |    ✅    |       ✅        |         ✅          | Android ᵈ |
 | `press_key`    |     ✅     |    ✅    |       ✅        |         ✅          |  ✅ ᵉ   |
@@ -300,9 +317,9 @@ shows how each underlying action maps per platform.
 
 - ᵃ Appium/Airtest emulate `double_click` as two quick taps.
 - ᵇ Mobile has no right-click: Appium taps; Airtest right-clicks on Windows only, taps elsewhere.
-- ᶜ Touch targets have no hover: Appium/Airtest treat `hover` as a no-op.
+- ᶜ Touch targets have no hover: Appium and Airtest Android/iOS treat `hover` as a no-op; Airtest moves the cursor (no click) on Windows.
 - ᵈ Airtest has no element model; `clear_text` is best-effort on Android (caret-to-end + repeated delete).
-- ᵉ Airtest key names are Android-first (adb); Windows (pywinauto) / iOS use different names.
+- ᵉ Airtest maps common key names per platform automatically — Android/iOS to adb keycodes, Windows to pywinauto `SendKeys` (`{ENTER}`, `^c`); names outside the map pass through unchanged.
 
 `navigate`/`go_back` raise `NotImplementedError` where unsupported (pyautogui has
 no browser-style navigation; Airtest has no URL concept). `close_tab` is

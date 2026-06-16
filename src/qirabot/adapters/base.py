@@ -7,6 +7,17 @@ from dataclasses import dataclass
 from typing import Any
 
 
+def split_combo(key: str) -> tuple[list[str], str]:
+    """Split a key combo like ``"ctrl+shift+a"`` into modifiers and the final key.
+
+    Returns ``(["ctrl", "shift"], "a")``; a single key yields ``([], "Enter")``.
+    The ``+`` join is the wire convention the server uses for press_key combos.
+    Each adapter maps the returned names to its own framework vocabulary.
+    """
+    parts = [p.strip() for p in key.split("+")]
+    return parts[:-1], parts[-1]
+
+
 @dataclass
 class ScreenshotConfig:
     """Screenshot format and quality settings."""
