@@ -68,8 +68,16 @@ Constructor options:
 
 ### Model & language
 
-`model_alias` selects which model backs every operation. The built-in aliases are
-`fast`, `balanced` (the default), and `high_quality` — trading cost for quality.
+`model_alias` selects which model backs every operation. The built-in aliases
+trade cost for quality:
+
+| Alias | Trade-off |
+|---|---|
+| `fast` | Cheapest, lowest latency |
+| `balanced` | The default — good cost/quality balance |
+| `balanced_pro` | Stronger than `balanced` |
+| `high_quality` | Best quality, highest cost |
+
 Check your dashboard for the live list your account can use, then pass the
 `name` as `model_alias`; leave it empty for the default:
 
