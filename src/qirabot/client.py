@@ -19,6 +19,7 @@ from qirabot.adapters import auto
 from qirabot.adapters.base import DeviceAdapter, ScreenshotConfig
 from qirabot.exceptions import (
     ActionError,
+    AuthenticationError,
     QirabotError,
     QirabotTimeoutError,
     _is_retryable,
@@ -105,6 +106,15 @@ class Qirabot:
         settle_seconds: float | None = None,
     ):
         api_key = api_key or os.environ.get("QIRA_API_KEY", "")
+        # Fail fast on a missing key: it's a local config error, so surface an
+        # actionable message here instead of letting an empty key reach the
+        # server and bounce back as an opaque 401 after a wasted round-trip.
+        if not api_key:
+            raise AuthenticationError(
+                "No API key provided. Set the QIRA_API_KEY environment variable "
+                "or pass api_key=... to Qirabot().",
+                code="auth.api_key_missing",
+            )
         base_url = base_url or os.environ.get("QIRA_BASE_URL", "https://app.qirabot.com")
         self._transport = Transport(base_url=base_url, api_key=api_key, timeout=timeout, verify_ssl=verify_ssl)
         self._adapters: dict[int, DeviceAdapter] = {}

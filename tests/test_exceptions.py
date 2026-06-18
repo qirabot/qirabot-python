@@ -50,6 +50,12 @@ class TestRaiseForError:
         with pytest.raises(AuthenticationError, match="invalid key"):
             raise_for_error(401, {"error": {"code": "auth.api_key_missing", "message": "invalid key"}})
 
+    def test_token_missing_code_maps_to_auth(self):
+        # The server returns auth.token_missing for an absent key; it must map to
+        # AuthenticationError by code, not just fall through to the 401 status.
+        with pytest.raises(AuthenticationError):
+            raise_for_error(401, {"error": {"code": "auth.token_missing", "message": "Authentication required"}})
+
     def test_string_error_format(self):
         with pytest.raises(QirabotError, match="something went wrong"):
             raise_for_error(500, {"error": "something went wrong"})

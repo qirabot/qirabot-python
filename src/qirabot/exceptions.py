@@ -58,6 +58,7 @@ class MissingDependencyError(QirabotError, ImportError):
 
 
 _ERROR_CODE_MAP: dict[str, type[QirabotError]] = {
+    "auth.token_missing": AuthenticationError,
     "auth.api_key_missing": AuthenticationError,
     "auth.api_key_invalid": AuthenticationError,
     "finance.insufficient_balance": InsufficientBalanceError,

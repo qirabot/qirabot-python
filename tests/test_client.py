@@ -6,6 +6,7 @@ import pytest
 
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
 from qirabot.client import Qirabot, StepResult, RunResult, _annotate_screenshot
+from qirabot.exceptions import AuthenticationError
 
 
 class _SettleFakeAdapter(DeviceAdapter):
@@ -187,6 +188,36 @@ class TestQirabotInit:
         assert adapter._settle_override is None
         assert adapter.settle_seconds == adapter._SETTLE_SECONDS
         bot.close()
+
+
+class TestQirabotMissingApiKey:
+    """A missing API key is a local config error, so the constructor must fail
+    fast with an actionable message — before building a transport or making the
+    /tasks/create round-trip that would otherwise bounce back as an opaque 401."""
+
+    def test_missing_key_fails_fast_before_network(self, monkeypatch):
+        import qirabot.client as client_mod
+
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        built = []
+        monkeypatch.setattr(client_mod, "Transport", lambda **kw: built.append(kw))
+
+        with pytest.raises(AuthenticationError, match="No API key provided"):
+            client_mod.Qirabot()
+
+        # No transport constructed → no network round-trip to discover the error.
+        assert built == []
+
+    def test_missing_key_has_actionable_code(self, monkeypatch):
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        with pytest.raises(AuthenticationError) as exc_info:
+            Qirabot()
+        assert exc_info.value.code == "auth.api_key_missing"
+
+    def test_empty_string_key_rejected(self, monkeypatch):
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        with pytest.raises(AuthenticationError):
+            Qirabot(api_key="")
 
 
 class TestQirabotContextManager:
