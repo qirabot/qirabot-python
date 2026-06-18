@@ -85,7 +85,7 @@ def _summarize_params(params: dict[str, Any]) -> str:
     if x is not None and y is not None:
         parts.append(f"({int(x)}, {int(y)})")
     sx, sy, ex, ey = (params.get(k) for k in _COORD_KEYS[2:])
-    if None not in (sx, sy, ex, ey):
+    if sx is not None and sy is not None and ex is not None and ey is not None:
         parts.append(f"({int(sx)},{int(sy)})→({int(ex)},{int(ey)})")
     rendered.update(_COORD_KEYS)
 
