@@ -222,7 +222,7 @@ class DeviceAdapter(ABC):
             # `amount` first so the model's requested distance isn't silently
             # dropped to the default of 3.
             raw_amount = params.get("amount")
-            if raw_amount not in (None, ""):
+            if raw_amount is not None and raw_amount != "":
                 distance = max(1, round(int(raw_amount) / 100))
             else:
                 distance = int(params.get("distance", 3))

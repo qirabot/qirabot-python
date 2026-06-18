@@ -164,7 +164,9 @@ class AirtestAdapter(DeviceAdapter):
 
         # ROTATE_270 is a 90deg clockwise turn (verified against airtest's
         # up_2_ori for orientation 1); orientation 3 is the mirror case.
-        return img.transpose(Image.ROTATE_270 if ori == 1 else Image.ROTATE_90)
+        return img.transpose(
+            Image.Transpose.ROTATE_270 if ori == 1 else Image.Transpose.ROTATE_90
+        )
 
     def click(self, x: float, y: float) -> None:
         self._device.touch((int(x), int(y)))

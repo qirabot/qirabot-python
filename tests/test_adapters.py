@@ -1,5 +1,6 @@
 """Tests for adapter base execute() dispatch logic."""
 
+import importlib.util
 from unittest.mock import MagicMock
 
 import pytest
@@ -404,6 +405,14 @@ class TestSeleniumAdapterSettle:
 class TestSeleniumPressKey:
     """send_keys() treats its argument as literal text, so combos and special
     keys must be mapped to Keys.* and held modifiers via ActionChains."""
+
+    # Unlike the other selenium tests (which drive a MagicMock driver), these
+    # reach into the real selenium package for Keys/ActionChains. selenium is an
+    # optional backend not installed in CI, so skip rather than error there.
+    pytestmark = pytest.mark.skipif(
+        importlib.util.find_spec("selenium") is None,
+        reason="selenium is an optional backend; not installed",
+    )
 
     def _adapter(self):
         from qirabot.adapters.selenium_adapter import SeleniumAdapter
