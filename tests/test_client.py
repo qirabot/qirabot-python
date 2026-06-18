@@ -90,6 +90,51 @@ class TestRunResult:
         assert r.steps == []
 
 
+class TestAiLoopFinish:
+    """The done action's success flag drives RunResult.success: a clean run that
+    concludes the goal is unreachable (success:false) is a failure, not a pass.
+    The top-level success only means the step committed, so it stays true here."""
+
+    def _bot_returning(self, done_result):
+        bot = Qirabot(api_key="k", task_id="t")
+        bot._get_adapter = lambda target: _SettleFakeAdapter()
+        bot._record_step = lambda *a, **k: None
+        bot._post_act_retrying = lambda **kw: done_result
+        return bot
+
+    def test_done_success_true_yields_success(self):
+        bot = self._bot_returning({
+            "success": True, "finished": True, "actionType": "done",
+            "params": {"result": "all good", "success": True},
+            "output": "all good",
+        })
+        result = bot.ai(object(), "do thing", max_steps=3)
+        assert result.success is True
+        assert result.output == "all good"
+        bot.close()
+
+    def test_done_success_false_yields_failure(self):
+        bot = self._bot_returning({
+            "success": True, "finished": True, "actionType": "done",
+            "params": {"result": "blocked: login wall", "success": False},
+            "output": "blocked: login wall",
+        })
+        result = bot.ai(object(), "do thing", max_steps=3)
+        assert result.success is False
+        assert result.output == "blocked: login wall"
+        bot.close()
+
+    def test_done_missing_flag_defaults_success(self):
+        bot = self._bot_returning({
+            "success": True, "finished": True, "actionType": "done",
+            "params": {"result": "legacy"},
+            "output": "legacy",
+        })
+        result = bot.ai(object(), "do thing", max_steps=3)
+        assert result.success is True
+        bot.close()
+
+
 class TestQirabotInit:
     # task_id="t" short-circuits the /tasks/create HTTP call so these unit
     # tests don't need a live server. Each test below exercises a non-task

@@ -194,7 +194,12 @@ class Qirabot:
         ``record_video_dir=bot.report_dir``, wrap its page with the bot, and on
         ``page.context.close()`` rename the emitted ``.webm`` to
         ``recording.webm``.
+
+        Creating the directory on access keeps the documented recording patterns
+        working even when nothing has been written to it yet (e.g. a run that
+        crashes on its first action, before any screenshot).
         """
+        self._report_dir.mkdir(parents=True, exist_ok=True)
         return str(self._report_dir)
 
     @property
@@ -686,13 +691,21 @@ class Qirabot:
 
             if finished:
                 output = result.get("output", "")
+                # The done action carries the model's own success flag: false
+                # means it concluded the goal is unreachable (login wall,
+                # captcha, the app froze). It rides in the action params; the
+                # top-level `success` checked above only means "the step
+                # committed". The server records this same outcome as the task's
+                # terminal state (mirroring max-steps). Default true for older
+                # servers that omit the flag.
+                goal_ok = bool(action_params.get("success", True))
                 # Log a short completion marker, not the full output: the result
                 # text is the caller's to surface via result.output, and dumping
                 # it here duplicates that for any caller that prints the result
                 # (and is out of step with the short per-step progress lines).
                 logger.info("completed in %d step(s)", len(steps))
                 return RunResult(
-                    success=True,
+                    success=goal_ok,
                     output=output,
                     steps=steps,
                 )
