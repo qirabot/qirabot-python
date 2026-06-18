@@ -47,6 +47,9 @@ class FakeAdapter(DeviceAdapter):
     def drag(self, from_x, from_y, to_x, to_y):
         self.calls.append(("drag", (from_x, from_y, to_x, to_y)))
 
+    def long_press(self, x, y, duration=2.0):
+        self.calls.append(("long_press", (x, y, duration)))
+
     def device_info(self):
         return DeviceInfo(platform="test", width=100, height=100)
 
@@ -66,6 +69,17 @@ class TestExecuteDispatch:
         a = FakeAdapter()
         a.execute("right_click", {"x": 10, "y": 20})
         assert a.calls == [("right_click", (10.0, 20.0))]
+
+    def test_long_press_default_duration(self):
+        a = FakeAdapter()
+        a.execute("long_press", {"x": 10, "y": 20})
+        # No duration on the wire -> 2000ms default -> 2.0s.
+        assert a.calls == [("long_press", (10.0, 20.0, 2.0))]
+
+    def test_long_press_converts_ms_to_seconds(self):
+        a = FakeAdapter()
+        a.execute("long_press", {"x": 10, "y": 20, "duration": 600})
+        assert a.calls == [("long_press", (10.0, 20.0, 0.6))]
 
     def test_hover(self):
         a = FakeAdapter()

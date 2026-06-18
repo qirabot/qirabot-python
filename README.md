@@ -306,6 +306,7 @@ Platform support (all actions):
 | `press_key`    |     ✅     |    ✅    |       ✅        |         ✅          |  ✅ ᵉ   |
 | `scroll`       |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
 | `drag`         |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
+| `long_press`   |     ❌ ᶠ    |    ❌ ᶠ   |       ✅        |         ❌ ᶠ         |   ✅    |
 | `navigate`     |     ✅     |    ✅    |       ✅        |         ❌          |   ❌    |
 | `go_back`      |     ✅     |    ✅    |       ✅        |         ❌          | Android |
 | `close_tab`    |     ✅     |    ❌    |       ❌        |         ❌          |   ❌    |
@@ -320,6 +321,7 @@ shows how each underlying action maps per platform.
 - ᶜ Touch targets have no hover: Appium and Airtest Android/iOS treat `hover` as a no-op; Airtest moves the cursor (no click) on Windows.
 - ᵈ Airtest has no element model; `clear_text` is best-effort on Android (caret-to-end + repeated delete).
 - ᵉ Airtest maps common key names per platform automatically — Android/iOS to adb keycodes, Windows to pywinauto `SendKeys` (`{ENTER}`, `^c`); names outside the map pass through unchanged.
+- ᶠ `long_press` is a touch-only gesture (Appium/Airtest mobile); the server only offers it on Android/iOS. Browser/desktop adapters raise `NotImplementedError`.
 
 `navigate`/`go_back` raise `NotImplementedError` where unsupported (pyautogui has
 no browser-style navigation; Airtest has no URL concept). `close_tab` is

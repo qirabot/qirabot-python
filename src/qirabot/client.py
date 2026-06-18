@@ -438,6 +438,46 @@ class Qirabot:
         )
         return self._result(adapter)
 
+    def long_press(
+        self,
+        target: Any,
+        locate: str,
+        *,
+        duration: float = 2.0,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> Any:
+        """AI-powered long press: locate element and press-and-hold it.
+
+        Touch-only gesture (Android/iOS) for context menus, edit/select mode,
+        drag-to-reorder priming, etc. ``duration`` is the hold time in seconds
+        (default 2.0).
+
+        When ``timeout > 0``, auto-waits until the element looks present before
+        acting (see :meth:`click` for the ``timeout``/``interval``/``wait``
+        semantics). With the default ``timeout=0`` it acts immediately.
+
+        Returns the current target (same kind you passed in).
+        """
+        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        adapter = self._get_adapter(target)
+        params: dict[str, Any] = {"locate": locate}
+        if duration != 2.0:
+            # Wire convention is milliseconds (matches the server schema/wait).
+            params["duration"] = int(duration * 1000)
+        self._ai_action(
+            target,
+            action={"type": "long_press", "params": params},
+            model_alias=model_alias,
+            language=language,
+            retry=retry,
+        )
+        return self._result(adapter)
+
     def extract(
         self,
         target: Any,
@@ -1329,6 +1369,32 @@ class _BoundQirabot:
             self._bot.double_click(
                 self._target,
                 locate,
+                timeout=timeout,
+                interval=interval,
+                wait=wait,
+                retry=retry,
+                model_alias=model_alias,
+                language=language,
+            )
+        )
+
+    def long_press(
+        self,
+        locate: str,
+        *,
+        duration: float = 2.0,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> Any:
+        return self._rebind(
+            self._bot.long_press(
+                self._target,
+                locate,
+                duration=duration,
                 timeout=timeout,
                 interval=interval,
                 wait=wait,

@@ -148,6 +148,10 @@ class DeviceAdapter(ABC):
     def drag(self, from_x: float, from_y: float, to_x: float, to_y: float) -> None:
         raise NotImplementedError(f"{type(self).__name__} does not support drag")
 
+    def long_press(self, x: float, y: float, duration: float = 2.0) -> None:
+        """Press and hold at (x, y) for ``duration`` seconds (touch-only gesture)."""
+        raise NotImplementedError(f"{type(self).__name__} does not support long_press")
+
     def navigate(self, url: str) -> None:
         raise NotImplementedError(f"{type(self).__name__} does not support navigate")
 
@@ -196,6 +200,9 @@ class DeviceAdapter(ABC):
             self.double_click(x, y)
         elif action_type == "right_click":
             self.right_click(x, y)
+        elif action_type == "long_press":
+            # Wire carries duration in ms (like wait); adapters take seconds.
+            self.long_press(x, y, int(params.get("duration", 2000)) / 1000.0)
         elif action_type == "hover":
             self.hover(x, y)
         elif action_type == "type_text":

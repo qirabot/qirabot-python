@@ -41,18 +41,19 @@ class AppiumAdapter(DeviceAdapter):
         img.save(buf, format="JPEG", quality=cfg.quality)
         return buf.getvalue()
 
-    def _tap(self, x: float, y: float) -> None:
+    def _tap(self, x: float, y: float, pause: float = 0.1) -> None:
         from selenium.webdriver.common.action_chains import ActionChains
 
         # add_pointer_input takes (kind, name) strings and builds the
         # PointerInput itself — passing a PointerInput object raises TypeError,
-        # which ai()'s loop swallows so taps silently no-op. The short pause
-        # between down/up makes the tap register reliably on real devices.
+        # which ai()'s loop swallows so taps silently no-op. The pause between
+        # down/up makes the tap register reliably on real devices; a longer
+        # pause turns the same gesture into a long press.
         actions = ActionChains(self._driver)
         touch = actions.w3c_actions.add_pointer_input("touch", "finger")
         touch.create_pointer_move(x=int(x), y=int(y), duration=0)
         touch.create_pointer_down(button=0)
-        touch.create_pause(0.1)
+        touch.create_pause(pause)
         touch.create_pointer_up(button=0)
         actions.perform()
 
@@ -62,6 +63,10 @@ class AppiumAdapter(DeviceAdapter):
     def double_click(self, x: float, y: float) -> None:
         self._tap(x, y)
         self._tap(x, y)
+
+    def long_press(self, x: float, y: float, duration: float = 2.0) -> None:
+        # Same pointer sequence as a tap, just holding for `duration` seconds.
+        self._tap(x, y, pause=duration)
 
     def _focused_element(self) -> Any:
         """Return the currently focused input element.

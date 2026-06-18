@@ -178,6 +178,11 @@ class AirtestAdapter(DeviceAdapter):
             self._device.touch(pos)
             self._device.touch(pos)
 
+    def long_press(self, x: float, y: float, duration: float = 2.0) -> None:
+        # Airtest's touch() takes a `duration` (seconds) that holds the finger
+        # down — the canonical long-press primitive across its backends.
+        self._device.touch((int(x), int(y)), duration=duration)
+
     def right_click(self, x: float, y: float) -> None:
         if self._platform == "windows":
             self._device.touch((int(x), int(y)), right_click=True)

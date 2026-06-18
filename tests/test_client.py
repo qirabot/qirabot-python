@@ -360,6 +360,31 @@ class TestQirabotTypeTextParams:
         bot.close()
 
 
+class TestQirabotLongPressParams:
+    def _make_mocked_bot(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        bot._get_adapter = MagicMock(return_value=MagicMock())
+        bot._ai_action = MagicMock(return_value={"success": True})
+        return bot
+
+    def test_long_press_omits_default_duration(self):
+        bot = self._make_mocked_bot()
+        bot.long_press("target", "app icon")
+        call_args = bot._ai_action.call_args
+        action = call_args.kwargs.get("action") or call_args[1].get("action") or call_args[0][1]
+        assert action["type"] == "long_press"
+        assert action["params"] == {"locate": "app icon"}
+        bot.close()
+
+    def test_long_press_converts_seconds_to_ms(self):
+        bot = self._make_mocked_bot()
+        bot.long_press("target", "app icon", duration=1.5)
+        call_args = bot._ai_action.call_args
+        action = call_args.kwargs.get("action") or call_args[1].get("action") or call_args[0][1]
+        assert action["params"]["duration"] == 1500
+        bot.close()
+
+
 class TestPressKey:
     """press_key is a deterministic (no-AI) action: it routes through
     adapter.execute (reusing tab-switch + settle) and returns the current
