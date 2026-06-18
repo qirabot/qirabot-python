@@ -18,7 +18,7 @@ from qirabot import Qirabot
 bot = Qirabot(task_name="quickstart", model_alias="fast",screenshot_annotate=True)
 
 # Qirabot launches the browser and returns a Playwright page.
-page = bot.open("https://www.wikipedia.org", headless=False, user_data_dir="~/.automation")
+page = bot.open("https://www.wikipedia.org", headless=False, user_data_dir=".automation")
 
 # Drive it with natural-language descriptions instead of selectors.
 bot.type_text(page, "Search input", "Python programming language", press_enter=True)
