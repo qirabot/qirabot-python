@@ -52,20 +52,49 @@ video { max-width: 100%; border-radius: 8px; margin-bottom: 18px; }
 """
 
 
+_COORD_KEYS = ("x", "y", "start_x", "start_y", "end_x", "end_y")
+
+
 def _summarize_params(params: dict[str, Any]) -> str:
-    """A compact one-line view of an action's parameters."""
+    """A compact one-line view of an action's parameters.
+
+    Known keys get pretty formatting; everything else falls through to a
+    generic ``key=value`` so a new action type never renders blank.
+    """
     parts: list[str] = []
-    for key in ("locate", "instruction", "assertion"):
+    rendered: set[str] = set()
+
+    # Primary human-readable descriptor.
+    for key in ("locate", "instruction", "assertion", "url"):
         if params.get(key):
             parts.append(str(params[key]))
+            rendered.add(key)
             break
+
     if params.get("text"):
         parts.append(f'text="{params["text"]}"')
+    rendered.add("text")
+
+    # Scroll: keep the compact "down 500" form rather than two key=value pairs.
     if params.get("direction"):
         parts.append(f'{params["direction"]} {params.get("amount", "")}'.strip())
+        rendered.update(("direction", "amount"))
+
+    # Coordinates, formatted compactly.
     x, y = params.get("x"), params.get("y")
     if x is not None and y is not None:
         parts.append(f"({int(x)}, {int(y)})")
+    sx, sy, ex, ey = (params.get(k) for k in _COORD_KEYS[2:])
+    if None not in (sx, sy, ex, ey):
+        parts.append(f"({int(sx)},{int(sy)})→({int(ex)},{int(ey)})")
+    rendered.update(_COORD_KEYS)
+
+    # Everything else: generic fallback so nothing silently vanishes.
+    for key, val in params.items():
+        if key in rendered or val in (None, "", False):
+            continue
+        parts.append(f"{key}={val}")
+
     return " ".join(parts)
 
 
