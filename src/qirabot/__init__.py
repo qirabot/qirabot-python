@@ -13,7 +13,9 @@ from qirabot.exceptions import (
     QirabotConnectionError,
     QirabotError,
     QirabotTimeoutError,
+    RateLimitError,
 )
+from qirabot.recording import ScreenRecorder, record
 
 try:
     __version__ = version("qirabot")
@@ -33,7 +35,10 @@ __all__ = [
     "QirabotConnectionError",
     "QirabotError",
     "QirabotTimeoutError",
+    "RateLimitError",
     "RunResult",
+    "ScreenRecorder",
     "StepResult",
     "launch_app",
+    "record",
 ]

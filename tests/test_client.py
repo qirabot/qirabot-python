@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
-from qirabot.client import Qirabot, StepResult, RunResult, _annotate_screenshot
+from qirabot.client import Qirabot, StepResult, RunResult, _render_step_images
 from qirabot.exceptions import AuthenticationError
 
 
@@ -575,7 +575,7 @@ class TestScreenshotConfig:
             ScreenshotConfig(format=fmt)
 
 
-class TestAnnotateScreenshot:
+class TestRenderStepImages:
     """The annotated debug image must be encoded in the configured format so its
     bytes match the filename extension _save_frame derives from the config."""
 
@@ -593,16 +593,22 @@ class TestAnnotateScreenshot:
 
         from PIL import Image
 
-        out = _annotate_screenshot(self._png_bytes(), 100, 75, ScreenshotConfig(format="jpeg"))
-        assert Image.open(io.BytesIO(out)).format == "JPEG"
+        full, thumb = _render_step_images(
+            self._png_bytes(), (100, 75), ScreenshotConfig(format="jpeg")
+        )
+        assert Image.open(io.BytesIO(full)).format == "JPEG"
+        assert thumb.startswith("data:image/jpeg;base64,")
 
     def test_png_config_produces_png(self):
         import io
 
         from PIL import Image
 
-        out = _annotate_screenshot(self._png_bytes(), 100, 75, ScreenshotConfig(format="png"))
-        assert Image.open(io.BytesIO(out)).format == "PNG"
+        full, thumb = _render_step_images(
+            self._png_bytes(), (100, 75), ScreenshotConfig(format="png")
+        )
+        assert Image.open(io.BytesIO(full)).format == "PNG"
+        assert thumb.startswith("data:image/jpeg;base64,")
 
     def test_default_config_produces_jpeg(self):
         import io
@@ -610,5 +616,12 @@ class TestAnnotateScreenshot:
         from PIL import Image
 
         # Default config is jpeg; the annotated bytes must not silently be PNG.
-        out = _annotate_screenshot(self._png_bytes(), 100, 75)
-        assert Image.open(io.BytesIO(out)).format == "JPEG"
+        full, _ = _render_step_images(self._png_bytes(), (100, 75))
+        assert Image.open(io.BytesIO(full)).format == "JPEG"
+
+    def test_no_coords_still_produces_thumbnail(self):
+        # When no coords are supplied, the full image is just re-encoded and we
+        # still want a thumbnail for the report.
+        full, thumb = _render_step_images(self._png_bytes(), None)
+        assert full
+        assert thumb.startswith("data:image/jpeg;base64,")

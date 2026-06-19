@@ -755,7 +755,7 @@ class TestAirtestAdapter:
 
 class TestBind:
     def _bound(self, bot):
-        from qirabot.client import _BoundQirabot
+        from qirabot.bound import _BoundQirabot
 
         return _BoundQirabot(bot, "T")
 
@@ -826,7 +826,17 @@ class TestBind:
     def test_bind_parity_covers_all_target_methods(self):
         import inspect
 
-        from qirabot.client import Qirabot, _BoundQirabot
+        from qirabot.bound import _BoundQirabot
+        from qirabot.client import Qirabot
+
+        # Compare the call contract only: name, kind (positional vs
+        # keyword-only) and default. Annotations are deliberately excluded —
+        # under ``from __future__ import annotations`` they are raw source
+        # strings, so an equivalent spelling (e.g. ``Callable[[StepResult]...``
+        # vs ``Callable[["StepResult"]...``) would false-fail without changing
+        # how the method is called.
+        def call_contract(params):
+            return [(p.name, p.kind, p.default) for p in params]
 
         for name in dir(Qirabot):
             if name.startswith("_") or name == "bind":
@@ -834,6 +844,21 @@ class TestBind:
             attr = inspect.getattr_static(Qirabot, name)
             if not inspect.isfunction(attr):
                 continue
-            params = list(inspect.signature(attr).parameters)
-            if len(params) >= 2 and params[1] == "target":
-                assert hasattr(_BoundQirabot, name), f"facade missing proxy for {name}"
+            params = list(inspect.signature(attr).parameters.values())
+            if not (len(params) >= 2 and params[1].name == "target"):
+                continue
+            assert hasattr(_BoundQirabot, name), f"facade missing proxy for {name}"
+
+            # The proxy must mirror the source signature exactly, minus the
+            # injected ``target``. A plain hasattr check misses param drift —
+            # e.g. adding a kwarg to Qirabot.click but forgetting the wrapper.
+            bound_params = list(
+                inspect.signature(getattr(_BoundQirabot, name)).parameters.values()
+            )
+            expected = call_contract(params[2:])  # drop self + target
+            actual = call_contract(bound_params[1:])  # drop self
+            assert actual == expected, (
+                f"_BoundQirabot.{name} signature drifted from Qirabot.{name}:\n"
+                f"  expected (minus target): {expected}\n"
+                f"  actual:                  {actual}"
+            )

@@ -59,6 +59,8 @@ Constructor options:
 | `task_name` | — | `""` | Optional name for the task (visible in dashboard) |
 | `report` | — | `True` | Write an HTML run report (+ screenshots) on close |
 | `report_dir` | `QIRA_REPORT_DIR` | `""` | Output root; default `./qira_runs/<date>/<time-id>/` |
+| `record` | `QIRA_RECORD` | `False` | Record the screen with ffmpeg into `recording.mp4` (embedded in the report) |
+| `record_fps` | — | `12` | Recording frame rate |
 | `screenshot_annotate` | — | `True` | Draw a red crosshair at click/type coordinates |
 | `screenshot_format` | — | `"jpeg"` | Saved screenshot format (`"jpeg"` or `"png"`) |
 | `screenshot_quality` | — | `80` | JPEG quality, 1–100 |
@@ -380,34 +382,59 @@ qira_runs/2026-06-07/192335-3f9ab2c1/
     001_click.jpg
     002_type_text.jpg
     ...
-  recording.mp4        # or recording.webm — embedded in the report if present
+  recording.mp4        # full-screen recording — embedded in the report if present
 ```
 
 `screenshot_annotate=True` (default) draws a red crosshair at the resolved
-click/type coordinates. To embed a screen recording, put a file named
-`recording.mp4` or `recording.webm` into `bot.report_dir`. With an external
-recorder, point it there directly:
+click/type coordinates.
+
+### Screen recording
+
+Pass `record=True` and the SDK records the full screen with ffmpeg for the whole
+run, saving `recording.mp4` into `bot.report_dir` and embedding it in the report
+— no matter which framework you drive:
 
 ```python
-dev.start_recording(output=os.path.join(bot.report_dir, "recording.mp4"))
+bot = Qirabot(record=True)          # or set QIRA_RECORD=1
+page = bot.open("https://example.com")
+bot.ai(page, "do the thing")
+bot.close()                         # stops recording, then writes the report
 ```
 
-For a browser run, the SDK does not record for you — use Playwright's native
-recording and save into `report_dir`. Create your own context with
-`record_video_dir`, drive it through the bot, then rename the emitted file:
+Or control it manually (works with `record=False` too):
 
 ```python
-from playwright.sync_api import sync_playwright
-
-with sync_playwright() as pw:
-    browser = pw.chromium.launch()
-    context = browser.new_context(record_video_dir=bot.report_dir)
-    page = context.new_page()
-    page.goto("https://example.com")
-    bot.ai(page, "do the thing")               # drive the recorded page
-    context.close()                            # flushes the .webm
-    os.rename(page.video.path(), os.path.join(bot.report_dir, "recording.webm"))
+bot.start_recording()               # idempotent; fps via record_fps / start_recording(fps=...)
+try:
+    bot.ai(page, "do the thing")
+finally:
+    bot.stop_recording()            # one recording per run — restarting overwrites recording.mp4
 ```
+
+Requires the `ffmpeg` binary on PATH (`brew install ffmpeg` /
+`choco install ffmpeg` / `apt install ffmpeg`); on macOS grant the terminal/IDE
+"Screen Recording" permission or it captures a black screen. Recording is
+best-effort: a missing ffmpeg or denied permission only warns and never fails
+the task (check `recording.ffmpeg.log` in the run dir). Dropping your own
+`recording.mp4` into `report_dir` is still embedded just the same.
+
+**Multiple monitors (macOS).** The full screen is captured one display at a
+time; by default that's the primary display (`Capture screen 0`). To record a
+different one, set `QIRA_SCREEN_INDEX` to its avfoundation device index:
+
+```bash
+# List the screen devices and their indices first:
+ffmpeg -f avfoundation -list_devices true -i ""
+#   [1] Capture screen 0   <- primary (default)
+#   [2] Capture screen 1   <- second monitor
+
+QIRA_SCREEN_INDEX=2 python reddit.py     # record the second monitor
+```
+
+Make sure the window you care about is on the recorded display — with
+`headless=False` the browser opens wherever macOS places it. On Windows/Linux
+the default already grabs the whole virtual desktop (all monitors), so this knob
+is macOS-only.
 
 Call `bot.report("path.html")` to also write the report to a custom location on
 demand. Use `bot.screenshot(target)` for a one-off frame (saved under
@@ -501,8 +528,11 @@ bot.close()
 
 A real run usually drives a specific app, streams steps, and records the screen.
 This connects to an emulator/device over ADB, runs an AI task in Chinese, and
-saves an Airtest screen recording into `bot.report_dir` so the HTML report embeds
-it automatically:
+records the **device** screen into `bot.report_dir` so the HTML report embeds it
+automatically. Here we use Airtest's `device().start_recording(...)` rather than
+`record=True`: the SDK's built-in recorder captures the *host* screen, which a
+headless device doesn't appear on (a visible emulator window would be captured
+by `record=True` like any other host window):
 
 ```python
 # -*- encoding=utf8 -*-
@@ -564,9 +594,10 @@ Notes on this example:
   `max_steps`, `on_step`, `model_alias`, and `language`.
 - **`on_step`** fires after every action — use it for live logging or to push
   progress somewhere. `step.finished` marks the terminal step.
-- **Recording** is done by Airtest's native `device().start_recording(...)`, not
-  the SDK. Aim it at `bot.report_dir` and name it `recording.mp4` (or
-  `recording.webm`) and the report picks it up — see [Reports](#reports).
+- **Recording** here uses Airtest's native `device().start_recording(...)` to
+  capture the *device* screen (the SDK's `record=True` records the host screen —
+  see [Reports](#reports)). Aim it at `bot.report_dir`, name it `recording.mp4`,
+  and the report picks it up.
 - **`result.output`** is the model's final answer; `result.success` is the
   pass/fail verdict.
 

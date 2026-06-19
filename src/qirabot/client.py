@@ -15,8 +15,10 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from qirabot._optional import require
 from qirabot._transport import Transport
+from qirabot.recording import ScreenRecorder
 from qirabot.adapters import auto
 from qirabot.adapters.base import DeviceAdapter, ScreenshotConfig
+from qirabot.bound import _BoundQirabot
 from qirabot.exceptions import (
     ActionError,
     AuthenticationError,
@@ -104,6 +106,8 @@ class Qirabot:
         retry: int = 1,
         retry_delay: float = 1.0,
         settle_seconds: float | None = None,
+        record: bool = False,
+        record_fps: int = 12,
     ):
         api_key = api_key or os.environ.get("QIRA_API_KEY", "")
         # Fail fast on a missing key: it's a local config error, so surface an
@@ -181,21 +185,28 @@ class Qirabot:
             raise ValueError(f"settle_seconds must be >= 0, got {settle_seconds}")
         self._settle_seconds = settle_seconds
         self._step_seq = 0
+        # Built-in ffmpeg full-screen recording. Opt-in (default off); the
+        # QIRA_RECORD env var enables it without a code change. Auto-started here
+        # and stopped in close() so the mp4 is finalized before the report scans
+        # for it. A single recorder slot + a fixed output path mean the auto path
+        # and the manual start_recording()/stop_recording() never spawn two ffmpegs.
+        self._record = record or _env_truthy(os.environ.get("QIRA_RECORD", ""))
+        self._record_fps = record_fps
+        self._recorder: ScreenRecorder | None = None
         atexit.register(self.close)
+        self._maybe_start_recording()
 
     @property
     def report_dir(self) -> str:
         """The per-run output directory (report.html + screenshots/ + recording).
 
-        Drop a file named ``recording.mp4`` or ``recording.webm`` here and the
-        report embeds it automatically. Use an external screen recorder, e.g.
-        ``dev.start_recording(output=os.path.join(bot.report_dir, "recording.mp4"))``,
-        or Playwright's native recording: create your own context with
-        ``record_video_dir=bot.report_dir``, wrap its page with the bot, and on
-        ``page.context.close()`` rename the emitted ``.webm`` to
-        ``recording.webm``.
+        Pass ``record=True`` (or set ``QIRA_RECORD=1``) and the SDK records the
+        full screen here as ``recording.mp4`` via ffmpeg, embedding it in the
+        report automatically; :meth:`start_recording`/:meth:`stop_recording`
+        drive it manually. Dropping your own ``recording.mp4`` into this dir is
+        also picked up.
 
-        Creating the directory on access keeps the documented recording patterns
+        Creating the directory on access keeps the recording/output patterns
         working even when nothing has been written to it yet (e.g. a run that
         crashes on its first action, before any screenshot).
         """
@@ -732,6 +743,53 @@ class Qirabot:
         data = adapter.screenshot(self._screenshot_config)
         return self._save_frame(data, "manual")
 
+    def _maybe_start_recording(self) -> None:
+        """Auto-start screen recording when ``record=True``.
+
+        Skipped when reporting is off (there is no report to embed into) or a
+        recorder is already running. Best-effort via :meth:`start_recording` — a
+        missing ffmpeg / unsupported platform only warns.
+        """
+        if not (self._record and self._report) or self._recorder is not None:
+            return
+        self.start_recording()
+
+    def start_recording(self, *, fps: int | None = None) -> bool:
+        """Start ffmpeg full-screen recording into ``report_dir/recording.mp4``.
+
+        Idempotent: if a recording is already running, this is a no-op returning
+        ``True`` (and ``fps`` is ignored — there is one recording per run). The
+        file is finalized and embedded in the report on :meth:`close`.
+        Best-effort — returns ``False`` (and only warns) when ffmpeg is missing
+        or the platform is unsupported.
+
+        Note: starting again after :meth:`stop_recording` overwrites the same
+        ``recording.mp4`` (it re-records from scratch, it does not resume).
+        """
+        if self._recorder is not None and self._recorder.active:
+            logger.info("recording already in progress; ignoring start_recording()")
+            return True
+        output = os.path.join(self.report_dir, "recording.mp4")
+        recorder = ScreenRecorder(output, fps=fps if fps is not None else self._record_fps)
+        started = recorder.start()
+        self._recorder = recorder if started else None
+        return started
+
+    def stop_recording(self) -> str | None:
+        """Stop the current recording and return the saved path (or ``None``).
+
+        A no-op returning ``None`` when nothing is recording.
+        """
+        if self._recorder is None:
+            return None
+        recorder = self._recorder
+        self._recorder = None
+        try:
+            return recorder.stop()
+        except Exception:
+            logger.debug("failed to stop recording", exc_info=True)
+            return None
+
     def launch_app(self, app: str, *, wait: float = 2.0) -> None:
         """Launch (or activate) a desktop application before driving it.
 
@@ -849,24 +907,19 @@ class Qirabot:
         # otherwise an auto-wait would spam the report and disk with poll frames.
         if not self._report or action_type == "assert":
             return
-        # Annotation and thumbnailing decode the image with PIL; never let a
+        # Annotation + thumbnailing share a single PIL decode; never let a
         # malformed/unexpected screenshot break the actual action — degrade to
         # the raw bytes / no thumbnail instead.
         annotated = data
-        if data and coords is not None and self._screenshot_config.annotate:
-            try:
-                annotated = _annotate_screenshot(
-                    data, coords[0], coords[1], self._screenshot_config
-                )
-            except Exception:
-                logger.debug("annotate failed", exc_info=True)
-        frame = self._save_frame(annotated, action_type or "action") if data else None
         thumb = ""
         if data:
             try:
-                thumb = _thumbnail_b64(annotated)
+                annotated, thumb = _render_step_images(
+                    data, coords, self._screenshot_config
+                )
             except Exception:
-                logger.debug("thumbnail failed", exc_info=True)
+                logger.debug("render step images failed", exc_info=True)
+        frame = self._save_frame(annotated, action_type or "action") if data else None
         self._log.append(
             {
                 "section": self._current_section,
@@ -1131,14 +1184,10 @@ class Qirabot:
         from qirabot import report as _report
 
         out = out or (self._report_dir / "report.html")
-        # Embed a screen recording if one was dropped into report_dir. We accept
-        # .mp4 (external recorders) and .webm (Playwright's native recording —
-        # point its record_video_dir at report_dir); first match wins.
-        recording = ""
-        for name in ("recording.mp4", "recording.webm"):
-            if (self._report_dir / name).exists():
-                recording = name
-                break
+        # Embed the screen recording if present. The SDK records to
+        # recording.mp4 (record=True / start_recording); dropping your own
+        # recording.mp4 here is picked up just the same.
+        recording = "recording.mp4" if (self._report_dir / "recording.mp4").exists() else ""
         try:
             _report.write_html(
                 self._log,
@@ -1159,6 +1208,11 @@ class Qirabot:
         if self._closed:
             return
         self._closed = True
+        # Finalize any in-progress screen recording before writing the report so
+        # the mp4 is complete on disk (moov atom flushed) when _write_report
+        # scans report_dir for it.
+        if self._recorder is not None:
+            self.stop_recording()
         # Emit the run report before tearing down (best-effort; never block
         # cleanup). Runs on normal exit, exception (via __exit__), and atexit.
         self._write_report()
@@ -1220,6 +1274,11 @@ class Qirabot:
         self.close()
 
 
+def _env_truthy(value: str) -> bool:
+    """Parse a boolean-ish env var value (``1``/``true``/``yes``/``on``)."""
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _extract_coords(params: dict[str, Any] | None) -> tuple[float, float] | None:
     if not params:
         return None
@@ -1230,317 +1289,66 @@ def _extract_coords(params: dict[str, Any] | None) -> tuple[float, float] | None
     return None
 
 
-def _annotate_screenshot(
-    data: bytes, x: float, y: float, config: ScreenshotConfig | None = None
-) -> bytes:
-    from PIL import Image, ImageDraw
+def _render_step_images(
+    data: bytes,
+    coords: tuple[float, float] | None,
+    config: ScreenshotConfig | None = None,
+    *,
+    thumb_max_edge: int = 800,
+    thumb_quality: int = 60,
+) -> tuple[bytes, str]:
+    """Decode the screenshot once → (full-res encoded bytes, thumbnail data URI).
 
-    img = Image.open(io.BytesIO(data)).convert("RGBA")
-    draw = ImageDraw.Draw(img)
-    color = (255, 0, 0, 255)
-
-    short_side = min(img.width, img.height)
-    radius = max(4, round(short_side * 0.015))
-    line_len = int(radius * 1.5)
-    width = 3 if short_side > 2000 else 2
-    gap = radius + 2
-    cx, cy = int(x), int(y)
-
-    draw.ellipse(
-        [cx - radius, cy - radius, cx + radius, cy + radius],
-        outline=color, width=width,
-    )
-    draw.line([(cx - gap - line_len, cy), (cx - gap, cy)], fill=color, width=width)
-    draw.line([(cx + gap, cy), (cx + gap + line_len, cy)], fill=color, width=width)
-    draw.line([(cx, cy - gap - line_len), (cx, cy - gap)], fill=color, width=width)
-    draw.line([(cx, cy + gap), (cx, cy + gap + line_len)], fill=color, width=width)
-
-    # Re-encode in the configured format so the bytes match the filename
-    # extension (jpeg has no alpha channel, so flatten RGBA → RGB first).
-    cfg = config or ScreenshotConfig()
-    buf = io.BytesIO()
-    if cfg.format == "jpeg":
-        img.convert("RGB").save(buf, format="JPEG", quality=cfg.quality)
-    else:
-        img.save(buf, format="PNG")
-    return buf.getvalue()
-
-
-def _thumbnail_b64(data: bytes, max_edge: int = 800, quality: int = 60) -> str:
-    """Downscale screenshot bytes to a compact base64 data URI for the report.
-
-    Keeps reports self-contained (and bounds memory) regardless of whether
-    full-resolution frames are kept on disk.
+    Annotates a crosshair at ``coords`` when given and ``config.annotate`` is on;
+    otherwise the full-res output is just the source re-encoded in the configured
+    format. The thumbnail is always a downscaled JPEG embedded as a data URI so
+    the HTML report stays self-contained.
     """
     import base64
 
-    from PIL import Image
+    from PIL import Image, ImageDraw
 
-    img = Image.open(io.BytesIO(data)).convert("RGB")
-    longest = max(img.width, img.height)
-    if longest > max_edge:
-        scale = max_edge / longest
-        img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))))
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=quality)
-    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    cfg = config or ScreenshotConfig()
+    img: Image.Image = Image.open(io.BytesIO(data))
 
-
-class _BoundQirabot:
-    """A :class:`Qirabot` proxy with a target pre-bound (see ``Qirabot.bind``).
-
-    Action methods drop the leading ``target`` argument; everything else
-    (lifecycle, context manager, unknown attributes) delegates to the wrapped
-    ``Qirabot``. Methods that return the current target (tab-following) update
-    the bound target in place, so the proxy keeps following the active page on
-    Playwright while staying a no-op on single-target frameworks.
-    """
-
-    def __init__(self, bot: Qirabot, target: Any) -> None:
-        self._bot = bot
-        self._target = target
-
-    @property
-    def bot(self) -> Qirabot:
-        """The underlying :class:`Qirabot` (rarely needed)."""
-        return self._bot
-
-    def _rebind(self, result: Any) -> Any:
-        # Follow tab/window switches: the action's return value is the current
-        # target, which may differ from the one we sent (Playwright new tab).
-        self._target = result
-        return result
-
-    # -- action methods: inject the bound target ---------------------------
-
-    def click(
-        self,
-        locate: str,
-        *,
-        timeout: float = 0.0,
-        interval: float = 2.0,
-        wait: str = "",
-        retry: int | None = None,
-        model_alias: str = "",
-        language: str = "",
-    ) -> Any:
-        return self._rebind(
-            self._bot.click(
-                self._target,
-                locate,
-                timeout=timeout,
-                interval=interval,
-                wait=wait,
-                retry=retry,
-                model_alias=model_alias,
-                language=language,
-            )
+    if coords is not None and cfg.annotate:
+        img = img.convert("RGBA")
+        draw = ImageDraw.Draw(img)
+        color = (255, 0, 0, 255)
+        short_side = min(img.width, img.height)
+        radius = max(4, round(short_side * 0.015))
+        line_len = int(radius * 1.5)
+        width = 3 if short_side > 2000 else 2
+        gap = radius + 2
+        cx, cy = int(coords[0]), int(coords[1])
+        draw.ellipse(
+            [cx - radius, cy - radius, cx + radius, cy + radius],
+            outline=color, width=width,
         )
+        draw.line([(cx - gap - line_len, cy), (cx - gap, cy)], fill=color, width=width)
+        draw.line([(cx + gap, cy), (cx + gap + line_len, cy)], fill=color, width=width)
+        draw.line([(cx, cy - gap - line_len), (cx, cy - gap)], fill=color, width=width)
+        draw.line([(cx, cy + gap), (cx, cy + gap + line_len)], fill=color, width=width)
 
-    def type_text(
-        self,
-        locate: str,
-        text: str,
-        *,
-        press_enter: bool = False,
-        clear_before_typing: bool = False,
-        timeout: float = 0.0,
-        interval: float = 2.0,
-        wait: str = "",
-        retry: int | None = None,
-        model_alias: str = "",
-        language: str = "",
-    ) -> Any:
-        return self._rebind(
-            self._bot.type_text(
-                self._target,
-                locate,
-                text,
-                press_enter=press_enter,
-                clear_before_typing=clear_before_typing,
-                timeout=timeout,
-                interval=interval,
-                wait=wait,
-                retry=retry,
-                model_alias=model_alias,
-                language=language,
-            )
+    # Full-res output in the configured format (jpeg has no alpha channel, so
+    # flatten RGBA → RGB first).
+    full_buf = io.BytesIO()
+    if cfg.format == "jpeg":
+        img.convert("RGB").save(full_buf, format="JPEG", quality=cfg.quality)
+    else:
+        img.save(full_buf, format="PNG")
+    full_bytes = full_buf.getvalue()
+
+    # Thumbnail derived from the same in-memory image — no second decode.
+    thumb_img = img if img.mode == "RGB" else img.convert("RGB")
+    longest = max(thumb_img.width, thumb_img.height)
+    if longest > thumb_max_edge:
+        scale = thumb_max_edge / longest
+        thumb_img = thumb_img.resize(
+            (max(1, round(thumb_img.width * scale)), max(1, round(thumb_img.height * scale)))
         )
+    thumb_buf = io.BytesIO()
+    thumb_img.save(thumb_buf, format="JPEG", quality=thumb_quality)
+    thumb_b64 = "data:image/jpeg;base64," + base64.b64encode(thumb_buf.getvalue()).decode("ascii")
 
-    def double_click(
-        self,
-        locate: str,
-        *,
-        timeout: float = 0.0,
-        interval: float = 2.0,
-        wait: str = "",
-        retry: int | None = None,
-        model_alias: str = "",
-        language: str = "",
-    ) -> Any:
-        return self._rebind(
-            self._bot.double_click(
-                self._target,
-                locate,
-                timeout=timeout,
-                interval=interval,
-                wait=wait,
-                retry=retry,
-                model_alias=model_alias,
-                language=language,
-            )
-        )
-
-    def long_press(
-        self,
-        locate: str,
-        *,
-        duration: float = 2.0,
-        timeout: float = 0.0,
-        interval: float = 2.0,
-        wait: str = "",
-        retry: int | None = None,
-        model_alias: str = "",
-        language: str = "",
-    ) -> Any:
-        return self._rebind(
-            self._bot.long_press(
-                self._target,
-                locate,
-                duration=duration,
-                timeout=timeout,
-                interval=interval,
-                wait=wait,
-                retry=retry,
-                model_alias=model_alias,
-                language=language,
-            )
-        )
-
-    def extract(
-        self,
-        instruction: str,
-        *,
-        retry: int | None = None,
-        model_alias: str = "",
-        language: str = "",
-    ) -> str:
-        return self._bot.extract(
-            self._target, instruction, retry=retry, model_alias=model_alias, language=language
-        )
-
-    def verify(
-        self,
-        assertion: str,
-        *,
-        retry: int | None = None,
-        model_alias: str = "",
-        language: str = "",
-    ) -> bool:
-        return self._bot.verify(
-            self._target, assertion, retry=retry, model_alias=model_alias, language=language
-        )
-
-    def wait_for(
-        self,
-        assertion: str,
-        timeout: float = 30.0,
-        interval: float = 2.0,
-        *,
-        model_alias: str = "",
-        language: str = "",
-    ) -> "_BoundQirabot":
-        """Wait until ``assertion`` holds, else raise :class:`QirabotTimeoutError`.
-
-        Returns the bound handle (unchanged target) so calls can be chained, e.g.
-        ``bot.wait_for("公告出现").click("关闭公告")``.
-        """
-        self._bot.wait_for(
-            self._target,
-            assertion,
-            timeout,
-            interval,
-            model_alias=model_alias,
-            language=language,
-        )
-        return self
-
-    def ai(
-        self,
-        instruction: str,
-        max_steps: int = 20,
-        *,
-        on_step: Callable[[StepResult], None] | None = None,
-        model_alias: str = "",
-        language: str = "",
-    ) -> RunResult:
-        return self._bot.ai(
-            self._target,
-            instruction,
-            max_steps,
-            on_step=on_step,
-            model_alias=model_alias,
-            language=language,
-        )
-
-    def screenshot(self) -> Path | None:
-        return self._bot.screenshot(self._target)
-
-    def go_back(self) -> Any:
-        return self._rebind(self._bot.go_back(self._target))
-
-    def press_key(self, key: str) -> Any:
-        return self._rebind(self._bot.press_key(self._target, key))
-
-    def close_tab(self) -> Any:
-        return self._rebind(self._bot.close_tab(self._target))
-
-    def navigate(self, url: str) -> Any:
-        return self._rebind(self._bot.navigate(self._target, url))
-
-    def scroll(
-        self,
-        direction: str = "down",
-        distance: int = 3,
-        *,
-        x: float | None = None,
-        y: float | None = None,
-    ) -> None:
-        self._bot.scroll(self._target, direction, distance, x=x, y=y)
-
-    def current_page(self) -> Any:
-        """The live current target (always fresh — use for native interop)."""
-        return self._rebind(self._bot.current_page(self._target))
-
-    # -- high-frequency lifecycle: explicit for typing/IDE -----------------
-
-    def close(self) -> None:
-        self._bot.close()
-
-    def open(self, *args: Any, **kwargs: Any) -> Any:
-        return self._bot.open(*args, **kwargs)
-
-    @property
-    def task_id(self) -> str | None:
-        return self._bot.task_id
-
-    # -- everything else (launch_app/fail/cancel/…) delegates --------------
-
-    def __getattr__(self, name: str) -> Any:
-        # __getattr__ runs only when normal lookup fails; guard _bot to avoid
-        # recursion before __init__ has set it.
-        if name == "_bot":
-            raise AttributeError(name)
-        return getattr(self._bot, name)
-
-    def __enter__(self) -> _BoundQirabot:
-        self._bot.__enter__()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
-    ) -> None:
-        self._bot.__exit__(exc_type, exc_val, exc_tb)
+    return full_bytes, thumb_b64

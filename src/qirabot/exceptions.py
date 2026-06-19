@@ -33,6 +33,15 @@ class InsufficientBalanceError(QirabotError):
     """Insufficient credit balance (402)."""
 
 
+class RateLimitError(QirabotError):
+    """Too many requests; the client is being rate limited (429).
+
+    Retryable: the SDK's internal retry loop backs off and retries these.
+    Exposed as its own type so callers can ``except RateLimitError`` to apply
+    their own backoff or surface a "slow down" message.
+    """
+
+
 class ActionError(QirabotError):
     """AI action failed."""
 
@@ -67,6 +76,7 @@ _ERROR_CODE_MAP: dict[str, type[QirabotError]] = {
 _STATUS_CODE_MAP: dict[int, type[QirabotError]] = {
     401: AuthenticationError,
     402: InsufficientBalanceError,
+    429: RateLimitError,
 }
 
 

@@ -9,6 +9,7 @@ from qirabot.exceptions import (
     QirabotConnectionError,
     QirabotError,
     QirabotTimeoutError,
+    RateLimitError,
     raise_for_error,
 )
 
@@ -46,6 +47,10 @@ class TestRaiseForError:
         with pytest.raises(InsufficientBalanceError):
             raise_for_error(402, {"message": "payment required"})
 
+    def test_rate_limit_by_status(self):
+        with pytest.raises(RateLimitError):
+            raise_for_error(429, {"message": "too many requests"})
+
     def test_nested_error_format(self):
         with pytest.raises(AuthenticationError, match="invalid key"):
             raise_for_error(401, {"error": {"code": "auth.api_key_missing", "message": "invalid key"}})
@@ -73,6 +78,7 @@ class TestExceptionHierarchy:
     @pytest.mark.parametrize("cls", [
         AuthenticationError,
         InsufficientBalanceError,
+        RateLimitError,
         ActionError,
         QirabotTimeoutError,
         QirabotConnectionError,
@@ -83,6 +89,7 @@ class TestExceptionHierarchy:
     @pytest.mark.parametrize("cls", [
         AuthenticationError,
         InsufficientBalanceError,
+        RateLimitError,
         ActionError,
         QirabotTimeoutError,
         QirabotConnectionError,

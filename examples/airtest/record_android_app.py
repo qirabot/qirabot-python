@@ -2,9 +2,11 @@
 """Standalone Android RPA with a screen recording embedded in the run report.
 
 This is the full-featured cousin of ``standalone_android_rpa.py``: it drives a
-specific app, streams every step, and records the screen with Airtest's native
-recorder. The SDK does not record for you — point Airtest's recorder at
-``bot.report_dir`` and the HTML report embeds the resulting ``recording.mp4``.
+specific app, streams every step, and records the **device** screen with
+Airtest's native recorder. We use Airtest here rather than the SDK's
+``record=True``, which records the *host* screen (a headless device doesn't
+appear there). Point Airtest's recorder at ``bot.report_dir`` and the HTML
+report embeds the resulting ``recording.mp4``.
 
 Install:
     pip install "qirabot[airtest]"

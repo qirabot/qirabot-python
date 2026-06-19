@@ -10,6 +10,7 @@ from qirabot.exceptions import (
     InsufficientBalanceError,
     QirabotError,
     QirabotTimeoutError,
+    RateLimitError,
     _is_retryable,
 )
 
@@ -26,6 +27,9 @@ class TestIsRetryable:
 
     def test_429_is_retryable(self):
         assert _is_retryable(QirabotError("rate limit", status_code=429)) is True
+
+    def test_rate_limit_error_is_retryable(self):
+        assert _is_retryable(RateLimitError("slow down", status_code=429)) is True
 
     def test_408_is_retryable(self):
         assert _is_retryable(QirabotError("request timeout", status_code=408)) is True
