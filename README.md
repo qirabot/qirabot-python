@@ -24,12 +24,11 @@ pip install "qirabot[airtest]"   # Airtest (Android / iOS / Windows, image-based
 pip install selenium             # Selenium is not an extra — bring your own driver
 ```
 
-> The `airtest` extra pulls in Airtest, which pins `numpy<2.0` and
-> `opencv-contrib-python` 4.4–4.6. These have prebuilt wheels only up to
-> **Python 3.12** — on Python 3.13/3.14 pip falls back to building them from
-> source and fails without a C/C++ compiler (e.g. MSVC on Windows). **For the
-> `airtest` extra, use Python 3.10–3.12.** Installing into an env that already
-> has `numpy>=2` may also downgrade or conflict — prefer a dedicated virtualenv.
+> Airtest itself declares no Python version, but its `numpy<2.0` pin caps the
+> install at **Python 3.12** (numpy 1.26 has no wheels beyond 3.12; on 3.13+ pip
+> builds from source and fails without a compiler). With the qirabot SDK's 3.10
+> floor, **install `qirabot[airtest]` on Python 3.10–3.12**, ideally in a fresh
+> virtualenv. AirtestIDE (the standalone GUI) also targets Python 3.10–3.12.
 
 The Quick Start below uses `bot.open()`, so it needs `qirabot[browser]` plus a
 one-time `playwright install chromium`. With Selenium you create the driver
