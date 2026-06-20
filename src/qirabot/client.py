@@ -1184,10 +1184,15 @@ class Qirabot:
         from qirabot import report as _report
 
         out = out or (self._report_dir / "report.html")
-        # Embed the screen recording if present. The SDK records to
-        # recording.mp4 (record=True / start_recording); dropping your own
-        # recording.mp4 here is picked up just the same.
-        recording = "recording.mp4" if (self._report_dir / "recording.mp4").exists() else ""
+        mp4 = self._report_dir / "recording.mp4"
+        recording = "recording.mp4" if (mp4.exists() and mp4.stat().st_size > 0) else ""
+        still_recording = self._recorder is not None and self._recorder.active
+        record_error = ""
+        if self._record and not recording and not still_recording:
+            record_error = (
+                "Recording was requested but not produced — is ffmpeg installed? "
+                "(see recording.ffmpeg.log)"
+            )
         try:
             _report.write_html(
                 self._log,
@@ -1196,6 +1201,7 @@ class Qirabot:
                 task_id=self._task_id or "",
                 outcomes=self._section_outcomes,
                 recording=recording,
+                record_error=record_error,
             )
             logger.info("report written: %s", out)
             return out

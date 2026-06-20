@@ -1,9 +1,18 @@
 """Tests for the ffmpeg screen recorder and its client integration."""
 
+from pathlib import Path
+
 import qirabot.client as client_mod
 from qirabot import recording
+from qirabot import report as report_mod
 from qirabot.client import Qirabot
 from qirabot.recording import ScreenRecorder, _build_input_args, _detect_screen_index
+
+# Minimal step log entry so write_html / report() has something to render.
+_LOG_ENTRY = {
+    "section": "setup", "action_type": "click", "params": {}, "output": "",
+    "finished": False, "success": True, "coords": None, "screenshot": "", "thumb": "",
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -276,3 +285,79 @@ class TestClientRecordingWiring:
         assert bot.start_recording() is True
         assert len(_FakeRecorder.instances) == 1
         assert bot.stop_recording() == _FakeRecorder.instances[0].output
+
+
+# --------------------------------------------------------------------------- #
+# Recording-failure notice in the report
+# --------------------------------------------------------------------------- #
+class _FailingRecorder:
+    """Recorder whose start() fails (e.g. ffmpeg missing)."""
+
+    def __init__(self, output, *, fps=12, capture_cursor=True):
+        self.output = output
+
+    def start(self):
+        return False
+
+    @property
+    def active(self):
+        return False
+
+    def stop(self, timeout=10.0):
+        return None
+
+
+class TestReportRecordingNotice:
+    def test_write_html_renders_notice(self, tmp_path):
+        out = report_mod.write_html(
+            [_LOG_ENTRY], tmp_path / "r.html", record_error="ffmpeg not found"
+        )
+        markup = out.read_text()
+        assert "class='notice'" in markup
+        assert "ffmpeg not found" in markup
+
+    def test_write_html_video_wins_over_error(self, tmp_path):
+        out = report_mod.write_html(
+            [_LOG_ENTRY], tmp_path / "r.html",
+            recording="recording.mp4", record_error="ignored",
+        )
+        markup = out.read_text()
+        assert "<video" in markup
+        assert "class='notice'" not in markup
+
+    def test_client_notes_failed_recording(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(client_mod, "ScreenRecorder", _FailingRecorder)
+        bot = Qirabot(api_key="k", task_id="t", record=True, report_dir=str(tmp_path))
+        assert bot._recorder is None  # start() failed
+        bot._log.append(dict(_LOG_ENTRY))
+        out = bot.report(str(tmp_path / "report.html"))
+        markup = Path(out).read_text()
+        assert "Recording was requested but not produced" in markup
+        assert "<video" not in markup
+
+    def test_client_zero_byte_recording_is_failure(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(client_mod, "ScreenRecorder", _FailingRecorder)
+        bot = Qirabot(api_key="k", task_id="t", record=True, report_dir=str(tmp_path))
+        (Path(bot.report_dir) / "recording.mp4").write_bytes(b"")  # 0 bytes
+        bot._log.append(dict(_LOG_ENTRY))
+        out = bot.report(str(tmp_path / "report.html"))
+        markup = Path(out).read_text()
+        assert "Recording was requested but not produced" in markup
+        assert "<video" not in markup
+
+    def test_client_valid_recording_embeds_no_notice(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(client_mod, "ScreenRecorder", _FailingRecorder)
+        bot = Qirabot(api_key="k", task_id="t", record=True, report_dir=str(tmp_path))
+        (Path(bot.report_dir) / "recording.mp4").write_bytes(b"data")
+        bot._log.append(dict(_LOG_ENTRY))
+        out = bot.report(str(tmp_path / "report.html"))
+        markup = Path(out).read_text()
+        assert "<video" in markup
+        assert "Recording was requested but not produced" not in markup
+
+    def test_no_notice_when_record_not_requested(self, tmp_path):
+        bot = Qirabot(api_key="k", task_id="t", report_dir=str(tmp_path))
+        bot._log.append(dict(_LOG_ENTRY))
+        out = bot.report(str(tmp_path / "report.html"))
+        markup = Path(out).read_text()
+        assert "Recording was requested but not produced" not in markup
