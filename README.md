@@ -657,6 +657,50 @@ with Qirabot(task_name="my automation") as bot:
 # bot.close() is called automatically
 ```
 
+## Agent Skill
+
+The `skills/qirabot/` directory is a **pre-built agent skill** — a self-contained
+bundle an AI agent can load to write, run, and debug Qirabot automations. Instead
+of describing the API in a chat, you state the automation goal and the agent
+handles setup, scripting, and verification.
+
+### Skill layout
+
+```
+skills/qirabot/
+  SKILL.md               # instructions the agent reads to operate the skill
+  references/
+    REFERENCE.md         # condensed API reference used at runtime
+  templates/
+    browser.py           # Playwright / web starter
+    android.py           # Airtest / Android starter
+    bolt_on.py           # bring-your-own-driver (Selenium, Appium, pyautogui, Airtest Windows)
+  scripts/
+    preflight.py         # environment checker — must pass before any script is written
+```
+
+### How the skill works
+
+1. **Preflight first** — before writing any code the agent runs `scripts/preflight.py`
+   to confirm Python version, `QIRA_API_KEY`, and target-specific dependencies:
+
+   ```bash
+   python scripts/preflight.py browser     # or: android | ios | desktop
+   ```
+
+   If anything is missing, it prints exactly what to fix.
+
+2. **Pick a template** — the agent copies the starter that matches the target
+   (browser, Android, or bring-your-own-driver) and fills in the task.
+
+3. **Verify from the report** — after running, the agent opens the HTML report
+   (`qira_runs/<date>/<run>/report.html`) to confirm what actually happened on
+   screen, rather than trusting the script's return value alone.
+
+The skill's reference and templates are drift-tested against the live SDK in CI
+(`tests/test_skill.py`), so renamed methods or changed constructor kwargs fail
+here instead of silently breaking an automation run.
+
 ## License
 
 MIT
