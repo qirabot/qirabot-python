@@ -11,6 +11,7 @@ Exit code 0 = ready to go; non-zero = fix the printed items first.
 
 import importlib
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -55,6 +56,9 @@ def main() -> int:
     # automation can be run with the exact same one (see the success message).
     print(f"interpreter: {sys.executable}\n")
     hard_ok = True
+    # Use platform.system() (not sys.platform) so type-checkers don't statically
+    # narrow the Windows-only branches to "unreachable" on a non-Windows host.
+    is_windows = platform.system() == "Windows"
 
     # 1. Python version
     v = sys.version_info
@@ -65,6 +69,10 @@ def main() -> int:
     if target == "android" and not ((3, 10) <= (v.major, v.minor) <= (3, 12)):
         line(WARN, "airtest extra wants Python 3.10-3.12",
              "numpy<2 / opencv 4.4-4.6 have prebuilt wheels only up to 3.12.")
+    if (target == "desktop" and is_windows
+            and not ((3, 10) <= (v.major, v.minor) <= (3, 12))):
+        line(WARN, "airtest (window-scoped) desktop backend wants Python 3.10-3.12",
+             "pyautogui (whole-screen) is fine on any 3.10+; only the airtest path pins numpy<2.")
 
     # 2. API key
     has_key = bool(os.environ.get("QIRA_API_KEY"))
@@ -148,10 +156,34 @@ def main() -> int:
         line(WARN, "iOS device + WebDriverAgent",
              "Needs macOS + Xcode, a built/signed WebDriverAgent, and a trusted device or simulator.")
     elif target == "desktop":
-        # Core qirabot does not pull in pyautogui (the desktop adapter is lazy);
-        # verify it imports here. On a headless Linux box this also surfaces the
-        # "no display" failure before the run.
-        if not check_import("pyautogui", "desktop", "pyautogui importable"):
+        # Desktop backends — "ready" if EITHER imports on this interpreter:
+        #   * pyautogui — any OS (Win/macOS/Linux), drives the whole primary screen
+        #   * airtest's pywinauto backend — Windows-only, scopes to one window.
+        # airtest itself also drives Android/iOS, but has NO macOS desktop backend,
+        # so on macOS pyautogui is the only path. Core qirabot pulls in neither
+        # (lazy adapters); import here so a missing one — or a headless-Linux
+        # "no display" — fails now, not mid-run.
+        backends = []
+        try:
+            importlib.import_module("pyautogui")
+            backends.append("pyautogui (whole screen, any OS)")
+        except Exception:  # noqa: BLE001
+            pass
+        if is_windows:
+            # airtest ships pywinauto only on win32; offer it as the window-scoped
+            # alternative when present.
+            try:
+                importlib.import_module("pywinauto")
+                backends.append("airtest/pywinauto (Windows, window-scoped)")
+            except Exception:  # noqa: BLE001
+                pass
+        if backends:
+            line(OK, f"desktop backend importable ({'; '.join(backends)})")
+        else:
+            hint = 'pip install "qirabot[desktop]"  (whole screen)'
+            if is_windows:
+                hint += '  — or "qirabot[airtest]" for window-scoped'
+            line(NO, "desktop backend importable", hint)
             hard_ok = False
         line(WARN, "desktop runtime",
              "Ensure the target app is installed; on macOS grant Screen Recording + Accessibility.")

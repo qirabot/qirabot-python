@@ -2,7 +2,6 @@
 name: qirabot
 description: Drive any GUI with natural language — click, type, extract, and verify on web browsers, Android, iOS, desktop apps, and games — using the Qirabot Python SDK. Use this when the user wants to automate, test, or scrape a user interface by describing elements in plain language instead of CSS/XPath selectors; when driving a mobile app or a native desktop/game where DOM-based tools don't work; or for visual UI verification, screenshots, and RPA. Triggers include: automate a website or app, UI/end-to-end test, fill a form, scrape a page, tap or click a button, verify what's on screen, drive an Android/iOS app, automate a desktop application.
 license: MIT
-compatibility: Requires Python >=3.10 (browser/desktop also run on 3.13; use 3.10-3.12 only for the Android/airtest extra, whose numpy/opencv wheels stop at 3.12), a QIRA_API_KEY (get one at https://app.qirabot.com), and the target runtime — Playwright+Chromium for browser, adb+device for Android, the app installed for desktop. ffmpeg optional for screen recording.
 metadata:
   author: qirabot
   version: "0.1.0"
@@ -52,8 +51,9 @@ python3 -m venv .qira-venv && source .qira-venv/bin/activate   # Windows: .qira-
 pip install "qirabot[browser]"      # → also: playwright install chromium
 #   or  qirabot[appium]  (iOS: + Appium server & WebDriverAgent)  /  qirabot[desktop]
 
-# android/airtest needs its OWN venv on Python 3.10-3.12 — it pins numpy<2 and
-# would downgrade/conflict a shared env:
+# the airtest backends (Android, iOS, and window-scoped Windows desktop) need
+# their OWN venv on Python 3.10-3.12 — airtest pins numpy<2 and would conflict a
+# shared env:
 python3.12 -m venv .qira-venv-airtest && source .qira-venv-airtest/bin/activate
 pip install "qirabot[airtest]"
 
@@ -66,25 +66,50 @@ export QIRA_API_KEY="qk_..."        # from https://app.qirabot.com
 |---|---|---|
 | Web browser (Qirabot launches Chromium) | `templates/browser.py` | `qirabot[browser]` + `playwright install chromium` |
 | Android (Airtest, no Appium server) | `templates/android.py` | `qirabot[airtest]` (Python 3.10-3.12) |
+| iOS / Selenium / Appium (you build the driver, then `bind()`) | `templates/bolt_on.py` | `qirabot[appium]` / `qirabot` + `selenium` |
+| Desktop — Windows & macOS (`bind()` your driver) | `templates/bolt_on.py` | `qirabot[desktop]` (whole screen, any OS) · `qirabot[airtest]` (Windows only, one window) |
 
 Copy the template, fill in the `TODO`s (start URL / app package, and the task),
 then run it with **the interpreter preflight echoed** (its absolute path), not a
-bare `python`. For iOS/desktop/Selenium/Appium variants see
-`references/REFERENCE.md`.
+bare `python`. `templates/bolt_on.py` shows the bind-an-existing-driver pattern
+with Selenium as the runnable example plus Appium (iOS/Android), pyautogui
+(whole-screen desktop, any OS), and Airtest (window-scoped Windows desktop)
+variants in comments; see `references/REFERENCE.md` for the full per-platform
+action matrix and `bind()` details.
 
 ## Step 2 — Hand the task to qirabot (default), drop to primitives only to optimize
 
 **Default: give the whole task to `bot.ai`.**
 
 ```python
+from qirabot import StepResult
+
+def on_step(step: StepResult) -> None:   # live trace -> stdout (see below)
+    label = "done" if step.finished else step.action_type
+    print(f"  step {step.step}: {label} {step.params} — {step.decision}")
+
 result = bot.ai(target, "Add the cheapest item to the cart and check out",
-                max_steps=15)
+                max_steps=15, on_step=on_step)
 print(result.success, result.output)
 ```
 
 `bot.ai` offloads the perceive → decide → act loop to qirabot, which manages its
 own step history and self-heals when a step misfires. The agent does NOT plan or
-micromanage each click — it states the goal once. Then confirm the outcome:
+micromanage each click — it states the goal once.
+
+The examples here pass the target explicitly (`bot.ai(target, ...)`). **If you
+`bind()` a stable target first** — as the `android.py` and `bolt_on.py` templates
+do — drop the leading arg: `bot.ai("...")`, `bot.click("...")`. (Keep the explicit
+form for Playwright so new-tab follows stay visible — see `references/REFERENCE.md`.)
+
+**Always pass `on_step`.** Until it returns, `bot.ai` is a black box — `result`
+only lands at the end. `on_step` fires after every step and prints the model's
+running `decision` + action to stdout, which is your one live window into the
+run: a stuck, looping, or failed run becomes debuggable straight from the
+console, without opening the HTML report. (`StepResult` also carries `.output`
+and token/duration counts — see `references/REFERENCE.md`.)
+
+Then confirm the outcome:
 
 ```python
 ok = bot.verify(target, "the order confirmation page is shown")   # cheap, bool
@@ -130,7 +155,9 @@ screenshot before reporting them.
   user's identity (posting a comment, purchasing, deleting): gather/read first,
   report exactly what you're about to do, get the user's go-ahead, then act.
   Keep the read step and the action step separate.
-- Costs real credits per AI call. Watch for `InsufficientBalanceError`. Long
+- Costs real credits per AI call. Watch for `InsufficientBalanceError`. Pick the
+  cheapest model that fits via `Qirabot(model_alias=...)` — `fast`/`balanced` for
+  simple flows, stepping up only when needed (tiers in REFERENCE). Long
   human-in-the-loop waits (QR/OTP) poll with billed AI calls — raise the
   `wait_for` `interval` or poll the live driver instead (see REFERENCE).
 - `bot.close()` (or the `with` form) finalizes the task and writes the report —

@@ -16,12 +16,12 @@ Common constructor options (all keyword):
 |---|---|---|
 | `api_key` / env `QIRA_API_KEY` | — | auth |
 | `base_url` / env `QIRA_BASE_URL` | `https://app.qirabot.com` | self-hosted/regional |
-| `model_alias` | `""` | `fast` \| `balanced` \| `balanced_pro` \| `high_quality` |
-| `language` | `""` | response language tag, e.g. `"zh"`, `"en"` |
+| `model_alias` | `"balanced"` | `fast` \| `balanced` \| `balanced_pro` \| `high_quality` |
+| `language` | `"en"` | response language tag, e.g. `"zh"`, `"en"` |
 | `task_name` | `""` | shown in dashboard / report |
 | `report` | `True` | write HTML report on close |
 | `report_dir` / env `QIRA_REPORT_DIR` | `./qira_runs/<date>/<run>/` | output root |
-| `record` / env `QIRA_RECORD` | `False` | ffmpeg screen recording into the report |
+| `record` / env `QIRA_RECORD` | `False` | ffmpeg recording of the **host machine's screen** into the report — NOT the device. For mobile, this captures the host, not the phone; record the device with the driver instead (Airtest: `G.DEVICE.start_recording(...)` / `stop_recording(...)`). |
 | `screenshot_annotate` | `True` | red crosshair at click/type point |
 | `retry` / `retry_delay` | `1` / `1.0` | per-action retry on transient failure |
 | `settle_seconds` / env `QIRA_SETTLE_SECONDS` | per-platform | fixed pause after each action |
@@ -34,11 +34,30 @@ result = bot.ai(target, instruction, max_steps=20, *, on_step=None, model_alias=
 ```
 
 Runs the full perceive → decide → act loop on qirabot's backend (step history
-managed server-side; self-heals on a misfire). `on_step(step)` fires after each
-step; `StepResult` has `.step`, `.action_type`, `.params`, `.finished`.
+managed server-side; self-heals on a misfire). Prefer this over hand-sequencing
+primitives. Drop to the primitives below only for strict determinism or a stable
+flow you'll run repeatedly (e.g. CI).
 
-Prefer this over hand-sequencing primitives. Drop to the primitives below only
-for strict determinism or a stable flow you'll run repeatedly (e.g. CI).
+**`on_step(step)` — your live window into the run.** It fires after every step;
+`bot.ai` is otherwise a black box until `result` returns. Print it so a stuck,
+looping, or failed run is debuggable from stdout without opening the report:
+
+```python
+def on_step(step: StepResult) -> None:
+    label = "done" if step.finished else step.action_type
+    print(f"  step {step.step}: {label} {step.params} — {step.decision}")
+```
+
+`StepResult` fields: `.step`, `.action_type`, `.params`, `.finished`,
+`.decision` (the model's reasoning for this step), `.output` (text on the final
+step), and `.input_tokens` / `.output_tokens` / `.thinking_tokens` /
+`.step_duration_ms` / `.llm_decision_duration_ms`. The full list is also on
+`result.steps` after the run; `on_step` is the same data, live. (The callback is
+read-only — its return value is ignored and it can't steer the loop. It runs on
+the hot path, so keep it light and wrap any IO in `try`; an exception thrown here
+aborts the run.) A lighter alternative if you only want a trace, not structured
+data: `logging.basicConfig(level=logging.INFO)` — `bot.ai` already logs each step
+at INFO.
 
 ## Bind (drop the repeated first arg)
 
@@ -131,6 +150,20 @@ profile already logged in, so they skip straight to the task. This is the
 intended pattern for any auth-gated automation.
 
 ## Platform support (summary)
+
+**Frameworks → platforms** (the adapter is auto-detected from the object you
+`bind()`, so "which framework" = which driver you build):
+
+- Playwright / Selenium = browser.
+- Appium = iOS / Android.
+- Airtest = Android / iOS / Windows desktop — one framework spanning mobile and
+  desktop. Its **desktop** backend (pywinauto) is **Windows-only (no macOS)**;
+  reports as `desktop`, scopes to one window by HWND (`connect_device("Windows:///<hwnd>")`).
+- pyautogui = desktop, **whole primary screen**, any OS (Win / macOS / Linux).
+
+For Windows pick by scope: pyautogui for the whole screen (simplest), Airtest
+when you must isolate a single window. (Airtest's key map is Android-first, so
+`press_key` is less complete there than on pyautogui.)
 
 AI-located actions (`click`/`type_text`/`double_click`) and AI ops
 (`extract`/`verify`/`wait_for`/`ai`) work on **every** framework. Lower-level

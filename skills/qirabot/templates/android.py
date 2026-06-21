@@ -24,8 +24,11 @@ auto_setup(__file__)  # connect to the current adb device
 
 
 def on_step(step: StepResult) -> None:
+    # Print each step so the whole run is traceable from stdout — not just the
+    # HTML report. Shows the model's per-step decision live, so a failed or
+    # looping run is debuggable straight from the console.
     label = "done" if step.finished else step.action_type
-    print(f"  step {step.step}: {label} {step.params}")
+    print(f"  step {step.step}: {label} {step.params} — {step.decision}")
 
 
 start_app(APP)

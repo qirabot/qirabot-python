@@ -10,17 +10,26 @@ A self-contained HTML report (with screenshots) is written to
 ./qira_runs/<date>/<run>/report.html on close — open it to verify the run.
 """
 
-from qirabot import Qirabot
+from qirabot import Qirabot, StepResult
 
 # TODO: starting URL + the task to perform
 START_URL = "https://www.saucedemo.com"
 TASK = "Log in as standard_user / secret_sauce, then add the cheapest item to the cart"
 
+
+def on_step(step: StepResult) -> None:
+    # Print each step so the whole run is traceable from stdout — not just the
+    # HTML report. Shows the model's per-step decision live, so a failed or
+    # looping run is debuggable straight from the console.
+    label = "done" if step.finished else step.action_type
+    print(f"  step {step.step}: {label} {step.params} — {step.decision}")
+
+
 with Qirabot(task_name="browser-template", model_alias="balanced") as bot:
     page = bot.open(START_URL, headless=False)
 
     # Default: hand the whole task to qirabot's agent loop (self-heals).
-    result = bot.ai(page, TASK, max_steps=15)
+    result = bot.ai(page, TASK, max_steps=15, on_step=on_step)
     print("success:", result.success)
     print("output:", result.output)
 
