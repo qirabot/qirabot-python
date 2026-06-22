@@ -110,6 +110,7 @@ bot.click(target, "Login button")
 bot.type_text(target, "Email field", "a@b.com", press_enter=True)
 bot.double_click(target, "the file name to rename")                # double-click
 bot.long_press(target, "the message bubble", duration=2.5)         # mobile: context menu
+bot.key_down(target, "w"); bot.key_up(target, "w")                 # desktop: hold/release a key (pair them)
 text = bot.extract(target, "the displayed account balance")        # read one thing
 bot.wait_for(target, "the dashboard finished loading")             # gate, raises on timeout
 ```

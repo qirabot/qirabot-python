@@ -131,6 +131,8 @@ bot.go_back(target)                     # Playwright: smart (closes a historyles
 page = bot.close_tab(page)              # Playwright only
 bot.scroll(target, "down", 3)          # or distance=, x=, y=
 page = bot.press_key(target, "Enter")  # "ctrl+c", "ctrl+t" (reassign on tab switch)
+bot.key_down(target, "w"); bot.key_up(target, "w")               # desktop: hold/release a key
+bot.mouse_down(target, locate); bot.mouse_up(target, locate="")  # desktop: press-hold / release (mouse_down AI-located; locate=""=at cursor)
 path = bot.screenshot(target)          # saved frame -> path (None if report=False)
 bot.launch_app("WeChat")               # desktop: open an app (pyautogui can't)
 ```
@@ -177,6 +179,7 @@ actions vary:
 - `navigate`/`close_tab`: browser only (`close_tab` = Playwright only).
 - `go_back`: Playwright/Selenium/Appium; Airtest = Android only; pyautogui = no.
 - `long_press`: Appium/Airtest mobile only.
+- `mouse_down`/`mouse_up`/`key_down`/`key_up`: desktop only (pyautogui + Airtest Windows); pair them — held input auto-released after `ai()`/`close()`.
 - `right_click`/`hover`: full on browser/desktop; mobile taps / no-ops.
 
 Unsupported actions raise `NotImplementedError`.
