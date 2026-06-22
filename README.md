@@ -308,6 +308,10 @@ Platform support (all actions):
 | `scroll`       |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
 | `drag`         |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
 | `long_press`   |     ❌ ᶠ    |    ❌ ᶠ   |       ✅        |         ❌ ᶠ         |   ✅    |
+| `mouse_down`   |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          | Windows |
+| `mouse_up`     |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          | Windows |
+| `key_down`     |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          | Windows |
+| `key_up`       |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          | Windows |
 | `navigate`     |     ✅     |    ✅    |       ✅        |         ❌          |   ❌    |
 | `go_back`      |     ✅     |    ✅    |       ✅        |         ❌          | Android |
 | `close_tab`    |     ✅     |    ❌    |       ❌        |         ❌          |   ❌    |
@@ -323,6 +327,7 @@ shows how each underlying action maps per platform.
 - ᵈ Airtest has no element model; `clear_text` is best-effort on Android (caret-to-end + repeated delete).
 - ᵉ Airtest maps common key names per platform automatically — Android/iOS to adb keycodes, Windows to pywinauto `SendKeys` (`{ENTER}`, `^c`); names outside the map pass through unchanged.
 - ᶠ `long_press` is a touch-only gesture (Appium/Airtest mobile); the server only offers it on Android/iOS. Browser/desktop adapters raise `NotImplementedError`.
+- ᵍ `mouse_down`/`mouse_up`/`key_down`/`key_up` are desktop-only split press/release primitives (pyautogui, plus Airtest on Windows) for holding an input across other actions — hold a key to keep moving in a game, press-and-hold the mouse to drag, etc. Pair each press with its release; as a safety net any input still held is auto-released at the end of an `ai()` run and on `close()`. `mouse_up`'s locate is optional (omit to release at the current cursor; `bot.mouse_up(target)` is then deterministic — no AI, no billing — like `key_down`/`key_up`). Browser/mobile adapters raise `NotImplementedError`.
 
 `navigate`/`go_back` raise `NotImplementedError` where unsupported (pyautogui has
 no browser-style navigation; Airtest has no URL concept). `close_tab` is

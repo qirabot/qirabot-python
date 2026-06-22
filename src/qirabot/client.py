@@ -494,6 +494,101 @@ class Qirabot:
         )
         return self._result(adapter)
 
+    def mouse_down(
+        self,
+        target: Any,
+        locate: str,
+        *,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> Any:
+        """AI-powered mouse press-and-hold: locate an element and hold the
+        button down on it WITHOUT releasing (pairs with :meth:`mouse_up`).
+
+        Desktop-only primitive for drag-from / press-and-hold gestures. You are
+        responsible for the matching ``mouse_up``; as a safety net any input
+        still held is auto-released at the end of an :meth:`ai` run and on
+        :meth:`close`.
+
+        When ``timeout > 0``, auto-waits until the element looks present before
+        acting (see :meth:`click` for the semantics).
+
+        Returns the current target (same kind you passed in).
+        """
+        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        adapter = self._get_adapter(target)
+        self._ai_action(
+            target,
+            action={"type": "mouse_down", "params": {"locate": locate}},
+            model_alias=model_alias,
+            language=language,
+            retry=retry,
+        )
+        return self._result(adapter)
+
+    def mouse_up(
+        self,
+        target: Any,
+        locate: str = "",
+        *,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> Any:
+        """Release the mouse button (pairs with :meth:`mouse_down`).
+
+        With ``locate`` the element is found (AI, billed) and the cursor moves
+        there before releasing — i.e. drop on a target. With the default empty
+        ``locate`` it releases at the current cursor position deterministically
+        (no AI, no billing), like :meth:`press_key`.
+
+        Returns the current target (same kind you passed in).
+        """
+        adapter = self._get_adapter(target)
+        if not locate:
+            adapter.execute("mouse_up", {})
+            return self._result(adapter)
+        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        self._ai_action(
+            target,
+            action={"type": "mouse_up", "params": {"locate": locate}},
+            model_alias=model_alias,
+            language=language,
+            retry=retry,
+        )
+        return self._result(adapter)
+
+    def key_down(self, target: Any, key: str) -> Any:
+        """Press and HOLD a key without releasing (pairs with :meth:`key_up`).
+        No AI, no billing.
+
+        Desktop-only primitive for held-key gestures (e.g. hold ``"w"`` to keep
+        moving in a game, hold ``"shift"`` to modify clicks). You are
+        responsible for the matching ``key_up``; any key still held is
+        auto-released at the end of an :meth:`ai` run and on :meth:`close`.
+
+        Returns the current target (same kind you passed in).
+        """
+        adapter = self._get_adapter(target)
+        adapter.execute("key_down", {"key": key})
+        return self._result(adapter)
+
+    def key_up(self, target: Any, key: str) -> Any:
+        """Release a key previously held with :meth:`key_down`. No AI, no billing.
+
+        Returns the current target (same kind you passed in).
+        """
+        adapter = self._get_adapter(target)
+        adapter.execute("key_up", {"key": key})
+        return self._result(adapter)
+
     def extract(
         self,
         target: Any,
@@ -594,6 +689,14 @@ class Qirabot:
             raise
         finally:
             self._current_section = prev_section
+            # Safety net: release any mouse button / key the model held with
+            # mouse_down/key_down but never released (or that an exception
+            # interrupted), so a stuck input can't corrupt later actions or
+            # outlive this run. Best-effort; never mask the real result/error.
+            try:
+                self._get_adapter(target).release_all_inputs()
+            except Exception:
+                logger.debug("release_all_inputs failed after ai()", exc_info=True)
 
     def _ai_loop(
         self,
@@ -1238,6 +1341,12 @@ class Qirabot:
             if id(adapter) in seen:
                 continue
             seen.add(id(adapter))
+            # Backstop for scripted holds: release any input left held by
+            # mouse_down/key_down before tearing the adapter down.
+            try:
+                adapter.release_all_inputs()
+            except Exception:
+                pass
             try:
                 adapter.close()
             except Exception:

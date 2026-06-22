@@ -60,6 +60,11 @@ class AirtestAdapter(DeviceAdapter):
         # the device may not be connected yet (or may be switched later).
         self._target = target
         self._last_size: tuple[int, int] | None = None
+        # Held-input tracking for the split press/release primitives (Windows
+        # only), so release_all_inputs() can clean up a forgotten release. See
+        # DeviceAdapter.release_all_inputs.
+        self._held_keys: set[str] = set()
+        self._mouse_held = False
 
     @classmethod
     def accepts(cls, target: Any) -> bool:
@@ -184,6 +189,73 @@ class AirtestAdapter(DeviceAdapter):
         # Airtest's touch() takes a `duration` (seconds) that holds the finger
         # down — the canonical long-press primitive across its backends.
         self._device.touch((int(x), int(y)), duration=duration)
+
+    # Scancode names for airtest's Windows key_press/key_release (DirectInput).
+    # Wire key names are lowercased then looked up here; unmapped single
+    # letters/digits pass through uppercased ("w" -> "W").
+    _WIN_SCANCODES = {
+        "enter": "ENTER", "return": "ENTER", "escape": "ESCAPE", "esc": "ESCAPE",
+        "space": "SPACE", "tab": "TAB", "backspace": "BACKSPACE", "delete": "DELETE",
+        "shift": "LSHIFT", "ctrl": "LCTRL", "control": "LCTRL",
+        "alt": "LALT", "option": "LALT",
+        "up": "UP", "down": "DOWN", "left": "LEFT", "right": "RIGHT",
+        "arrowup": "UP", "arrowdown": "DOWN", "arrowleft": "LEFT", "arrowright": "RIGHT",
+        "home": "HOME", "end": "END", "pageup": "PAGE_UP", "pagedown": "PAGE_DOWN",
+    }
+
+    def _scancode(self, key: str) -> str:
+        return self._WIN_SCANCODES.get(key.lower(), key.upper())
+
+    def _require_windows(self, action: str) -> None:
+        # The split press/release primitives are mouse/keyboard concepts: only
+        # the Windows backend has them (touch platforms never get these tools).
+        if self._platform != "windows":
+            raise NotImplementedError(
+                f"airtest {self._platform or 'device'} does not support {action}"
+            )
+
+    def mouse_down(self, x: float, y: float) -> None:
+        self._require_windows("mouse_down")
+        # airtest's mouse_down() presses at the CURRENT cursor, so move first.
+        self._device.mouse_move((int(x), int(y)))
+        self._device.mouse_down()
+        self._mouse_held = True
+
+    def mouse_up(self, x: float | None = None, y: float | None = None) -> None:
+        self._require_windows("mouse_up")
+        if x is not None and y is not None:
+            self._device.mouse_move((int(x), int(y)))
+        self._device.mouse_up()
+        self._mouse_held = False
+
+    def key_down(self, key: str) -> None:
+        self._require_windows("key_down")
+        code = self._scancode(key)
+        self._device.key_press(code)
+        self._held_keys.add(code)
+
+    def key_up(self, key: str) -> None:
+        self._require_windows("key_up")
+        code = self._scancode(key)
+        self._device.key_release(code)
+        self._held_keys.discard(code)
+
+    def release_all_inputs(self) -> None:
+        # Best-effort sweep; one stuck input must not block releasing the rest.
+        if self._held_keys or self._mouse_held:
+            dev = self._device
+            for code in list(self._held_keys):
+                try:
+                    dev.key_release(code)
+                except Exception:
+                    pass
+            self._held_keys.clear()
+            if self._mouse_held:
+                try:
+                    dev.mouse_up()
+                except Exception:
+                    pass
+                self._mouse_held = False
 
     def right_click(self, x: float, y: float) -> None:
         if self._platform == "windows":

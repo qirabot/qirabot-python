@@ -140,6 +140,54 @@ class _BoundQirabot:
             )
         )
 
+    def mouse_down(
+        self,
+        locate: str,
+        *,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> Any:
+        return self._rebind(
+            self._bot.mouse_down(
+                self._target,
+                locate,
+                timeout=timeout,
+                interval=interval,
+                wait=wait,
+                retry=retry,
+                model_alias=model_alias,
+                language=language,
+            )
+        )
+
+    def mouse_up(
+        self,
+        locate: str = "",
+        *,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> Any:
+        return self._rebind(
+            self._bot.mouse_up(
+                self._target,
+                locate,
+                timeout=timeout,
+                interval=interval,
+                wait=wait,
+                retry=retry,
+                model_alias=model_alias,
+                language=language,
+            )
+        )
+
     def extract(
         self,
         instruction: str,
@@ -214,6 +262,12 @@ class _BoundQirabot:
 
     def press_key(self, key: str) -> Any:
         return self._rebind(self._bot.press_key(self._target, key))
+
+    def key_down(self, key: str) -> Any:
+        return self._rebind(self._bot.key_down(self._target, key))
+
+    def key_up(self, key: str) -> Any:
+        return self._rebind(self._bot.key_up(self._target, key))
 
     def close_tab(self) -> Any:
         return self._rebind(self._bot.close_tab(self._target))

@@ -152,6 +152,40 @@ class DeviceAdapter(ABC):
         """Press and hold at (x, y) for ``duration`` seconds (touch-only gesture)."""
         raise NotImplementedError(f"{type(self).__name__} does not support long_press")
 
+    def mouse_down(self, x: float, y: float) -> None:
+        """Press and HOLD the (left) mouse button at (x, y) without releasing.
+
+        Pairs with :meth:`mouse_up`. Desktop-only primitive; the holder is
+        responsible for the matching release (the client auto-releases any
+        still-held input at the end of an ``ai()`` run and on ``close()``).
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support mouse_down")
+
+    def mouse_up(self, x: float | None = None, y: float | None = None) -> None:
+        """Release the (left) mouse button.
+
+        With ``x``/``y`` the cursor moves there first (drag-to-target release);
+        without them it releases at the current cursor position.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support mouse_up")
+
+    def key_down(self, key: str) -> None:
+        """Press and HOLD ``key`` without releasing (pairs with :meth:`key_up`)."""
+        raise NotImplementedError(f"{type(self).__name__} does not support key_down")
+
+    def key_up(self, key: str) -> None:
+        """Release a key previously held with :meth:`key_down`."""
+        raise NotImplementedError(f"{type(self).__name__} does not support key_up")
+
+    def release_all_inputs(self) -> None:
+        """Release every mouse button / key still held by this adapter.
+
+        Safety net for the split press/release primitives: the client calls this
+        at the end of an ``ai()`` run and on ``close()`` so a forgotten
+        ``mouse_up``/``key_up`` can't leave an input stuck and silently corrupt
+        every later action. No-op for adapters that don't hold state.
+        """
+
     def navigate(self, url: str) -> None:
         raise NotImplementedError(f"{type(self).__name__} does not support navigate")
 
@@ -203,6 +237,19 @@ class DeviceAdapter(ABC):
         elif action_type == "long_press":
             # Wire carries duration in ms (like wait); adapters take seconds.
             self.long_press(x, y, int(params.get("duration", 2000)) / 1000.0)
+        elif action_type == "mouse_down":
+            self.mouse_down(x, y)
+        elif action_type == "mouse_up":
+            # locate is optional: with resolved x/y, release there (drag-to-
+            # target); without, release at the current cursor position.
+            if params.get("x") is not None and params.get("y") is not None:
+                self.mouse_up(x, y)
+            else:
+                self.mouse_up()
+        elif action_type == "key_down":
+            self.key_down(str(params.get("key", "")))
+        elif action_type == "key_up":
+            self.key_up(str(params.get("key", "")))
         elif action_type == "hover":
             self.hover(x, y)
         elif action_type == "type_text":

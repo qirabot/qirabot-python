@@ -51,6 +51,18 @@ class FakeAdapter(DeviceAdapter):
     def long_press(self, x, y, duration=2.0):
         self.calls.append(("long_press", (x, y, duration)))
 
+    def mouse_down(self, x, y):
+        self.calls.append(("mouse_down", (x, y)))
+
+    def mouse_up(self, x=None, y=None):
+        self.calls.append(("mouse_up", (x, y)))
+
+    def key_down(self, key):
+        self.calls.append(("key_down", (key,)))
+
+    def key_up(self, key):
+        self.calls.append(("key_up", (key,)))
+
     def device_info(self):
         return DeviceInfo(platform="test", width=100, height=100)
 
@@ -81,6 +93,33 @@ class TestExecuteDispatch:
         a = FakeAdapter()
         a.execute("long_press", {"x": 10, "y": 20, "duration": 600})
         assert a.calls == [("long_press", (10.0, 20.0, 0.6))]
+
+    def test_mouse_down(self):
+        a = FakeAdapter()
+        a.execute("mouse_down", {"x": 10, "y": 20})
+        assert a.calls == [("mouse_down", (10.0, 20.0))]
+
+    def test_mouse_up_with_coords(self):
+        a = FakeAdapter()
+        a.execute("mouse_up", {"x": 10, "y": 20})
+        # locate resolved -> release at the target point.
+        assert a.calls == [("mouse_up", (10.0, 20.0))]
+
+    def test_mouse_up_without_coords_releases_at_cursor(self):
+        a = FakeAdapter()
+        a.execute("mouse_up", {})
+        # no x/y on the wire -> release at the current cursor (None, None).
+        assert a.calls == [("mouse_up", (None, None))]
+
+    def test_key_down(self):
+        a = FakeAdapter()
+        a.execute("key_down", {"key": "w"})
+        assert a.calls == [("key_down", ("w",))]
+
+    def test_key_up(self):
+        a = FakeAdapter()
+        a.execute("key_up", {"key": "w"})
+        assert a.calls == [("key_up", ("w",))]
 
     def test_hover(self):
         a = FakeAdapter()
@@ -297,6 +336,62 @@ class TestPyAutoGuiScaling:
         a._pag.typewrite.assert_not_called()
         # paste hotkey fired with the platform modifier + 'v'
         assert a._pag.hotkey.call_args[0][-1] == "v"
+
+    def test_mouse_down_holds_button_scaled(self):
+        a = self._adapter(screenshot_w=2880, logical_w=1440)
+        a.mouse_down(200, 400)
+        # 2x display -> screenshot-pixel coords halved to logical points.
+        a._pag.mouseDown.assert_called_once_with(100, 200)
+        assert a._mouse_held is True
+
+    def test_mouse_up_with_coords(self):
+        a = self._adapter(screenshot_w=1440, logical_w=1440)
+        a._mouse_held = True
+        a.mouse_up(50, 60)
+        a._pag.mouseUp.assert_called_once_with(50, 60)
+        assert a._mouse_held is False
+
+    def test_mouse_up_without_coords_releases_at_cursor(self):
+        a = self._adapter(screenshot_w=1440, logical_w=1440)
+        a._mouse_held = True
+        a.mouse_up()
+        a._pag.mouseUp.assert_called_once_with()
+        assert a._mouse_held is False
+
+    def test_key_down_up_tracks_held(self):
+        a = self._adapter(screenshot_w=1440, logical_w=1440)
+        a.key_down("w")
+        a._pag.keyDown.assert_called_once_with("w")
+        assert a._held_keys == {"w"}
+        a.key_up("w")
+        a._pag.keyUp.assert_called_once_with("w")
+        assert a._held_keys == set()
+
+    def test_key_down_normalizes_name(self):
+        a = self._adapter(screenshot_w=1440, logical_w=1440)
+        a.key_down("ArrowUp")
+        # _norm_key maps ArrowUp -> up before holding.
+        a._pag.keyDown.assert_called_once_with("up")
+        assert a._held_keys == {"up"}
+
+    def test_release_all_inputs_releases_held_key_and_mouse(self):
+        a = self._adapter(screenshot_w=1440, logical_w=1440)
+        a.key_down("w")
+        a.key_down("shift")
+        a.mouse_down(10, 20)
+        a.release_all_inputs()
+        # every held key released, mouse released at current cursor, state cleared.
+        released = {c.args[0] for c in a._pag.keyUp.call_args_list}
+        assert released == {"w", "shift"}
+        a._pag.mouseUp.assert_called_once_with()
+        assert a._held_keys == set()
+        assert a._mouse_held is False
+
+    def test_release_all_inputs_noop_when_nothing_held(self):
+        a = self._adapter(screenshot_w=1440, logical_w=1440)
+        a.release_all_inputs()
+        a._pag.keyUp.assert_not_called()
+        a._pag.mouseUp.assert_not_called()
 
     def test_scroll_without_xy_anchors_at_screen_center(self):
         # Server plain scroll sends no x/y -> 0,0; without the center fallback

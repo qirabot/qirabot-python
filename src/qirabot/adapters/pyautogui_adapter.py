@@ -25,6 +25,11 @@ class PyAutoGuiAdapter(DeviceAdapter):
     def __init__(self, module: Any) -> None:
         self._pag = module
         self._scale: float | None = None
+        # Held-input tracking for the split press/release primitives, so
+        # release_all_inputs() can clean up anything mouse_down/key_down left
+        # held (see DeviceAdapter.release_all_inputs).
+        self._held_keys: set[str] = set()
+        self._mouse_held = False
 
     @classmethod
     def accepts(cls, target: Any) -> bool:
@@ -144,6 +149,45 @@ class PyAutoGuiAdapter(DeviceAdapter):
             self._pag.hotkey(*keys)
         else:
             self._pag.press(keys[0])
+
+    def mouse_down(self, x: float, y: float) -> None:
+        lx, ly = self._to_logical(x, y)
+        self._pag.mouseDown(lx, ly)
+        self._mouse_held = True
+
+    def mouse_up(self, x: float | None = None, y: float | None = None) -> None:
+        if x is not None and y is not None:
+            lx, ly = self._to_logical(x, y)
+            self._pag.mouseUp(lx, ly)
+        else:
+            self._pag.mouseUp()
+        self._mouse_held = False
+
+    def key_down(self, key: str) -> None:
+        k = self._norm_key(key)
+        self._pag.keyDown(k)
+        self._held_keys.add(k)
+
+    def key_up(self, key: str) -> None:
+        k = self._norm_key(key)
+        self._pag.keyUp(k)
+        self._held_keys.discard(k)
+
+    def release_all_inputs(self) -> None:
+        # Release in a best-effort sweep: one stuck key must not stop the rest
+        # from being released. Keys first, then the mouse button.
+        for k in list(self._held_keys):
+            try:
+                self._pag.keyUp(k)
+            except Exception:
+                pass
+        self._held_keys.clear()
+        if self._mouse_held:
+            try:
+                self._pag.mouseUp()
+            except Exception:
+                pass
+            self._mouse_held = False
 
     def drag(self, from_x: float, from_y: float, to_x: float, to_y: float) -> None:
         lfx, lfy = self._to_logical(from_x, from_y)

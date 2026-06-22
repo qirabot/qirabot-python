@@ -430,6 +430,135 @@ class TestQirabotLongPressParams:
         bot.close()
 
 
+class TestMouseDownUpKeyDownUp:
+    """mouse_down/mouse_up(with locate) are AI-located; mouse_up(no locate) and
+    key_down/key_up are deterministic client-side actions (no AI, no billing)."""
+
+    def _ai_bot(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        bot._get_adapter = MagicMock(return_value=MagicMock())
+        bot._ai_action = MagicMock(return_value={"success": True})
+        return bot
+
+    def _action_of(self, mock):
+        ca = mock.call_args
+        return ca.kwargs.get("action") or ca[1].get("action") or ca[0][1]
+
+    def test_mouse_down_is_ai_located(self):
+        bot = self._ai_bot()
+        bot.mouse_down("target", "the blue piece")
+        action = self._action_of(bot._ai_action)
+        assert action["type"] == "mouse_down"
+        assert action["params"] == {"locate": "the blue piece"}
+        bot.close()
+
+    def test_mouse_up_with_locate_is_ai_located(self):
+        bot = self._ai_bot()
+        bot.mouse_up("target", "the drop zone")
+        action = self._action_of(bot._ai_action)
+        assert action["type"] == "mouse_up"
+        assert action["params"] == {"locate": "the drop zone"}
+        bot.close()
+
+    def test_mouse_up_without_locate_is_deterministic(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        target = object()
+        adapter = MagicMock()
+        adapter.current_target = target
+        bot._adapters[id(target)] = adapter
+        bot._ai_action = MagicMock()
+
+        bot.mouse_up(target)  # no locate -> release at current cursor
+
+        adapter.execute.assert_called_once_with("mouse_up", {})
+        bot._ai_action.assert_not_called()  # deterministic: no AI, no billing
+        bot.close()
+
+    def test_key_down_up_are_deterministic(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        target = object()
+        adapter = MagicMock()
+        adapter.current_target = target
+        bot._adapters[id(target)] = adapter
+
+        bot.key_down(target, "w")
+        bot.key_up(target, "w")
+
+        assert adapter.execute.call_args_list[0][0] == ("key_down", {"key": "w"})
+        assert adapter.execute.call_args_list[1][0] == ("key_up", {"key": "w"})
+        bot.close()
+
+    def test_bound_variants_delegate(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        target = object()
+        adapter = MagicMock()
+        adapter.current_target = target
+        bot._adapters[id(target)] = adapter
+
+        bound = bot.bind(target)
+        bound.key_down("shift")
+        bound.key_up("shift")
+        bound.mouse_up()  # no locate -> deterministic
+
+        types = [c[0][0] for c in adapter.execute.call_args_list]
+        assert types == ["key_down", "key_up", "mouse_up"]
+        bot.close()
+
+
+class TestAiLoopReleasesHeldInputs:
+    """Safety net: after an ai() run the client must release any input the model
+    held with mouse_down/key_down but never released — on done, on max-steps, and
+    on exception — so a stuck button/key can't outlive the run."""
+
+    def _adapter(self):
+        # Real device_info (so the request body serializes) + a release spy +
+        # a no-op execute (we only assert the end-of-run release).
+        a = _SettleFakeAdapter()
+        a.release_all_inputs = MagicMock()
+        a.execute = MagicMock()
+        return a
+
+    def _bot(self, adapter, post):
+        bot = Qirabot(api_key="k", task_id="t")
+        bot._get_adapter = lambda target: adapter
+        bot._record_step = lambda *a, **k: None
+        bot._post_act_retrying = post
+        return bot
+
+    def test_released_on_done(self):
+        adapter = self._adapter()
+        bot = self._bot(adapter, lambda **kw: {
+            "success": True, "finished": True, "actionType": "done",
+            "params": {"result": "ok", "success": True}, "output": "ok",
+        })
+        bot.ai(object(), "hold then finish", max_steps=3)
+        adapter.release_all_inputs.assert_called_once()
+        bot.close()
+
+    def test_released_on_max_steps(self):
+        adapter = self._adapter()
+        # Never finishes -> loop exhausts max_steps with a key still "held".
+        bot = self._bot(adapter, lambda **kw: {
+            "success": True, "finished": False, "actionType": "key_down",
+            "params": {"key": "w"},
+        })
+        bot.ai(object(), "hold forever", max_steps=2)
+        adapter.release_all_inputs.assert_called_once()
+        bot.close()
+
+    def test_released_on_exception(self):
+        adapter = self._adapter()
+
+        def boom(**kw):
+            raise RuntimeError("network down")
+
+        bot = self._bot(adapter, boom)
+        with pytest.raises(RuntimeError, match="network down"):
+            bot.ai(object(), "will crash", max_steps=2)
+        adapter.release_all_inputs.assert_called_once()
+        bot.close()
+
+
 class TestPressKey:
     """press_key is a deterministic (no-AI) action: it routes through
     adapter.execute (reusing tab-switch + settle) and returns the current

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qirabot"
-version = "1.5.3"
+version = "1.5.4"
 description = "AI automation bolt-on for any framework"
 readme = "README.md"
 license = "MIT"
