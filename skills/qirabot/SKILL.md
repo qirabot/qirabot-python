@@ -7,21 +7,6 @@ metadata:
   version: "0.1.0"
 ---
 
-# Qirabot automation
-
-Give an agent eyes and hands for any GUI. Qirabot locates elements by
-**natural-language description** (no selectors) and works the same way across
-browser, Android, iOS, native desktop, and canvas/game UIs.
-
-## When to use this vs. not
-
-- **Use it** for: mobile apps, native desktop apps, games/canvas/Flutter (no
-  usable DOM), visual assertions ("the success banner is green"), and any "do
-  this on the screen" task described in plain language.
-- **Consider a DOM tool instead** for *pure web* automation when the host
-  already has a browser/DOM tool available — it can be cheaper and faster.
-  Qirabot's edge is the non-web and visual cases.
-
 ## Step 0 — Preflight (always run first)
 
 Do NOT write an automation script before the environment checks out. Run:
@@ -64,7 +49,7 @@ export QIRA_API_KEY="qk_..."        # from https://app.qirabot.com
 
 | Target | Template | Extra |
 |---|---|---|
-| Web browser (Qirabot launches Chromium) | `templates/browser.py` | `qirabot[browser]` + `playwright install chromium` |
+| Web browser (Qirabot launches Chromium) | `templates/browser.py` | `qirabot[browser]` + `playwright install chromium`. Also supports connecting to an existing Chrome via `cdp_url` (e.g. Browserless/Browserbase). |
 | Android (Airtest, no Appium server) | `templates/android.py` | `qirabot[airtest]` (Python 3.10-3.12) |
 | iOS / Selenium / Appium (you build the driver, then `bind()`) | `templates/bolt_on.py` | `qirabot[appium]` / `qirabot` + `selenium` |
 | Desktop — Windows & macOS (`bind()` your driver) | `templates/bolt_on.py` | `qirabot[desktop]` (whole screen, any OS) · `qirabot[airtest]` (Windows only, one window) |
@@ -94,8 +79,14 @@ print(result.success, result.output)
 ```
 
 `bot.ai` offloads the perceive → decide → act loop to qirabot, which manages its
-own step history and self-heals when a step misfires. The agent does NOT plan or
-micromanage each click — it states the goal once.
+own step history and self-heals when a step misfires.
+
+**Keep the task string a concise goal, not a step-by-step script.** `bot.ai` is
+smart enough to plan its own clicks — over-specifying ("click Search, then type
+X, then click the first result, then…") fights the model, locks in a brittle
+path, and burns extra steps. Write what success looks like, not how to get
+there. Good: `"Add the cheapest in-stock item to the cart and check out"`.
+Bad: a 6-step click-by-click recipe.
 
 The examples here pass the target explicitly (`bot.ai(target, ...)`). **If you
 `bind()` a stable target first** — as the `android.py` and `bolt_on.py` templates
@@ -109,12 +100,6 @@ run: a stuck, looping, or failed run becomes debuggable straight from the
 console, without opening the HTML report. (`StepResult` also carries `.output`
 and token/duration counts — see `references/REFERENCE.md`.)
 
-Then confirm the outcome:
-
-```python
-ok = bot.verify(target, "the order confirmation page is shown")   # cheap, bool
-```
-
 **Drop to the per-step primitives only as a deliberate optimization** — when you
 want strict, reproducible determinism, or you're codifying a stable flow to run
 repeatedly (e.g. a CI regression check). They cost less per action and are
@@ -123,26 +108,42 @@ reproducible, but are brittle to UI changes:
 ```python
 bot.click(target, "Login button")
 bot.type_text(target, "Email field", "a@b.com", press_enter=True)
+bot.double_click(target, "the file name to rename")                # double-click
+bot.long_press(target, "the message bubble", duration=2.5)         # mobile: context menu
 text = bot.extract(target, "the displayed account balance")        # read one thing
 bot.wait_for(target, "the dashboard finished loading")             # gate, raises on timeout
 ```
 
-`extract()` / `verify()` are cheap and useful regardless — use them to read
-values and check results even when the actions came from `bot.ai`.
+`extract()` reads values off the screen; `verify()` returns a bool the script
+can branch on. See Step 3 for when to use which after `bot.ai`.
 
 See `references/REFERENCE.md` for the full API: constructor options, `bind()`,
 navigation/scroll/keys, the per-platform action matrix, and errors.
 
-## Step 3 — Verify the result from the report, not assumptions
+## Step 3 — Check the result by who consumes it
 
 Every run writes a self-contained HTML report with per-step screenshots to
-`./qira_runs/<date>/<run>/report.html` (unless `report=False`). After running,
-**open/inspect that report (or call `bot.screenshot(target)`) to confirm what
-actually happened** — the model can act on (or read back) a misread screen, so
-don't report success without looking. Identity/state reads are especially
-slippery: `extract(target, "the logged-in username")` may return a rotating
-search-box hint rather than the account — confirm such values against the
-screenshot before reporting them.
+`./qira_runs/<date>/<run>/report.html` (unless `report=False`). `bot.ai` leaves
+three signals after it returns — pick by who acts on them:
+
+- **A human/agent will read the result** → open the report and look at the step
+  screenshots. Do NOT trust `result.success`: it's the same model that just
+  acted, reporting on itself, and can claim victory after clicking the wrong
+  button.
+- **The script must branch on the outcome** (CI gate, `if logged_in skip
+  login`, conditional flow) → `bot.verify(target, "...")`. Independent vision
+  call, returns `bool`, costs one AI call. The bool must drive something —
+  otherwise it's a billed call whose result goes nowhere, and the screenshot
+  already tells the human reviewer the same thing for free.
+- **The script needs to read a value** (price, username, status) →
+  `bot.extract(target, "...")`. Beware ambiguous locates:
+  `extract("the logged-in username")` can grab a rotating search-box hint
+  instead — scope the phrase and cross-check against the screenshot.
+
+When a run fails (`result.success=False`, or the screenshot looks wrong), the
+**stdout `on_step` trace is the fastest entry point** — find the step where the
+model started looping or chose a wrong action, then jump to that step's
+screenshot in the report.
 
 ## Notes
 

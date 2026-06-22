@@ -80,6 +80,7 @@ the explicit form** `page = bot.click(page, ...)` so new-tab follows stay visibl
 bot.click(target, locate, *, timeout=0.0, interval=2.0, wait="", model_alias="", language="")
 bot.type_text(target, locate, text, *, press_enter=False, clear_before_typing=False, timeout=0.0, ...)
 bot.double_click(target, locate, ...)
+bot.long_press(target, locate, *, duration=2.0, timeout=0.0, ...)  # Appium/Airtest mobile only
 ```
 
 - `locate` is a natural-language description ("the blue Submit button").
@@ -182,6 +183,18 @@ Unsupported actions raise `NotImplementedError`.
 with Qirabot(task_name="job") as bot:   # auto-close + report on exit
     ...
 # or: bot.close()  (atexit also cleans up; server times out orphans after 30 min)
+```
+
+The `with` block auto-handles error states: an exception records the task as
+**failed** (`fail()`); a `KeyboardInterrupt` records it as **cancelled**
+(`cancel()`); normal exit records **success** via `close()`. Call these
+manually when not using `with`:
+
+```python
+bot.fail("login wall hit — aborting")   # mark task failed (idempotent)
+bot.cancel("user pressed Ctrl+C")       # mark task cancelled (idempotent)
+bot.report()                            # write HTML report early (auto on close)
+bot.close()                             # finalize — cannot override a prior fail/cancel
 ```
 
 ## Errors

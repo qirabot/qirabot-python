@@ -33,9 +33,11 @@ with Qirabot(task_name="browser-template", model_alias="balanced") as bot:
     print("success:", result.success)
     print("output:", result.output)
 
-    # Confirm the outcome (cheap checks).
-    ok = bot.verify(page, "an item is in the shopping cart")
-    print("item in cart:", ok)
+    # If a script (CI gate, conditional flow) must branch on success,
+    # uncomment. `verify` is a billed AI call — skip it when a human will
+    # read the report:
+    # if not bot.verify(page, "an item is in the shopping cart"):
+    #     bot.fail("item never made it into the cart")
 
     # --- Optimization: for a stable flow you'll run repeatedly, hand-script the
     # --- steps instead (cheaper per action, deterministic, but brittle):
