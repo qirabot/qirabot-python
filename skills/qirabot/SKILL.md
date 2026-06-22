@@ -150,8 +150,10 @@ screenshot in the report.
 - One script run = one Qirabot session = one task. State (the live
   page/driver) does not survive across separate `python` invocations, so put a
   whole task in one script. **To reuse a login across runs**, open with a
-  persistent profile: `bot.open(url, user_data_dir="~/.qira-profiles/<site>")`
+  persistent profile: `bot.open(url, user_data_dir=os.path.expanduser("~/.qira-profiles/<site>"))`
   (log in once, later runs start authenticated — see `references/REFERENCE.md`).
+  NOTE: pass an **absolute** path — qirabot/Playwright do NOT expand `~`, so a
+  literal `"~/..."` creates a `./~/` dir in the CWD. Use `os.path.expanduser`.
 - **Confirm before irreversible or outward-facing actions** done under the
   user's identity (posting a comment, purchasing, deleting): gather/read first,
   report exactly what you're about to do, get the user's go-ahead, then act.

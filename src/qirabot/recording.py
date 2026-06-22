@@ -134,7 +134,7 @@ class ScreenRecorder:
 
         ffmpeg = _find_ffmpeg()
         if not ffmpeg:
-            logger.warning("recording skipped: ffmpeg not found (install it, e.g. `brew install ffmpeg`)")
+            logger.warning("recording skipped: ffmpeg not found (install it and ensure it's on PATH: https://ffmpeg.org/download.html)")
             return False
 
         index = _detect_screen_index(ffmpeg) if sys.platform == "darwin" else _DEFAULT_SCREEN_INDEX

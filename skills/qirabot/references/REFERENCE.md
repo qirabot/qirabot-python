@@ -141,7 +141,11 @@ A run is one session; login state is lost when it ends (see Lifecycle). To keep
 cookies/login **between** runs, open with a persistent Chromium profile:
 
 ```python
-page = bot.open(url, user_data_dir="~/.qira-profiles/<site>")
+import os
+# Pass an ABSOLUTE path: qirabot forwards user_data_dir straight to Playwright's
+# launch_persistent_context, and neither expands "~". A literal "~/..." would
+# create a "./~/" dir in the CWD — always wrap with os.path.expanduser.
+page = bot.open(url, user_data_dir=os.path.expanduser("~/.qira-profiles/<site>"))
 if not bot.verify(page, "the user is logged in (avatar shown, no Login button)"):
     ...  # first run only: do the login (e.g. QR scan), then it sticks
 ```
