@@ -1131,9 +1131,9 @@ class Qirabot:
 
         Use this when the run is aborted by an error on the client (e.g. your
         script catches an exception): without it, the default close() would
-        complete the still-running task as succeeded. Idempotent and a no-op for externally
-        owned tasks. The server's state machine rejects a later success-complete
-        once the task is failed, so a subsequent close() cannot override it.
+        complete the still-running task as "completed". Idempotent and a no-op for
+        externally owned tasks. The server's state machine rejects a later
+        completion once the task is failed, so a subsequent close() cannot override it.
         """
         if self._terminalized:
             return
@@ -1149,7 +1149,7 @@ class Qirabot:
 
     def cancel(self, reason: str = "") -> None:
         """Report a deliberate client-side abort (e.g. Ctrl+C) so the task is
-        recorded as cancelled rather than failed or, worse, succeeded.
+        recorded as cancelled rather than failed or, worse, completed.
 
         Like fail(), but the server records a distinct 'cancelled' terminal state
         kept out of the failure bucket. Shares fail()'s terminalized guard so it
