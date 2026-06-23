@@ -363,6 +363,29 @@ class AirtestAdapter(DeviceAdapter):
             cx, cy = info.width / 2.0, info.height / 2.0
         self._swipe(cx, cy, str(params.get("direction", "down")), pixels, info)
 
+    # Pixels of intended travel per mouse-wheel notch (WHEEL_DELTA) on Windows.
+    # There is no exact pixel<->notch mapping (one notch is ~3 lines by default,
+    # but apps vary), so this is an approximate, deliberately generous ratio:
+    # an ``amount`` of 500 becomes ~5 notches instead of the single-notch crawl
+    # a left-button drag produced.
+    _WIN_PIXELS_PER_NOTCH = 100
+
+    def _win_wheel(self, cx: float, cy: float, direction: str, pixels: int) -> None:
+        """Scroll a Windows desktop with the mouse wheel (vertical only).
+
+        airtest's ``swipe`` is a left-button DRAG, which selects content rather
+        than scrolling it; pywinauto's ``mouse.scroll`` sends a real wheel event.
+        ``wheel_dist`` is a notch count: positive scrolls up, negative down.
+        """
+        dev = self._device
+        notches = max(1, round(pixels / self._WIN_PIXELS_PER_NOTCH))
+        wheel = notches if direction == "up" else -notches
+        # mouse.scroll() anchors at SCREEN coords and sends the wheel to the
+        # control under the cursor, so convert window->screen exactly as
+        # touch()/swipe() do (_action_pos + _fix_op_pos).
+        pos = dev._fix_op_pos(dev._action_pos((int(cx), int(cy))))
+        dev.mouse.scroll((int(pos[0]), int(pos[1])), wheel)
+
     def _swipe(
         self, cx: float, cy: float, direction: str, pixels: int, info: DeviceInfo
     ) -> None:
@@ -370,6 +393,14 @@ class AirtestAdapter(DeviceAdapter):
         span = h if direction in ("up", "down") else w
         if pixels <= 0:
             pixels = int(span * 0.6)
+        # Windows scrolls with the wheel, not a drag. Vertical only — horizontal
+        # wheel isn't widely supported, so left/right fall through to the drag.
+        if self._platform == "windows" and direction in ("up", "down"):
+            try:
+                self._win_wheel(cx, cy, direction, pixels)
+                return
+            except Exception:
+                pass  # missing internals / unsupported: fall back to a drag
         pixels = min(pixels, int(span * 0.7))  # keep the whole gesture on-screen
 
         if direction == "down":

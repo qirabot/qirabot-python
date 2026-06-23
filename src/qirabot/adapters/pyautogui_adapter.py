@@ -195,6 +195,29 @@ class PyAutoGuiAdapter(DeviceAdapter):
         self._pag.moveTo(lfx, lfy)
         self._pag.drag(ltx - lfx, lty - lfy, duration=0.5)
 
+    @staticmethod
+    def _wheel_clicks(notches: int) -> int:
+        """Convert a notch count to ``pyautogui.scroll()``'s platform unit.
+
+        ``pyautogui.scroll(clicks)`` means something different on each OS:
+
+        * Windows: a raw wheel delta — ``dwData`` is passed straight to
+          ``mouse_event``, and Windows treats ``WHEEL_DELTA`` (120) as one
+          notch, so a notch needs ``clicks = 120``.
+        * macOS: lines (``kCGScrollEventUnitLine``), ~3 lines per notch.
+        * Linux/X11: one wheel "click" (button 4/5 press) per unit, i.e. a notch.
+
+        Without this conversion the macOS-tuned ``distance * 3`` is only ~0.1
+        notch on Windows (a sub-notch delta that most apps round to zero), which
+        is why scrolling there barely moved.
+        """
+        system = platform.system()
+        if system == "Windows":
+            return notches * 120  # WHEEL_DELTA per notch
+        if system == "Darwin":
+            return notches * 3  # ~3 lines per notch (unchanged macOS behaviour)
+        return notches  # X11: one button-4/5 click per notch
+
     def scroll(self, x: float, y: float, direction: str, distance: int) -> None:
         # The server's plain `scroll` sends no x/y, so they arrive as 0 and the
         # scroll would anchor at the top-left corner (menu bar / non-scrollable
@@ -204,7 +227,13 @@ class PyAutoGuiAdapter(DeviceAdapter):
             info = self.device_info()
             x, y = info.width / 2.0, info.height / 2.0
         lx, ly = self._to_logical(x, y)
-        clicks = distance * 3
+        # On Windows pyautogui emits MOUSEEVENTF_WHEEL without a move, so its
+        # x/y are ignored and the wheel lands on whatever is under the CURRENT
+        # cursor; move there first so scroll_at actually targets (x, y). macOS
+        # and X11 already move to the anchor inside their own _scroll.
+        if platform.system() == "Windows":
+            self._pag.moveTo(lx, ly)
+        clicks = self._wheel_clicks(max(1, distance))
         if direction == "up":
             self._pag.scroll(clicks, x=lx, y=ly)
         elif direction == "down":

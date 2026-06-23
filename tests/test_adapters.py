@@ -393,25 +393,71 @@ class TestPyAutoGuiScaling:
         a._pag.keyUp.assert_not_called()
         a._pag.mouseUp.assert_not_called()
 
-    def test_scroll_without_xy_anchors_at_screen_center(self):
+    # pyautogui.scroll()'s unit is platform-dependent, so every scroll test pins
+    # platform.system() — otherwise the expected click count flips with the OS
+    # the suite runs on. macOS: lines (~3/notch); Windows: raw wheel delta
+    # (120/notch); X11: one click/notch.
+    @staticmethod
+    def _pin_platform(monkeypatch, name):
+        monkeypatch.setattr(
+            "qirabot.adapters.pyautogui_adapter.platform.system", lambda: name
+        )
+
+    def test_scroll_without_xy_anchors_at_screen_center(self, monkeypatch):
         # Server plain scroll sends no x/y -> 0,0; without the center fallback
         # the scroll would land on the top-left corner and do nothing.
+        self._pin_platform(monkeypatch, "Darwin")
         a = self._adapter(screenshot_w=1440, logical_w=1440, logical_h=900)
         a.scroll(0, 0, "down", 5)
+        # macOS unit is lines (~3/notch): 5 notches -> 15 lines, centered.
         # center = (720, 450) in screenshot px == logical px here (scale 1.0)
         a._pag.scroll.assert_called_once_with(-15, x=720, y=450)
 
-    def test_scroll_with_explicit_xy_is_respected(self):
+    def test_scroll_with_explicit_xy_is_respected(self, monkeypatch):
+        self._pin_platform(monkeypatch, "Darwin")
         a = self._adapter(screenshot_w=1440, logical_w=1440, logical_h=900)
         a.scroll(100, 200, "up", 5)
         a._pag.scroll.assert_called_once_with(15, x=100, y=200)
 
-    def test_server_scroll_path_honors_amount_and_centers(self):
+    def test_server_scroll_path_honors_amount_and_centers(self, monkeypatch):
         # End-to-end through execute(): {direction, amount} only, as the server
-        # sends it. amount 500 -> distance 5 -> 15 clicks, centered.
+        # sends it. amount 500 -> distance 5 -> 15 lines on macOS, centered.
+        self._pin_platform(monkeypatch, "Darwin")
         a = self._adapter(screenshot_w=1440, logical_w=1440, logical_h=900)
         a.execute("scroll", {"direction": "down", "amount": 500})
         a._pag.scroll.assert_called_once_with(-15, x=720, y=450)
+
+    def test_scroll_macos_does_not_move_cursor(self, monkeypatch):
+        # macOS _scroll anchors at x/y itself, so the adapter must NOT moveTo.
+        self._pin_platform(monkeypatch, "Darwin")
+        a = self._adapter(screenshot_w=1440, logical_w=1440, logical_h=900)
+        a.scroll(100, 200, "down", 5)
+        a._pag.moveTo.assert_not_called()
+
+    def test_scroll_windows_uses_wheel_delta_and_moves_first(self, monkeypatch):
+        # Windows scroll() takes a raw wheel delta (120 == one notch) and ignores
+        # x/y (no MOVE flag), so the adapter must scale by 120 AND move the cursor
+        # to the anchor first, or the wheel lands wherever the cursor happens to be.
+        self._pin_platform(monkeypatch, "Windows")
+        a = self._adapter(screenshot_w=1440, logical_w=1440, logical_h=900)
+        a.scroll(100, 200, "up", 5)
+        a._pag.moveTo.assert_called_once_with(100, 200)
+        a._pag.scroll.assert_called_once_with(600, x=100, y=200)  # 5 * 120
+
+    def test_scroll_windows_horizontal_scales_and_signs(self, monkeypatch):
+        self._pin_platform(monkeypatch, "Windows")
+        a = self._adapter(screenshot_w=1440, logical_w=1440, logical_h=900)
+        a.scroll(100, 200, "right", 5)
+        a._pag.hscroll.assert_called_once_with(600, x=100, y=200)
+
+    def test_scroll_linux_uses_one_click_per_notch(self, monkeypatch):
+        # X11 scroll() is one wheel click (notch) per unit and already anchors at
+        # x/y inside its own _scroll, so no 120x scaling and no extra moveTo.
+        self._pin_platform(monkeypatch, "Linux")
+        a = self._adapter(screenshot_w=1440, logical_w=1440, logical_h=900)
+        a.scroll(100, 200, "down", 5)
+        a._pag.scroll.assert_called_once_with(-5, x=100, y=200)
+        a._pag.moveTo.assert_not_called()
 
     def test_press_key_single_special_is_normalized(self):
         # "Enter"/"ArrowDown" aren't pyautogui key names; press() would no-op.
