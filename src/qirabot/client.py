@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import io
 import json
 import logging
 import os
+import signal
+import threading
 import time
 import weakref
 from dataclasses import dataclass, field
@@ -31,6 +34,38 @@ if TYPE_CHECKING:
     from playwright.sync_api import ViewportSize
 
 logger = logging.getLogger("qirabot")
+
+
+@contextlib.contextmanager
+def _suppress_sigint():
+    """Make the wrapped block uninterruptible by Ctrl+C (SIGINT).
+
+    Used in :meth:`Qirabot.close` so a flurry of Ctrl+C during shutdown cannot
+    skip writing the run report — a plain try/except can't guarantee this because
+    Python delivers each SIGINT as a fresh ``KeyboardInterrupt`` at whatever
+    bytecode boundary it lands on, including inside the report write itself.
+
+    Only the SIGINTs that arrive *inside* the block are suppressed; the original
+    KeyboardInterrupt that triggered shutdown keeps propagating once we return.
+    A no-op (best-effort) off the main thread or where SIGINT can't be reassigned
+    (``signal.signal`` is main-thread only) — callers keep their own try/except
+    as the fallback for that case.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    try:
+        previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except (ValueError, OSError):
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            signal.signal(signal.SIGINT, previous)
+        except (ValueError, OSError):
+            pass
 
 
 @dataclass
@@ -1317,14 +1352,30 @@ class Qirabot:
         if self._closed:
             return
         self._closed = True
-        # Finalize any in-progress screen recording before writing the report so
-        # the mp4 is complete on disk (moov atom flushed) when _write_report
-        # scans report_dir for it.
-        if self._recorder is not None:
-            self.stop_recording()
-        # Emit the run report before tearing down (best-effort; never block
-        # cleanup). Runs on normal exit, exception (via __exit__), and atexit.
-        self._write_report()
+        # The report is the primary artifact of an aborted run, so guarantee it
+        # even if the user mashes Ctrl+C during shutdown: SIGINT is suppressed
+        # for this whole block (recording finalize + report write). A plain
+        # try/except can't promise this — each Ctrl+C raises a fresh
+        # KeyboardInterrupt at an arbitrary point, including inside the write.
+        # Worst case ffmpeg is slow to finalize and Ctrl+C is unresponsive for a
+        # few seconds (stop_recording is bounded by its own timeouts); normal
+        # finalize is sub-second. The try/except blocks below are the fallback
+        # for the non-main-thread case where suppression is a no-op.
+        with _suppress_sigint():
+            # Finalize any in-progress screen recording first so the mp4 is
+            # complete on disk (moov atom flushed) when _write_report scans
+            # report_dir for it.
+            if self._recorder is not None:
+                try:
+                    self.stop_recording()
+                except BaseException:
+                    logger.debug("recording teardown interrupted", exc_info=True)
+            # Emit the run report before tearing down. Runs on normal exit,
+            # exception (via __exit__), and atexit.
+            try:
+                self._write_report()
+            except BaseException:
+                logger.debug("report write interrupted", exc_info=True)
         # Only auto-complete (as success) when no terminal status was reported
         # yet — an errored run reports failure via fail() first.
         if self._task_id is not None and not self._external_task and not self._terminalized:

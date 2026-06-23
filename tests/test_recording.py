@@ -361,3 +361,59 @@ class TestReportRecordingNotice:
         out = bot.report(str(tmp_path / "report.html"))
         markup = Path(out).read_text()
         assert "Recording was requested but not produced" not in markup
+
+
+# --------------------------------------------------------------------------- #
+# Report survives Ctrl+C during shutdown
+# --------------------------------------------------------------------------- #
+class _InterruptingRecorder:
+    """Recorder whose stop() raises KeyboardInterrupt — simulates a Ctrl+C
+    landing while ffmpeg is being finalized in close()."""
+
+    def __init__(self, output, *, fps=12, capture_cursor=True):
+        self.output = output
+
+    def start(self):
+        return True
+
+    @property
+    def active(self):
+        return False
+
+    def stop(self, timeout=10.0):
+        raise KeyboardInterrupt()
+
+
+class TestReportSurvivesCtrlC:
+    def test_report_written_when_recording_stop_interrupted(self, monkeypatch, tmp_path):
+        # A Ctrl+C during recording finalize must not skip the report.
+        monkeypatch.setattr(client_mod, "ScreenRecorder", _InterruptingRecorder)
+        bot = Qirabot(api_key="k", task_id="t", record=True, report_dir=str(tmp_path))
+        bot._log.append(dict(_LOG_ENTRY))
+        report_path = Path(bot.report_dir) / "report.html"
+
+        bot.close()  # must not raise, and must still produce the report
+
+        assert report_path.exists()
+
+    def test_close_swallows_keyboardinterrupt_from_report_write(self, monkeypatch, tmp_path):
+        # The fallback path (non-main-thread, where SIGINT suppression is a
+        # no-op): a KeyboardInterrupt raised inside the write is swallowed so
+        # close() finishes its teardown instead of aborting.
+        bot = Qirabot(api_key="k", task_id="t", report_dir=str(tmp_path))
+        bot._log.append(dict(_LOG_ENTRY))
+
+        def boom(out=None):
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr(bot, "_write_report", boom)
+        bot.close()  # does not raise
+        assert bot._closed is True
+
+    def test_suppress_sigint_ignores_then_restores(self):
+        import signal
+
+        original = signal.getsignal(signal.SIGINT)
+        with client_mod._suppress_sigint():
+            assert signal.getsignal(signal.SIGINT) is signal.SIG_IGN
+        assert signal.getsignal(signal.SIGINT) is original

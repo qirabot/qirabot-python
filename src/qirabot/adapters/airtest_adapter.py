@@ -173,8 +173,21 @@ class AirtestAdapter(DeviceAdapter):
             Image.Transpose.ROTATE_270 if ori == 1 else Image.Transpose.ROTATE_90
         )
 
+    # Harden Windows clicks: airtest presses immediately after teleporting the
+    # cursor and holds only ~10ms, so apps that hit-test on WM_MOUSEMOVE or
+    # debounce fast clicks miss it. ``offset`` injects move events before the
+    # press, ``duration`` lengthens the hold; coordinates (accuracy) unchanged.
+    _WIN_CLICK_OFFSET = 2
+    _WIN_CLICK_DURATION = 0.1
+
     def click(self, x: float, y: float) -> None:
-        self._device.touch((int(x), int(y)))
+        pos = (int(x), int(y))
+        if self._platform == "windows":
+            self._device.touch(
+                pos, offset=self._WIN_CLICK_OFFSET, duration=self._WIN_CLICK_DURATION
+            )
+        else:
+            self._device.touch(pos)
 
     def double_click(self, x: float, y: float) -> None:
         pos = (int(x), int(y))
