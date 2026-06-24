@@ -14,7 +14,7 @@ import time
 import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from qirabot._optional import require
 from qirabot._transport import Transport
@@ -37,7 +37,7 @@ logger = logging.getLogger("qirabot")
 
 
 @contextlib.contextmanager
-def _suppress_sigint():
+def _suppress_sigint() -> Iterator[None]:
     """Make the wrapped block uninterruptible by Ctrl+C (SIGINT).
 
     Used in :meth:`Qirabot.close` so a flurry of Ctrl+C during shutdown cannot
