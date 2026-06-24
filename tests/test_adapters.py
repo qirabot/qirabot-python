@@ -304,8 +304,10 @@ class TestPyAutoGuiScaling:
         a = self._adapter(screenshot_w=2880, logical_w=1440)
         a.drag(100, 100, 300, 500)
         a._pag.moveTo.assert_called_once_with(50, 50)
-        # drag receives the logical delta: (150-50, 250-50)
-        a._pag.drag.assert_called_once_with(100, 200, duration=0.5)
+        # drag receives the logical delta: (150-50, 250-50). button="left" is
+        # required so pyautogui's default "primary" never reaches the macOS
+        # backend's _dragTo() (which asserts left/middle/right).
+        a._pag.drag.assert_called_once_with(100, 200, duration=0.5, button="left")
 
     def test_device_info_reports_physical_pixels_on_retina(self):
         # device_info must match the screenshot dimensions (physical), not
@@ -616,6 +618,55 @@ class TestAirtestPressKey:
         a, dev = self._adapter("windows")
         a.press_key("Enter")
         dev.keyevent.assert_called_once_with("{ENTER}")
+
+    def test_windows_win_combo_uses_down_up(self):
+        # SendKeys' ^%+ prefixes can't express Win, so a Win combo is built as a
+        # down/up sequence around the base key (injects the real VK_LWIN).
+        a, dev = self._adapter("windows")
+        a.press_key("win+d")
+        dev.keyevent.assert_called_once_with("{VK_LWIN down}d{VK_LWIN up}")
+
+    def test_windows_bare_win_opens_start(self):
+        a, dev = self._adapter("windows")
+        a.press_key("win")
+        dev.keyevent.assert_called_once_with("{LWIN}")
+
+    def test_windows_win_combo_with_extra_mod_and_special_base(self):
+        # Mods nest in order; the base reuses the braced-special-key map
+        # (server sends JS-style "arrowleft", not "left").
+        a, dev = self._adapter("windows")
+        a.press_key("ctrl+win+arrowleft")
+        dev.keyevent.assert_called_once_with(
+            "{VK_CONTROL down}{VK_LWIN down}{LEFT}{VK_LWIN up}{VK_CONTROL up}"
+        )
+
+    def test_windows_function_key_is_braced(self):
+        # Bare "f5" would type the letters f,5 via SendKeys; it must be {F5}.
+        a, dev = self._adapter("windows")
+        a.press_key("f5")
+        dev.keyevent.assert_called_once_with("{F5}")
+
+    def test_windows_alt_f4_braces_the_function_key(self):
+        # The classic regression: "%f4" is Alt+F then '4', NOT Alt+F4.
+        a, dev = self._adapter("windows")
+        a.press_key("alt+f4")
+        dev.keyevent.assert_called_once_with("%{F4}")
+
+    def test_windows_insert_is_braced(self):
+        a, dev = self._adapter("windows")
+        a.press_key("insert")
+        dev.keyevent.assert_called_once_with("{INSERT}")
+
+    def test_windows_bare_arrow_name_is_braced(self):
+        # The model may emit "Down" (not just "ArrowDown"); both must brace.
+        a, dev = self._adapter("windows")
+        a.press_key("down")
+        dev.keyevent.assert_called_once_with("{DOWN}")
+
+    def test_windows_win_plus_function_key(self):
+        a, dev = self._adapter("windows")
+        a.press_key("win+f4")
+        dev.keyevent.assert_called_once_with("{VK_LWIN down}{F4}{VK_LWIN up}")
 
     def test_android_single_key_is_adb_keycode(self):
         a, dev = self._adapter("android")

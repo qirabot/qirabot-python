@@ -16,7 +16,7 @@ Common constructor options (all keyword):
 |---|---|---|
 | `api_key` / env `QIRA_API_KEY` | — | auth |
 | `base_url` / env `QIRA_BASE_URL` | `https://app.qirabot.com` | self-hosted/regional |
-| `model_alias` | `"balanced"` | `fast` \| `balanced` \| `balanced_pro` \| `high_quality` |
+| `model_alias` | `"balanced_pro"` | `fast` \| `balanced` \| `balanced_pro` \| `high_quality` |
 | `language` | `"en"` | response language tag, e.g. `"zh"`, `"en"` |
 | `task_name` | `""` | shown in dashboard / report |
 | `report` | `True` | write HTML report on close |

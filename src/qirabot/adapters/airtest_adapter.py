@@ -313,12 +313,31 @@ class AirtestAdapter(DeviceAdapter):
     # and named keys in braces ({ENTER}, {TAB}, ...). A bare "ENTER" there would
     # type the letters E-N-T-E-R, so single special keys must be braced too.
     _WIN_MODS = {"ctrl": "^", "control": "^", "alt": "%", "option": "%", "shift": "+"}
+    # An unmapped special key is worse than a no-op here: SendKeys would TYPE the
+    # name (e.g. "f5" -> the letters f,5), so every key the model emits for a
+    # desktop hotkey must be spelled out. F13-F24/numpad/media keys are omitted:
+    # the model doesn't emit them for GUI automation.
     _WIN_KEYS = {
         "enter": "{ENTER}", "return": "{ENTER}", "tab": "{TAB}", "escape": "{ESC}",
         "esc": "{ESC}", "backspace": "{BACKSPACE}", "delete": "{DELETE}", "del": "{DELETE}",
-        "space": "{SPACE}", "arrowup": "{UP}", "arrowdown": "{DOWN}",
-        "arrowleft": "{LEFT}", "arrowright": "{RIGHT}", "pageup": "{PGUP}",
-        "pagedown": "{PGDN}", "home": "{HOME}", "end": "{END}",
+        "space": "{SPACE}", "insert": "{INSERT}", "ins": "{INSERT}",
+        "arrowup": "{UP}", "arrowdown": "{DOWN}", "arrowleft": "{LEFT}", "arrowright": "{RIGHT}",
+        "up": "{UP}", "down": "{DOWN}", "left": "{LEFT}", "right": "{RIGHT}",
+        "pageup": "{PGUP}", "pagedown": "{PGDN}", "pgup": "{PGUP}", "pgdn": "{PGDN}",
+        "home": "{HOME}", "end": "{END}",
+        **{"f%d" % i: "{F%d}" % i for i in range(1, 13)},
+    }
+
+    # SendKeys' modifier prefixes (^ % +) have no Win equivalent, so "win+d"
+    # would silently drop win. Build any Win combo with explicit down/up tokens
+    # ({VK_LWIN down}d{VK_LWIN up}) — that injects the real VK_LWIN shell hotkeys
+    # need (Win+D/Win+I/...).
+    _WIN_ALIASES = frozenset({"win", "super", "meta", "cmd", "command"})
+    _WIN_MOD_VK = {
+        "ctrl": "VK_CONTROL", "control": "VK_CONTROL",
+        "alt": "VK_MENU", "option": "VK_MENU", "shift": "VK_SHIFT",
+        "win": "VK_LWIN", "super": "VK_LWIN", "meta": "VK_LWIN",
+        "cmd": "VK_LWIN", "command": "VK_LWIN",
     }
 
     def press_key(self, key: str) -> None:
@@ -327,6 +346,19 @@ class AirtestAdapter(DeviceAdapter):
         # combos. Android/iOS use adb-style keycode names and have no ctrl-style
         # combos (the server only sends single keycodes there).
         if self._platform == "windows":
+            if base.lower() in self._WIN_ALIASES or any(
+                m.lower() in self._WIN_ALIASES for m in mods
+            ):
+                # Bare Win opens Start; a combo holds the mods around the base.
+                if not mods and base.lower() in self._WIN_ALIASES:
+                    self._device.keyevent("{LWIN}")
+                    return
+                downs = "".join("{%s down}" % self._WIN_MOD_VK[m.lower()] for m in mods)
+                ups = "".join(
+                    "{%s up}" % self._WIN_MOD_VK[m.lower()] for m in reversed(mods)
+                )
+                self._device.keyevent(downs + self._WIN_KEYS.get(base.lower(), base) + ups)
+                return
             prefix = "".join(self._WIN_MODS.get(m.lower(), "") for m in mods)
             self._device.keyevent(prefix + self._WIN_KEYS.get(base.lower(), base))
             return

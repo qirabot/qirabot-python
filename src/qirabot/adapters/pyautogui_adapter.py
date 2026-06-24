@@ -193,7 +193,13 @@ class PyAutoGuiAdapter(DeviceAdapter):
         lfx, lfy = self._to_logical(from_x, from_y)
         ltx, lty = self._to_logical(to_x, to_y)
         self._pag.moveTo(lfx, lfy)
-        self._pag.drag(ltx - lfx, lty - lfy, duration=0.5)
+        # button="left" is REQUIRED, not cosmetic: pyautogui.drag() defaults to
+        # button="primary" and, unlike mouseDown(), does NOT normalize it before
+        # handing it to the macOS backend's _dragTo(), which asserts the button
+        # is one of left/middle/right. So the default raises AssertionError on
+        # macOS *after* the mouseDown fires (leaving the button stuck). Passing
+        # "left" explicitly keeps the unnormalized "primary" from reaching _dragTo.
+        self._pag.drag(ltx - lfx, lty - lfy, duration=0.5, button="left")
 
     @staticmethod
     def _wheel_clicks(notches: int) -> int:

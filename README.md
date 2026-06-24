@@ -75,8 +75,8 @@ trade cost for quality:
 | Alias | Trade-off |
 |---|---|
 | `fast` | Cheapest, lowest latency |
-| `balanced` | The default — good cost/quality balance |
-| `balanced_pro` | Stronger than `balanced` |
+| `balanced` | Good cost/quality balance |
+| `balanced_pro` | The default — stronger than `balanced` |
 | `high_quality` | Best quality, highest cost |
 
 Check your dashboard for the live list your account can use, then pass the
