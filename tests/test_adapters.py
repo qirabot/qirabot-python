@@ -1,7 +1,7 @@
 """Tests for adapter base execute() dispatch logic."""
 
 import importlib.util
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -619,26 +619,50 @@ class TestAirtestPressKey:
         a.press_key("Enter")
         dev.keyevent.assert_called_once_with("{ENTER}")
 
+    @staticmethod
+    def _key_calls(dev):
+        # The DirectInput path drives key_press/key_release on the device; pull
+        # them out (in order) so the interleaving of downs/ups is asserted.
+        return [c for c in dev.method_calls if c[0] in ("key_press", "key_release")]
+
     def test_windows_win_combo_uses_down_up(self):
-        # SendKeys' ^%+ prefixes can't express Win, so a Win combo is built as a
-        # down/up sequence around the base key (injects the real VK_LWIN).
+        # SendKeys' ^%+ prefixes can't express Win and the bundled pywinauto
+        # rejects {KEY down}/{KEY up} tokens, so a Win combo goes through the
+        # DirectInput scancode path (press/release of the real LWINDOWS).
         a, dev = self._adapter("windows")
         a.press_key("win+d")
-        dev.keyevent.assert_called_once_with("{VK_LWIN down}d{VK_LWIN up}")
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("LWINDOWS"),
+            call.key_press("D"),
+            call.key_release("D"),
+            call.key_release("LWINDOWS"),
+        ]
 
     def test_windows_bare_win_opens_start(self):
+        # Bare Win is a press+release of LWINDOWS (taps Start).
         a, dev = self._adapter("windows")
         a.press_key("win")
-        dev.keyevent.assert_called_once_with("{LWIN}")
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("LWINDOWS"),
+            call.key_release("LWINDOWS"),
+        ]
 
     def test_windows_win_combo_with_extra_mod_and_special_base(self):
-        # Mods nest in order; the base reuses the braced-special-key map
-        # (server sends JS-style "arrowleft", not "left").
+        # Mods nest in order and release in reverse; the base reuses the scancode
+        # map (server sends JS-style "arrowleft", not "left").
         a, dev = self._adapter("windows")
         a.press_key("ctrl+win+arrowleft")
-        dev.keyevent.assert_called_once_with(
-            "{VK_CONTROL down}{VK_LWIN down}{LEFT}{VK_LWIN up}{VK_CONTROL up}"
-        )
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("LCTRL"),
+            call.key_press("LWINDOWS"),
+            call.key_press("LEFT"),
+            call.key_release("LEFT"),
+            call.key_release("LWINDOWS"),
+            call.key_release("LCTRL"),
+        ]
 
     def test_windows_function_key_is_braced(self):
         # Bare "f5" would type the letters f,5 via SendKeys; it must be {F5}.
@@ -666,7 +690,13 @@ class TestAirtestPressKey:
     def test_windows_win_plus_function_key(self):
         a, dev = self._adapter("windows")
         a.press_key("win+f4")
-        dev.keyevent.assert_called_once_with("{VK_LWIN down}{F4}{VK_LWIN up}")
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("LWINDOWS"),
+            call.key_press("F4"),
+            call.key_release("F4"),
+            call.key_release("LWINDOWS"),
+        ]
 
     def test_android_single_key_is_adb_keycode(self):
         a, dev = self._adapter("android")

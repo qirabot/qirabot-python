@@ -211,6 +211,8 @@ class AirtestAdapter(DeviceAdapter):
         "space": "SPACE", "tab": "TAB", "backspace": "BACKSPACE", "delete": "DELETE",
         "shift": "LSHIFT", "ctrl": "LCTRL", "control": "LCTRL",
         "alt": "LALT", "option": "LALT",
+        "win": "LWINDOWS", "super": "LWINDOWS", "meta": "LWINDOWS",
+        "cmd": "LWINDOWS", "command": "LWINDOWS",
         "up": "UP", "down": "DOWN", "left": "LEFT", "right": "RIGHT",
         "arrowup": "UP", "arrowdown": "DOWN", "arrowleft": "LEFT", "arrowright": "RIGHT",
         "home": "HOME", "end": "END", "pageup": "PAGE_UP", "pagedown": "PAGE_DOWN",
@@ -328,17 +330,13 @@ class AirtestAdapter(DeviceAdapter):
         **{"f%d" % i: "{F%d}" % i for i in range(1, 13)},
     }
 
-    # SendKeys' modifier prefixes (^ % +) have no Win equivalent, so "win+d"
-    # would silently drop win. Build any Win combo with explicit down/up tokens
-    # ({VK_LWIN down}d{VK_LWIN up}) — that injects the real VK_LWIN shell hotkeys
-    # need (Win+D/Win+I/...).
+    # SendKeys' modifier prefixes (^ % +) have no Win equivalent, AND the bundled
+    # pywinauto 0.6.3 supports neither a Win prefix nor a "{KEY down}/{KEY up}"
+    # token syntax (it parses the word after the space as a repeat count and
+    # raises KeySequenceError). So a Win combo can't go through SendKeys at all —
+    # it must use the DirectInput scancode press/release path (key_down/key_up),
+    # which does inject the real LWINDOWS the shell hotkeys need (Win+D/Win+I/...).
     _WIN_ALIASES = frozenset({"win", "super", "meta", "cmd", "command"})
-    _WIN_MOD_VK = {
-        "ctrl": "VK_CONTROL", "control": "VK_CONTROL",
-        "alt": "VK_MENU", "option": "VK_MENU", "shift": "VK_SHIFT",
-        "win": "VK_LWIN", "super": "VK_LWIN", "meta": "VK_LWIN",
-        "cmd": "VK_LWIN", "command": "VK_LWIN",
-    }
 
     def press_key(self, key: str) -> None:
         mods, base = split_combo(key)
@@ -349,15 +347,15 @@ class AirtestAdapter(DeviceAdapter):
             if base.lower() in self._WIN_ALIASES or any(
                 m.lower() in self._WIN_ALIASES for m in mods
             ):
-                # Bare Win opens Start; a combo holds the mods around the base.
-                if not mods and base.lower() in self._WIN_ALIASES:
-                    self._device.keyevent("{LWIN}")
-                    return
-                downs = "".join("{%s down}" % self._WIN_MOD_VK[m.lower()] for m in mods)
-                ups = "".join(
-                    "{%s up}" % self._WIN_MOD_VK[m.lower()] for m in reversed(mods)
-                )
-                self._device.keyevent(downs + self._WIN_KEYS.get(base.lower(), base) + ups)
+                # Hold the modifiers (scancodes) around the base, then release in
+                # reverse. Reuses key_down/key_up so a stuck key is swept up by
+                # release_all_inputs. Bare Win works too: no mods -> just the base.
+                for m in mods:
+                    self.key_down(m)
+                self.key_down(base)
+                self.key_up(base)
+                for m in reversed(mods):
+                    self.key_up(m)
                 return
             prefix = "".join(self._WIN_MODS.get(m.lower(), "") for m in mods)
             self._device.keyevent(prefix + self._WIN_KEYS.get(base.lower(), base))
