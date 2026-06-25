@@ -744,6 +744,73 @@ class TestAirtestPressKey:
         dev.keyevent.assert_called_once_with("ENTER")
 
 
+class TestAirtestTypeText:
+    """Windows types ASCII via DirectInput scancodes so games receive the text;
+    non-ASCII (or any unmappable char) falls the whole string back to
+    device.text() (SendKeys). Other platforms always use device.text()."""
+
+    def _adapter(self, platform: str):
+        from qirabot.adapters.airtest_adapter import AirtestAdapter
+
+        dev = MagicMock()  # has snapshot/get_current_resolution -> concrete-device path
+        dev.platform = platform
+        return AirtestAdapter(dev), dev
+
+    @staticmethod
+    def _key_calls(dev):
+        return [c for c in dev.method_calls if c[0] in ("key_press", "key_release")]
+
+    def test_windows_ascii_uses_scancodes(self):
+        a, dev = self._adapter("windows")
+        a.type_text(10, 20, "ab 1")
+        dev.touch.assert_called_once_with((10, 20))  # caret placement first
+        dev.text.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("A"), call.key_release("A"),
+            call.key_press("B"), call.key_release("B"),
+            call.key_press("SPACE"), call.key_release("SPACE"),
+            call.key_press("1"), call.key_release("1"),
+        ]
+
+    def test_windows_shifted_chars_hold_shift(self):
+        a, dev = self._adapter("windows")
+        a.type_text(0, 0, "A!")
+        dev.text.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("LSHIFT"), call.key_press("A"),
+            call.key_release("A"), call.key_release("LSHIFT"),
+            call.key_press("LSHIFT"), call.key_press("1"),
+            call.key_release("1"), call.key_release("LSHIFT"),
+        ]
+
+    def test_windows_game_command_uses_scancodes(self):
+        # The reported case: a chat/console command must reach the game.
+        a, dev = self._adapter("windows")
+        a.type_text(0, 0, "quest accept 7011402")
+        dev.text.assert_not_called()
+        assert self._key_calls(dev)[:2] == [call.key_press("Q"), call.key_release("Q")]
+        assert len(self._key_calls(dev)) == 2 * len("quest accept 7011402")
+
+    def test_windows_non_ascii_falls_back_to_sendkeys(self):
+        a, dev = self._adapter("windows")
+        a.type_text(0, 0, "打电话")
+        assert self._key_calls(dev) == []
+        dev.text.assert_called_once_with("打电话", enter=False)
+
+    def test_windows_mixed_ascii_and_non_ascii_falls_back_whole(self):
+        # One non-ASCII char makes the WHOLE string take the SendKeys path.
+        a, dev = self._adapter("windows")
+        a.type_text(0, 0, "hi打")
+        assert self._key_calls(dev) == []
+        dev.text.assert_called_once_with("hi打", enter=False)
+
+    def test_android_uses_device_text(self):
+        a, dev = self._adapter("android")
+        a.type_text(0, 0, "hello")
+        assert self._key_calls(dev) == []
+        dev.text.assert_called_once_with("hello", enter=False)
+
+
 class TestAirtestHover:
     """Hover is a cursor concept: Windows moves the cursor (mouse_move, NOT the
     window-moving device.move); touch platforms keep the base no-op."""

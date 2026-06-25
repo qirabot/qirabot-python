@@ -288,8 +288,56 @@ class AirtestAdapter(DeviceAdapter):
         if self._platform == "windows":
             self._device.mouse_move((int(x), int(y)))
 
+    # US-layout ASCII -> scancode names for Windows type_text. Shifted chars
+    # hold LSHIFT around the base key; plain symbols/space map directly.
+    _SHIFT_CHARS = {
+        "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7",
+        "*": "8", "(": "9", ")": "0", "_": "-", "+": "=", "{": "[", "}": "]",
+        "|": "BACKSLASH", ":": ";", '"': "'", "~": "`", "<": ",", ">": ".", "?": "/",
+    }
+    _SYMBOL_CHARS = {
+        "-": "-", "=": "=", "[": "[", "]": "]", "\\": "BACKSLASH", ";": ";",
+        "'": "'", "`": "`", ",": ",", ".": ".", "/": "/", " ": "SPACE",
+    }
+
+    def _char_scancode(self, ch: str) -> tuple[bool, str] | None:
+        """ASCII char -> (needs_shift, scancode name), or None if not typeable."""
+        if "a" <= ch <= "z":
+            return False, ch.upper()
+        if "A" <= ch <= "Z":
+            return True, ch
+        if "0" <= ch <= "9":
+            return False, ch
+        if ch in self._SYMBOL_CHARS:
+            return False, self._SYMBOL_CHARS[ch]
+        if ch in self._SHIFT_CHARS:
+            return True, self._SHIFT_CHARS[ch]
+        return None
+
     def type_text(self, x: float, y: float, text: str) -> None:
         self._device.touch((int(x), int(y)))
+        # Windows: type ASCII via DirectInput scancodes so games (which read raw
+        # scancodes and ignore the virtual keys SendKeys sends) receive the text.
+        # Any non-ASCII / unmappable char makes the WHOLE string fall back to
+        # device.text() (SendKeys) so ordering stays correct. Scancodes are
+        # US-layout physical keys; non-US layouts rely on the SendKeys fallback.
+        if self._platform == "windows":
+            codes = []
+            for ch in text:
+                m = self._char_scancode(ch)
+                if m is None:
+                    break
+                codes.append(m)
+            if text and len(codes) == len(text):
+                dev = self._device
+                for needs_shift, code in codes:
+                    if needs_shift:
+                        dev.key_press("LSHIFT")
+                    dev.key_press(code)
+                    dev.key_release(code)
+                    if needs_shift:
+                        dev.key_release("LSHIFT")
+                return
         # enter=False: Android/iOS text() auto-appends Enter by default; the
         # base execute() controls Enter via press_enter instead. (Windows
         # ignores enter and never appends one, so this is safe everywhere.)
