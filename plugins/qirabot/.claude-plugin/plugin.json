@@ -6,5 +6,16 @@
     "email": "support@qirabot.com"
   },
   "homepage": "https://qirabot.com",
-  "license": "MIT"
+  "repository": "https://github.com/qirabot/qirabot-python",
+  "license": "MIT",
+  "keywords": [
+    "automation",
+    "testing",
+    "ui",
+    "rpa",
+    "browser",
+    "android",
+    "ios",
+    "desktop"
+  ]
 }

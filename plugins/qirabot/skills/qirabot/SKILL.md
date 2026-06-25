@@ -146,6 +146,23 @@ When a run fails (`result.success=False`, or the screenshot looks wrong), the
 model started looping or chose a wrong action, then jump to that step's
 screenshot in the report.
 
+**Embed a screen video in the report.** The report auto-discovers a file named
+`recording.mp4` in `bot.report_dir` and embeds it as a `<video>` at the top
+(next to the step screenshots) — just put one there before `bot.close()`:
+
+- **Desktop / browser** → let the SDK record the host screen for you:
+  `Qirabot(record=True)` (or env `QIRA_RECORD=1`) runs ffmpeg into
+  `recording.mp4`, no extra code.
+- **Android / iOS (or any native framework)** → host capture can't see the
+  device, so record the **device** with its own recorder and write it to
+  `bot.report_dir/recording.mp4`. Start before `bot.ai` and **stop before
+  `bot.close()`** (close scans for the file):
+  - Airtest (Android): `device().start_recording(output=os.path.join(bot.report_dir, "recording.mp4"), max_time=1800)`, then `device().stop_recording(output=...)` in a `finally`.
+  - Appium (iOS/Android): `driver.start_recording_screen()`, then write
+    `base64.b64decode(driver.stop_recording_screen())` to that same path.
+
+See `references/REFERENCE.md` (the `record` row) for details.
+
 ## Notes
 
 - One script run = one Qirabot session = one task. State (the live

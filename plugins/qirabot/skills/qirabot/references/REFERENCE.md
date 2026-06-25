@@ -21,7 +21,7 @@ Common constructor options (all keyword):
 | `task_name` | `""` | shown in dashboard / report |
 | `report` | `True` | write HTML report on close |
 | `report_dir` / env `QIRA_REPORT_DIR` | `./qira_runs/<date>/<run>/` | output root |
-| `record` / env `QIRA_RECORD` | `False` | ffmpeg recording of the **host machine's screen** into the report — NOT the device. For mobile, this captures the host, not the phone; record the device with the driver instead (Airtest: `G.DEVICE.start_recording(...)` / `stop_recording(...)`). |
+| `record` / env `QIRA_RECORD` | `False` | ffmpeg recording of the **host machine's screen** into the report — NOT the device. For mobile, this captures the host, not the phone; record the **device** with its native recorder and write to `report_dir/recording.mp4` instead — the report auto-embeds any `recording.mp4` found there. Airtest: `device().start_recording(output=...)` / `stop_recording(output=...)`. Appium: `driver.start_recording_screen()` then b64-decode `driver.stop_recording_screen()` to that path. Stop before `close()` (it scans for the file). |
 | `screenshot_annotate` | `True` | red crosshair at click/type point |
 | `retry` / `retry_delay` | `1` / `1.0` | per-action retry on transient failure |
 | `settle_seconds` / env `QIRA_SETTLE_SECONDS` | per-platform | fixed pause after each action |

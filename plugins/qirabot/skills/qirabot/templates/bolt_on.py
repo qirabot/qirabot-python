@@ -67,6 +67,18 @@ driver.quit()
 #     result = bot.ai("Open General settings and show the software version")
 #     print(result.success, result.output)
 # driver.quit()
+#
+# To embed a DEVICE video in the report (record=True records the host, not the
+# device): start before bot.ai, then write the recording to
+# bot.report_dir/recording.mp4 before the `with` block exits — the report
+# auto-embeds any recording.mp4 there:
+#     import base64, os
+#     driver.start_recording_screen()
+#     try:
+#         bot.ai("...")
+#     finally:
+#         mp4 = base64.b64decode(driver.stop_recording_screen())
+#         open(os.path.join(bot.report_dir, "recording.mp4"), "wb").write(mp4)
 
 
 # --- Native desktop via pyautogui (drives the WHOLE primary screen, any OS) --

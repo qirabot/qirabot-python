@@ -687,21 +687,9 @@ runtime by the skill's own `scripts/preflight.py`.
 
 ### Skill layout
 
-```
-plugins/qirabot/
-  .claude-plugin/
-    plugin.json          # plugin manifest (name, description, author)
-  skills/qirabot/
-    SKILL.md             # instructions the agent reads to operate the skill
-    references/
-      REFERENCE.md       # condensed API reference used at runtime
-    templates/
-      browser.py         # Playwright / web starter
-      android.py         # Airtest / Android starter
-      bolt_on.py         # bring-your-own-driver (Selenium, Appium, pyautogui, Airtest Windows)
-    scripts/
-      preflight.py       # environment checker — must pass before any script is written
-```
+The plugin bundles the skill (`SKILL.md`) plus its preflight script, condensed
+API reference, and starter templates (browser / Android / bring-your-own-driver).
+See [plugins/qirabot/README.md](plugins/qirabot/README.md) for the full tree.
 
 ### How the skill works
 

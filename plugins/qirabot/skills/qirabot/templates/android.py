@@ -46,3 +46,22 @@ with Qirabot(task_name="android-template", model_alias="balanced_pro").bind(G) a
     # bot.click("the Display menu item")
     # bot.click("the Dark theme toggle")
 stop_app(APP)
+
+
+# --- Optional: record the DEVICE screen into the report -----------------------
+# The SDK's record=True records the HOST screen, where a remote/headless device
+# won't appear. Record the device with Airtest instead and write it to
+# bot.report_dir/recording.mp4 — the report auto-embeds any recording.mp4 there.
+# Start before bot.ai and stop BEFORE the `with` exits (close() scans for it):
+#
+# import os
+# from airtest.core.api import device
+# start_app(APP)
+# with Qirabot(task_name="android-template", model_alias="balanced_pro").bind(G) as bot:
+#     video = os.path.join(bot.report_dir, "recording.mp4")
+#     device().start_recording(output=video, max_time=1800)
+#     try:
+#         result = bot.ai(TASK, max_steps=20, on_step=on_step)
+#     finally:
+#         device().stop_recording(output=video)   # before close() → report embeds it
+# stop_app(APP)
