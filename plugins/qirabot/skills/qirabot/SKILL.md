@@ -1,6 +1,6 @@
 ---
 name: qirabot
-description: Drive any GUI with natural language — click, type, extract, and verify on web browsers, Android, iOS, desktop apps, and games — using the Qirabot Python SDK. Use this when the user wants to automate, test, or scrape a user interface by describing elements in plain language instead of CSS/XPath selectors; when driving a mobile app or a native desktop/game where DOM-based tools don't work; or for visual UI verification, screenshots, and RPA. Triggers include: automate a website or app, UI/end-to-end test, fill a form, scrape a page, tap or click a button, verify what's on screen, drive an Android/iOS app, automate a desktop application.
+description: "Drive any GUI with natural language — click, type, extract, and verify on web browsers, Android, iOS, desktop apps, and games — using the Qirabot Python SDK. Use this when the user wants to automate, test, or scrape a user interface by describing elements in plain language instead of CSS/XPath selectors; when driving a mobile app or a native desktop/game where DOM-based tools don't work; or for visual UI verification, screenshots, and RPA. Triggers include: automate a website or app, UI/end-to-end test, fill a form, scrape a page, tap or click a button, verify what's on screen, drive an Android/iOS app, automate a desktop application."
 license: MIT
 metadata:
   author: qirabot

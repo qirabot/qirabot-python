@@ -1,0 +1,10 @@
+{
+  "name": "qirabot",
+  "description": "Drive any GUI with natural language — click, type, extract, and verify on web browsers, Android, iOS, desktop apps, and games.",
+  "author": {
+    "name": "Qirabot Team",
+    "email": "support@qirabot.com"
+  },
+  "homepage": "https://qirabot.com",
+  "license": "MIT"
+}

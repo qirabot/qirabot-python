@@ -664,24 +664,43 @@ with Qirabot(task_name="my automation") as bot:
 
 ## Agent Skill
 
-The `skills/qirabot/` directory is a **pre-built agent skill** — a self-contained
-bundle an AI agent can load to write, run, and debug Qirabot automations. Instead
-of describing the API in a chat, you state the automation goal and the agent
-handles setup, scripting, and verification.
+The `plugins/qirabot/skills/qirabot/` directory is a **pre-built agent skill** — a
+self-contained bundle an AI agent can load to write, run, and debug Qirabot
+automations. Instead of describing the API in a chat, you state the automation
+goal and the agent handles setup, scripting, and verification.
+
+### Install in Claude Code
+
+The skill is packaged as a Claude Code plugin (`plugins/qirabot/`) and published
+through the lightweight [`qirabot/claude-plugins`](https://github.com/qirabot/claude-plugins)
+marketplace, which fetches **only this subdirectory** (via a `git-subdir` source)
+— users never clone the whole SDK:
+
+```text
+/plugin marketplace add qirabot/claude-plugins
+/plugin install qirabot@qirabot
+```
+
+Once installed the skill is available as `/qirabot:qirabot` and Claude invokes it
+automatically for UI automation tasks. The `qirabot` pip package is installed at
+runtime by the skill's own `scripts/preflight.py`.
 
 ### Skill layout
 
 ```
-skills/qirabot/
-  SKILL.md               # instructions the agent reads to operate the skill
-  references/
-    REFERENCE.md         # condensed API reference used at runtime
-  templates/
-    browser.py           # Playwright / web starter
-    android.py           # Airtest / Android starter
-    bolt_on.py           # bring-your-own-driver (Selenium, Appium, pyautogui, Airtest Windows)
-  scripts/
-    preflight.py         # environment checker — must pass before any script is written
+plugins/qirabot/
+  .claude-plugin/
+    plugin.json          # plugin manifest (name, description, author)
+  skills/qirabot/
+    SKILL.md             # instructions the agent reads to operate the skill
+    references/
+      REFERENCE.md       # condensed API reference used at runtime
+    templates/
+      browser.py         # Playwright / web starter
+      android.py         # Airtest / Android starter
+      bolt_on.py         # bring-your-own-driver (Selenium, Appium, pyautogui, Airtest Windows)
+    scripts/
+      preflight.py       # environment checker — must pass before any script is written
 ```
 
 ### How the skill works

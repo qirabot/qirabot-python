@@ -1,4 +1,4 @@
-"""Drift guard for the bundled Agent Skill (``skills/qirabot/``).
+"""Drift guard for the bundled Agent Skill (``plugins/qirabot/skills/qirabot/``).
 
 The skill ships copy-paste code: the snippets in ``references/REFERENCE.md`` and
 the ``templates/*.py`` an agent runs verbatim. If a public method is renamed or a
@@ -24,7 +24,9 @@ import qirabot
 from qirabot import Qirabot
 from qirabot.bound import _BoundQirabot
 
-SKILL = Path(__file__).resolve().parent.parent / "skills" / "qirabot"
+SKILL = (
+    Path(__file__).resolve().parent.parent / "plugins" / "qirabot" / "skills" / "qirabot"
+)
 REFERENCE = SKILL / "references" / "REFERENCE.md"
 TEMPLATES = sorted((SKILL / "templates").glob("*.py"))
 
@@ -103,7 +105,7 @@ def _reference_constructor_options() -> set[str]:
 
 def test_skill_assets_present():
     assert REFERENCE.is_file(), "REFERENCE.md missing"
-    assert TEMPLATES, "no templates under skills/qirabot/templates/"
+    assert TEMPLATES, "no templates under plugins/qirabot/skills/qirabot/templates/"
 
 
 def test_core_methods_exist_on_sdk():
