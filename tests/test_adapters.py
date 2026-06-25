@@ -592,9 +592,10 @@ class TestSeleniumPressKey:
 
 
 class TestAirtestPressKey:
-    """Windows speaks pywinauto SendKeys syntax (braces + ^%+ modifiers) for both
-    single keys and combos; Android/iOS use adb keycode names. Verifies the
-    string-building per platform, not pywinauto/adb themselves."""
+    """Windows prefers the DirectInput scancode path (key_press/key_release) so
+    games receive the keys; only keys the scancode table can't express fall back
+    to pywinauto SendKeys. Android/iOS use adb keycode names. Verifies the
+    routing per platform, not pywinauto/adb themselves."""
 
     def _adapter(self, platform: str):
         from qirabot.adapters.airtest_adapter import AirtestAdapter
@@ -603,32 +604,97 @@ class TestAirtestPressKey:
         dev.platform = platform
         return AirtestAdapter(dev), dev
 
-    def test_windows_combo_to_pywinauto(self):
-        a, dev = self._adapter("windows")
-        a.press_key("ctrl+c")
-        dev.keyevent.assert_called_once_with("^c")
-
-    def test_windows_alt_tab(self):
-        a, dev = self._adapter("windows")
-        a.press_key("alt+tab")
-        dev.keyevent.assert_called_once_with("%{TAB}")
-
-    def test_windows_single_special_is_braced(self):
-        # Bare "ENTER" would type the letters via SendKeys; the key needs braces.
-        a, dev = self._adapter("windows")
-        a.press_key("Enter")
-        dev.keyevent.assert_called_once_with("{ENTER}")
-
     @staticmethod
     def _key_calls(dev):
         # The DirectInput path drives key_press/key_release on the device; pull
         # them out (in order) so the interleaving of downs/ups is asserted.
         return [c for c in dev.method_calls if c[0] in ("key_press", "key_release")]
 
+    def test_windows_backtick_uses_scancode(self):
+        # Regression: the ` game-console key must go through scancodes; SendKeys
+        # sends a virtual key the game's DirectInput never sees.
+        a, dev = self._adapter("windows")
+        a.press_key("`")
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("`"),
+            call.key_release("`"),
+        ]
+
+    def test_windows_letter_uses_scancode(self):
+        # WASD movement: a bare letter must reach the game as a scancode.
+        a, dev = self._adapter("windows")
+        a.press_key("w")
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("W"),
+            call.key_release("W"),
+        ]
+
+    def test_windows_combo_uses_scancode(self):
+        a, dev = self._adapter("windows")
+        a.press_key("ctrl+c")
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("LCTRL"),
+            call.key_press("C"),
+            call.key_release("C"),
+            call.key_release("LCTRL"),
+        ]
+
+    def test_windows_alt_tab(self):
+        a, dev = self._adapter("windows")
+        a.press_key("alt+tab")
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("LALT"),
+            call.key_press("TAB"),
+            call.key_release("TAB"),
+            call.key_release("LALT"),
+        ]
+
+    def test_windows_single_special_uses_scancode(self):
+        a, dev = self._adapter("windows")
+        a.press_key("Enter")
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("ENTER"),
+            call.key_release("ENTER"),
+        ]
+
+    def test_windows_function_key_uses_scancode(self):
+        a, dev = self._adapter("windows")
+        a.press_key("f5")
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("F5"),
+            call.key_release("F5"),
+        ]
+
+    def test_windows_alt_f4_uses_scancode(self):
+        a, dev = self._adapter("windows")
+        a.press_key("alt+f4")
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("LALT"),
+            call.key_press("F4"),
+            call.key_release("F4"),
+            call.key_release("LALT"),
+        ]
+
+    def test_windows_arrow_name_uses_scancode(self):
+        # The model may emit "Down" or "ArrowDown"; both normalize to DOWN.
+        a, dev = self._adapter("windows")
+        a.press_key("down")
+        dev.keyevent.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("DOWN"),
+            call.key_release("DOWN"),
+        ]
+
     def test_windows_win_combo_uses_down_up(self):
-        # SendKeys' ^%+ prefixes can't express Win and the bundled pywinauto
-        # rejects {KEY down}/{KEY up} tokens, so a Win combo goes through the
-        # DirectInput scancode path (press/release of the real LWINDOWS).
+        # SendKeys' ^%+ prefixes can't express Win; the scancode path injects the
+        # real LWINDOWS the shell hotkeys need.
         a, dev = self._adapter("windows")
         a.press_key("win+d")
         dev.keyevent.assert_not_called()
@@ -649,7 +715,7 @@ class TestAirtestPressKey:
             call.key_release("LWINDOWS"),
         ]
 
-    def test_windows_win_combo_with_extra_mod_and_special_base(self):
+    def test_windows_combo_nests_and_releases_in_reverse(self):
         # Mods nest in order and release in reverse; the base reuses the scancode
         # map (server sends JS-style "arrowleft", not "left").
         a, dev = self._adapter("windows")
@@ -664,39 +730,13 @@ class TestAirtestPressKey:
             call.key_release("LCTRL"),
         ]
 
-    def test_windows_function_key_is_braced(self):
-        # Bare "f5" would type the letters f,5 via SendKeys; it must be {F5}.
+    def test_windows_unsupported_key_falls_back_to_sendkeys(self):
+        # A shifted symbol isn't in the scancode table, so it falls back to
+        # SendKeys (which types it correctly) with no scancode calls.
         a, dev = self._adapter("windows")
-        a.press_key("f5")
-        dev.keyevent.assert_called_once_with("{F5}")
-
-    def test_windows_alt_f4_braces_the_function_key(self):
-        # The classic regression: "%f4" is Alt+F then '4', NOT Alt+F4.
-        a, dev = self._adapter("windows")
-        a.press_key("alt+f4")
-        dev.keyevent.assert_called_once_with("%{F4}")
-
-    def test_windows_insert_is_braced(self):
-        a, dev = self._adapter("windows")
-        a.press_key("insert")
-        dev.keyevent.assert_called_once_with("{INSERT}")
-
-    def test_windows_bare_arrow_name_is_braced(self):
-        # The model may emit "Down" (not just "ArrowDown"); both must brace.
-        a, dev = self._adapter("windows")
-        a.press_key("down")
-        dev.keyevent.assert_called_once_with("{DOWN}")
-
-    def test_windows_win_plus_function_key(self):
-        a, dev = self._adapter("windows")
-        a.press_key("win+f4")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("LWINDOWS"),
-            call.key_press("F4"),
-            call.key_release("F4"),
-            call.key_release("LWINDOWS"),
-        ]
+        a.press_key("!")
+        assert self._key_calls(dev) == []
+        dev.keyevent.assert_called_once_with("!")
 
     def test_android_single_key_is_adb_keycode(self):
         a, dev = self._adapter("android")

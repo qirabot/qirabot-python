@@ -330,26 +330,39 @@ class AirtestAdapter(DeviceAdapter):
         **{"f%d" % i: "{F%d}" % i for i in range(1, 13)},
     }
 
-    # SendKeys' modifier prefixes (^ % +) have no Win equivalent, AND the bundled
-    # pywinauto 0.6.3 supports neither a Win prefix nor a "{KEY down}/{KEY up}"
-    # token syntax (it parses the word after the space as a repeat count and
-    # raises KeySequenceError). So a Win combo can't go through SendKeys at all —
-    # it must use the DirectInput scancode press/release path (key_down/key_up),
-    # which does inject the real LWINDOWS the shell hotkeys need (Win+D/Win+I/...).
-    _WIN_ALIASES = frozenset({"win", "super", "meta", "cmd", "command"})
+    # Names airtest's key_press/key_release accept as DirectInput scancodes
+    # (KEYS + EXTENDED_KEYS in airtest/core/win/ctypesinput.py). Keys outside
+    # this set fall back to SendKeys.
+    _WIN_SCANCODE_KEYS = frozenset(
+        {
+            "ESCAPE", "BACKSPACE", "TAB", "ENTER", "SPACE", "CAPS_LOCK",
+            "NUM_LOCK", "SCROLL_LOCK", "PRINT_SCREEN", "PAUSE",
+            "LCTRL", "RCTRL", "LSHIFT", "RSHIFT", "LALT", "RALT",
+            "LWINDOWS", "RWINDOWS", "MENU",
+            "UP", "DOWN", "LEFT", "RIGHT",
+            "HOME", "END", "PAGE_UP", "PAGE_DOWN", "INSERT", "DELETE",
+            "-", "=", "[", "]", ";", "'", "`", ",", ".", "/", "*", "BACKSLASH",
+            "NUMPAD_-", "NUMPAD_+", "NUMPAD_.", "NUMPAD_/", "NUMPAD_ENTER",
+        }
+        | set("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        | set("0123456789")
+        | {f"F{i}" for i in range(1, 13)}
+        | {f"NUMPAD_{i}" for i in range(10)}
+    )
+
+    def _scancode_supported(self, keys: list[str]) -> bool:
+        return all(self._scancode(k) in self._WIN_SCANCODE_KEYS for k in keys)
 
     def press_key(self, key: str) -> None:
         mods, base = split_combo(key)
-        # Windows speaks pywinauto SendKeys syntax for BOTH single keys and
-        # combos. Android/iOS use adb-style keycode names and have no ctrl-style
-        # combos (the server only sends single keycodes there).
+        # Windows: prefer the DirectInput scancode path. Games read raw scancodes
+        # and ignore the virtual-key codes SendKeys injects, so keyevent() keys
+        # silently no-op in them (` console, WASD, ...). Fall back to SendKeys
+        # only for keys the scancode table can't express (e.g. '!', F13+).
         if self._platform == "windows":
-            if base.lower() in self._WIN_ALIASES or any(
-                m.lower() in self._WIN_ALIASES for m in mods
-            ):
-                # Hold the modifiers (scancodes) around the base, then release in
-                # reverse. Reuses key_down/key_up so a stuck key is swept up by
-                # release_all_inputs. Bare Win works too: no mods -> just the base.
+            if self._scancode_supported(mods + [base]):
+                # Hold mods around the base, release in reverse; key_down/key_up
+                # let release_all_inputs sweep up a stuck key.
                 for m in mods:
                     self.key_down(m)
                 self.key_down(base)

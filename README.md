@@ -274,9 +274,9 @@ it to its own vocabulary.
 | Combos (desktop/browser) | `ctrl+c` `ctrl+a` `alt+tab` `ctrl+shift+t` | modifiers `ctrl` `alt` `shift` `cmd` (= meta/win); join with `+` |
 | Mobile (Android/iOS) | `Back` `Home` `Menu` `Enter` | single keys only, no combos |
 
-So `bot.press_key(t, "Enter")` becomes an adb keycode on Android and a `{ENTER}`
-SendKeys on Airtest Windows automatically; `ctrl+t`/`ctrl+w` switch the active
-tab on Playwright (reassign the returned page).
+So `bot.press_key(t, "Enter")` becomes an adb keycode on Android and a
+DirectInput scancode on Airtest Windows automatically; `ctrl+t`/`ctrl+w` switch
+the active tab on Playwright (reassign the returned page).
 
 **Smart `go_back` (Playwright):** if the current page has back history it goes
 back in place; if it doesn't — e.g. a click opened a link in a **new tab**,
@@ -325,7 +325,7 @@ shows how each underlying action maps per platform.
 - ᵇ Mobile has no right-click: Appium taps; Airtest right-clicks on Windows only, taps elsewhere.
 - ᶜ Touch targets have no hover: Appium and Airtest Android/iOS treat `hover` as a no-op; Airtest moves the cursor (no click) on Windows.
 - ᵈ Airtest has no element model; `clear_text` is best-effort on Android (caret-to-end + repeated delete).
-- ᵉ Airtest maps common key names per platform automatically — Android/iOS to adb keycodes, Windows to pywinauto `SendKeys` (`{ENTER}`, `^c`); names outside the map pass through unchanged.
+- ᵉ Airtest maps common key names per platform automatically — Android/iOS to adb keycodes, Windows to DirectInput scancodes (real hardware-level keys, so games that read raw scancodes receive them, incl. `ctrl`/`alt`/`win` combos), falling back to pywinauto `SendKeys` only for keys scancodes can't express (e.g. shifted symbols like `!`, F13+).
 - ᶠ `long_press` is a touch-only gesture (Appium/Airtest mobile); the server only offers it on Android/iOS. Browser/desktop adapters raise `NotImplementedError`.
 - ᵍ `mouse_down`/`mouse_up`/`key_down`/`key_up` are desktop-only split press/release primitives (pyautogui, plus Airtest on Windows) for holding an input across other actions — hold a key to keep moving in a game, press-and-hold the mouse to drag, etc. Pair each press with its release; as a safety net any input still held is auto-released at the end of an `ai()` run and on `close()`. `mouse_up`'s locate is optional (omit to release at the current cursor; `bot.mouse_up(target)` is then deterministic — no AI, no billing — like `key_down`/`key_up`). Browser/mobile adapters raise `NotImplementedError`.
 

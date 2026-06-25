@@ -13,6 +13,9 @@ screenshots/
 user_data/
 qira_runs/
 
+# local reference material (e.g. vendored third-party source for lookup)
+reference/
+
 # virtualenvs
 venv/
 .venv/
