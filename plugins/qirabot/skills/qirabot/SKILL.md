@@ -4,7 +4,6 @@ description: "Drive any GUI with natural language — click, type, extract, and 
 license: MIT
 metadata:
   author: qirabot
-  version: "0.1.0"
 ---
 
 ## Step 0 — Preflight (always run first)
@@ -50,8 +49,8 @@ export QIRA_API_KEY="qk_..."        # from https://app.qirabot.com
 | Target | Template | Extra |
 |---|---|---|
 | Web browser (Qirabot launches Chromium) | `templates/browser.py` | `qirabot[browser]` + `playwright install chromium`. Also supports connecting to an existing Chrome via `cdp_url` (e.g. Browserless/Browserbase). |
-| Android (Airtest, no Appium server) | `templates/android.py` | `qirabot[airtest]` (Python 3.10-3.12) |
-| iOS / Selenium / Appium (you build the driver, then `bind()`) | `templates/bolt_on.py` | `qirabot[appium]` / `qirabot` + `selenium` |
+| Android / iOS — Airtest (no Appium server, fastest start) | `templates/android.py` (Android starter; for iOS keep the API, swap the `connect_device` string) | `qirabot[airtest]` (Python 3.10-3.12) |
+| Android / iOS via Appium, or any Selenium driver (you build the driver, then `bind()`) | `templates/bolt_on.py` | `qirabot[appium]` / `qirabot` + `selenium` |
 | Desktop — Windows & macOS (`bind()` your driver) | `templates/bolt_on.py` | `qirabot[desktop]` (whole screen, any OS) · `qirabot[airtest]` (Windows only, one window) |
 
 Copy the template, fill in the `TODO`s (start URL / app package, and the task),
