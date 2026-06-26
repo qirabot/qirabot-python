@@ -111,7 +111,10 @@ class AppiumAdapter(DeviceAdapter):
             else:
                 self._focused_element().send_keys(key)
         else:
-            self._focused_element().send_keys(key)
+            # iOS：键名要转成 XCUITest 能识别的字符，否则会被当文本输入。
+            # 回车需发 "\n" 触发键盘 return/搜索键（直接发 "Enter" 会输出字面文字）。
+            ios_key_map = {"enter": "\n", "return": "\n", "tab": "\t"}
+            self._focused_element().send_keys(ios_key_map.get(key.lower(), key))
 
     def drag(self, from_x: float, from_y: float, to_x: float, to_y: float) -> None:
         from selenium.webdriver.common.action_chains import ActionChains

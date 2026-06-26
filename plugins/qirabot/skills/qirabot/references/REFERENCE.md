@@ -162,7 +162,12 @@ intended pattern for any auth-gated automation.
 `bind()`, so "which framework" = which driver you build):
 
 - Playwright / Selenium = browser.
-- Appium = iOS / Android.
+- Appium = iOS / Android. On **iOS** Qirabot uses only screenshots + coordinates
+  (no element finding), so Appium's job is just building WDA and forwarding. Once
+  WebDriverAgent is running on :8100, reuse it via `webDriverAgentUrl` +
+  `usePrebuiltWDA` to skip xcodebuild on every run (see `templates/ios.py`). On a
+  real device WDA must be built/signed once (Xcode or `appium driver run xcuitest
+  open-wda`); a simulator lets Appium build it automatically.
 - Airtest = Android / iOS / Windows desktop — one framework spanning mobile and
   desktop. Its **desktop** backend (pywinauto) is **Windows-only (no macOS)**;
   reports as `desktop`, scopes to one window by HWND (`connect_device("Windows:///<hwnd>")`).
@@ -179,6 +184,8 @@ actions vary:
 - `navigate`/`close_tab`: browser only (`close_tab` = Playwright only).
 - `go_back`: Playwright/Selenium/Appium; Airtest = Android only; pyautogui = no.
 - `long_press`: Appium/Airtest mobile only.
+- `press_key` on iOS: key names are mapped to characters (`enter`/`return`→`\n`,
+  `tab`→`\t`); arrows/esc/home have no iOS soft-keyboard equivalent.
 - `mouse_down`/`mouse_up`/`key_down`/`key_up`: desktop only (pyautogui + Airtest Windows); pair them — held input auto-released after `ai()`/`close()`.
 - `right_click`/`hover`: full on browser/desktop; mobile taps / no-ops.
 

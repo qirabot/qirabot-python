@@ -1,13 +1,14 @@
 """Qirabot bolt-on template — add AI to a driver you build yourself.
 
-Use this for iOS, native desktop, or any case where you already construct a
+Use this for native desktop, or any case where you already construct a
 Selenium / Appium driver: build the framework object as usual, `bind()` it once,
 then drive it by natural language. (For "Qirabot launches Chromium" use
-templates/browser.py; for Android over Airtest use templates/android.py.)
+templates/browser.py; for Android over Airtest use templates/android.py; for
+iOS use templates/ios.py — it has the real-device capabilities and WDA reuse.)
 
 The concrete example below is Selenium. Swap the marked block for one of the
-Appium (iOS / Android), pyautogui (whole-screen desktop, any OS), or Airtest
-(window-scoped Windows desktop) variants at the bottom.
+Appium, pyautogui (whole-screen desktop, any OS), or Airtest (window-scoped
+Windows desktop) variants at the bottom.
 
 Run (Selenium):
     python -m venv .qira-venv && source .qira-venv/bin/activate
@@ -54,31 +55,21 @@ with Qirabot(task_name="bolt-on-template", model_alias="balanced").bind(driver) 
 driver.quit()
 
 
-# --- iOS / Android via Appium (needs a running Appium server) ---------------
+# --- Android via Appium UiAutomator2 (needs a running Appium server) ---------
+# For iOS use templates/ios.py instead — it covers real-device capabilities
+# (udid / WDA reuse / signing) and device screen recording.
 # from appium import webdriver
-# from appium.options.ios import XCUITestOptions       # Android: UiAutomator2Options
+# from appium.options.android import UiAutomator2Options
 #
-# options = XCUITestOptions()
-# options.platform_name = "iOS"
-# options.device_name = "iPhone 15"
-# options.bundle_id = "com.apple.Preferences"
+# options = UiAutomator2Options()
+# options.platform_name = "Android"
+# options.app_package = "com.android.settings"
+# options.app_activity = ".Settings"
 # driver = webdriver.Remote("http://localhost:4723", options=options)
-# with Qirabot(task_name="ios-bolt-on").bind(driver) as bot:
-#     result = bot.ai("Open General settings and show the software version")
+# with Qirabot(task_name="android-bolt-on").bind(driver) as bot:
+#     result = bot.ai("Open Display settings and turn on Dark theme")
 #     print(result.success, result.output)
 # driver.quit()
-#
-# To embed a DEVICE video in the report (record=True records the host, not the
-# device): start before bot.ai, then write the recording to
-# bot.report_dir/recording.mp4 before the `with` block exits — the report
-# auto-embeds any recording.mp4 there:
-#     import base64, os
-#     driver.start_recording_screen()
-#     try:
-#         bot.ai("...")
-#     finally:
-#         mp4 = base64.b64decode(driver.stop_recording_screen())
-#         open(os.path.join(bot.report_dir, "recording.mp4"), "wb").write(mp4)
 
 
 # --- Native desktop via pyautogui (drives the WHOLE primary screen, any OS) --

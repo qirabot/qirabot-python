@@ -49,17 +49,19 @@ export QIRA_API_KEY="qk_..."        # from https://app.qirabot.com
 | Target | Template | Extra |
 |---|---|---|
 | Web browser (Qirabot launches Chromium) | `templates/browser.py` | `qirabot[browser]` + `playwright install chromium`. Also supports connecting to an existing Chrome via `cdp_url` (e.g. Browserless/Browserbase). |
-| Android / iOS — Airtest (no Appium server, fastest start) | `templates/android.py` (Android starter; for iOS keep the API, swap the `connect_device` string) | `qirabot[airtest]` (Python 3.10-3.12) |
-| Android / iOS via Appium, or any Selenium driver (you build the driver, then `bind()`) | `templates/bolt_on.py` | `qirabot[appium]` / `qirabot` + `selenium` |
+| Android — Airtest (no Appium server, fastest start) | `templates/android.py` | `qirabot[airtest]` (Python 3.10-3.12) |
+| iOS — Appium XCUITest (you build the driver, then `bind()`) | `templates/ios.py` | `qirabot[appium]` + a running Appium server & WDA. Real device (iOS 17+) needs a built/signed WDA; simplest is to leave WDA running on :8100 and reuse it via `webDriverAgentUrl` (the template does this). |
+| Any Selenium driver, or other Appium targets (you build the driver, then `bind()`) | `templates/bolt_on.py` | `qirabot` + `selenium` / `qirabot[appium]` |
 | Desktop — Windows & macOS (`bind()` your driver) | `templates/bolt_on.py` | `qirabot[desktop]` (whole screen, any OS) · `qirabot[airtest]` (Windows only, one window) |
 
-Copy the template, fill in the `TODO`s (start URL / app package, and the task),
-then run it with **the interpreter preflight echoed** (its absolute path), not a
-bare `python`. `templates/bolt_on.py` shows the bind-an-existing-driver pattern
-with Selenium as the runnable example plus Appium (iOS/Android), pyautogui
-(whole-screen desktop, any OS), and Airtest (window-scoped Windows desktop)
-variants in comments; see `references/REFERENCE.md` for the full per-platform
-action matrix and `bind()` details.
+Copy the template, fill in the `TODO`s (start URL / app package or bundle id, and
+the task), then run it with **the interpreter preflight echoed** (its absolute
+path), not a bare `python`. `templates/ios.py` is the iOS starter (Appium
+XCUITest, reusing a running WDA). `templates/bolt_on.py` shows the generic
+bind-an-existing-driver pattern with Selenium as the runnable example plus
+pyautogui (whole-screen desktop, any OS) and Airtest (window-scoped Windows
+desktop) variants in comments; see `references/REFERENCE.md` for the full
+per-platform action matrix and `bind()` details.
 
 ## Step 2 — Hand the task to qirabot (default), drop to primitives only to optimize
 
@@ -88,8 +90,8 @@ there. Good: `"Add the cheapest in-stock item to the cart and check out"`.
 Bad: a 6-step click-by-click recipe.
 
 The examples here pass the target explicitly (`bot.ai(target, ...)`). **If you
-`bind()` a stable target first** — as the `android.py` and `bolt_on.py` templates
-do — drop the leading arg: `bot.ai("...")`, `bot.click("...")`. (Keep the explicit
+`bind()` a stable target first** — as the `android.py`, `ios.py`, and
+`bolt_on.py` templates do — drop the leading arg: `bot.ai("...")`, `bot.click("...")`. (Keep the explicit
 form for Playwright so new-tab follows stay visible — see `references/REFERENCE.md`.)
 
 **Always pass `on_step`.** Until it returns, `bot.ai` is a black box — `result`
