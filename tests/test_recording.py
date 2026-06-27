@@ -455,7 +455,7 @@ class TestClientRecordingWiring:
 
     def test_record_audio_passed_to_recorder(self, monkeypatch, tmp_path):
         self._use_fake(monkeypatch)
-        bot = Qirabot(
+        Qirabot(
             api_key="k", task_id="t", record=True, record_audio=True, report_dir=str(tmp_path)
         )
         # record_window off -> starts immediately (full screen) with audio on.
