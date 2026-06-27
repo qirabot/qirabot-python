@@ -80,7 +80,7 @@ def _detect_audio_device(ffmpeg: str) -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     # Device names are quoted; the audio block lists them as `"name" (audio)`.
-    names = re.findall(r'"([^"]+)"', proc.stderr)
+    names: list[str] = re.findall(r'"([^"]+)"', proc.stderr)
     lowered = [(n, n.lower()) for n in names]
     for hint in _WIN_SYSTEM_AUDIO_HINTS:
         for name, low in lowered:
