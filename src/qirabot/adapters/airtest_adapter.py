@@ -533,6 +533,27 @@ class AirtestAdapter(DeviceAdapter):
         )
         return DeviceInfo(platform=mapped, width=width, height=height)
 
+    def window_info(self) -> dict[str, Any] | None:
+        # Only the Windows backend is bound to a concrete OS window; Android/iOS
+        # have no host window to follow (the recorder records the host screen).
+        # Best-effort: the device may not be connected yet, get_title() requires
+        # a connected app (it's @require_app), and handle may be None when the
+        # session targets the whole desktop rather than one window.
+        if self._platform != "windows":
+            return None
+        dev = self._device
+        hwnd = getattr(dev, "handle", None)
+        title: str | None = None
+        try:
+            titles = dev.get_title()  # airtest returns a list[str] of window texts
+            if titles:
+                title = titles[0]
+        except Exception:
+            title = None
+        if not title and hwnd is None:
+            return None
+        return {"title": title, "hwnd": int(hwnd) if hwnd is not None else None}
+
     def _dispatch(self, action_type: str, params: dict[str, Any]) -> None:
         if action_type in ("scroll", "scroll_at"):
             self._scroll_action(action_type, params or {})

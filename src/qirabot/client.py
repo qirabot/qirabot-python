@@ -143,6 +143,9 @@ class Qirabot:
         settle_seconds: float | None = None,
         record: bool = False,
         record_fps: int = 12,
+        record_window: bool = False,
+        record_audio: bool | str = False,
+        record_audio_offset: float | None = None,
     ):
         api_key = api_key or os.environ.get("QIRA_API_KEY", "")
         # Fail fast on a missing key: it's a local config error, so surface an
@@ -227,7 +230,23 @@ class Qirabot:
         # and the manual start_recording()/stop_recording() never spawn two ffmpegs.
         self._record = record or _env_truthy(os.environ.get("QIRA_RECORD", ""))
         self._record_fps = record_fps
+        # Windows-only recording extras: follow the window under test (resolved
+        # lazily from the first action's target) and capture system audio.
+        self._record_window = record_window or _env_truthy(os.environ.get("QIRA_RECORD_WINDOW", ""))
+        self._record_audio = record_audio or _env_truthy(os.environ.get("QIRA_RECORD_AUDIO", ""))
+        if record_audio_offset is None:
+            env_off = os.environ.get("QIRA_AUDIO_OFFSET", "")
+            if env_off:
+                try:
+                    record_audio_offset = float(env_off)
+                except ValueError:
+                    raise ValueError(f"QIRA_AUDIO_OFFSET must be a number, got {env_off!r}")
+        self._record_audio_offset = record_audio_offset
         self._recorder: ScreenRecorder | None = None
+        # True while a recording is still owed: claimed (set False) right before a
+        # recorder starts, which also guards against re-entrancy through
+        # _get_adapter when window-following resolves the target.
+        self._record_pending = self._record and self._report
         atexit.register(self.close)
         self._maybe_start_recording()
 
@@ -881,25 +900,68 @@ class Qirabot:
         data = adapter.screenshot(self._screenshot_config)
         return self._save_frame(data, "manual")
 
-    def _maybe_start_recording(self) -> None:
+    def _maybe_start_recording(self, target: Any = None) -> None:
         """Auto-start screen recording when ``record=True``.
 
-        Skipped when reporting is off (there is no report to embed into) or a
-        recorder is already running. Best-effort via :meth:`start_recording` — a
-        missing ffmpeg / unsupported platform only warns.
+        Called once from ``__init__`` (no ``target``) and again from
+        :meth:`_get_adapter` on every action (with the action's ``target``).
+        Skipped once a recorder exists or the slot has been claimed. In
+        ``record_window`` mode the start is deferred until an action supplies a
+        ``target`` to resolve the window from. Best-effort via
+        :meth:`start_recording` — a missing ffmpeg / unsupported platform warns.
         """
-        if not (self._record and self._report) or self._recorder is not None:
+        if self._recorder is not None or not self._record_pending:
             return
-        self.start_recording()
+        if self._record_window and target is None:
+            return  # defer: need a target to resolve the window to follow
+        # Claim the slot BEFORE starting so the _get_adapter() call made while
+        # resolving the window doesn't re-enter this and start a second ffmpeg.
+        self._record_pending = False
+        self.start_recording(target=target)
 
-    def start_recording(self, *, fps: int | None = None) -> bool:
-        """Start ffmpeg full-screen recording into ``report_dir/recording.mp4``.
+    def _resolve_window_target(self, target: Any) -> str | None:
+        """Window title (or handle) to record for ``target``, or ``None``.
+
+        Reads the adapter's :meth:`~qirabot.adapters.base.DeviceAdapter.window_info`
+        (only airtest/Windows returns one); prefers the title, falls back to the
+        numeric handle. Any failure degrades to ``None`` (full-screen).
+        """
+        try:
+            info = self._get_adapter(target).window_info()
+        except Exception:
+            logger.debug("window_info() failed; recording full screen", exc_info=True)
+            return None
+        if not info:
+            return None
+        title = info.get("title")
+        if title:
+            return str(title)
+        hwnd = info.get("hwnd")
+        return str(hwnd) if hwnd is not None else None
+
+    def start_recording(
+        self,
+        *,
+        fps: int | None = None,
+        target: Any = None,
+        window: str | None = None,
+        audio: bool | str | None = None,
+    ) -> bool:
+        """Start ffmpeg recording into ``report_dir/recording.mp4``.
+
+        Records the full screen by default. On Windows it can instead follow a
+        single window and capture system audio:
+
+        * ``window`` — a window title (or numeric handle) to record.
+        * ``target`` — when ``record_window`` is set, the window is resolved
+          automatically from this action target (airtest/Windows only).
+        * ``audio`` — ``True`` to auto-detect a system-audio device, a dshow
+          device name, or ``False``; defaults to the ``record_audio`` setting.
 
         Idempotent: if a recording is already running, this is a no-op returning
-        ``True`` (and ``fps`` is ignored — there is one recording per run). The
-        file is finalized and embedded in the report on :meth:`close`.
-        Best-effort — returns ``False`` (and only warns) when ffmpeg is missing
-        or the platform is unsupported.
+        ``True``. The file is finalized and embedded in the report on
+        :meth:`close`. Best-effort — returns ``False`` (and only warns) when
+        ffmpeg is missing or the platform is unsupported.
 
         Note: starting again after :meth:`stop_recording` overwrites the same
         ``recording.mp4`` (it re-records from scratch, it does not resume).
@@ -907,8 +969,20 @@ class Qirabot:
         if self._recorder is not None and self._recorder.active:
             logger.info("recording already in progress; ignoring start_recording()")
             return True
+        # Manual start also claims the slot so a later action's auto-start hook
+        # doesn't spawn a second recorder.
+        self._record_pending = False
+        if window is None and target is not None and self._record_window:
+            window = self._resolve_window_target(target)
+        audio_spec = audio if audio is not None else self._record_audio
         output = os.path.join(self.report_dir, "recording.mp4")
-        recorder = ScreenRecorder(output, fps=fps if fps is not None else self._record_fps)
+        recorder = ScreenRecorder(
+            output,
+            fps=fps if fps is not None else self._record_fps,
+            window=window,
+            audio=audio_spec,
+            audio_offset=self._record_audio_offset,
+        )
         started = recorder.start()
         self._recorder = recorder if started else None
         return started
@@ -1097,6 +1171,11 @@ class Qirabot:
             if self._settle_seconds is not None:
                 adapter._settle_override = self._settle_seconds
             self._cache_adapter(target, adapter)
+        # Deferred recording start for record_window mode: the first action to
+        # supply a target lets us resolve the window to follow. Cheap no-op once
+        # started/claimed (and re-entrancy-safe via _record_pending).
+        if self._record_pending:
+            self._maybe_start_recording(target)
         return adapter
 
     def _cache_adapter(self, target: Any, adapter: DeviceAdapter) -> None:

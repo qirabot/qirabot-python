@@ -60,6 +60,9 @@ Constructor options:
 | `report_dir` | `QIRA_REPORT_DIR` | `""` | Output root; default `./qira_runs/<date>/<time-id>/` |
 | `record` | `QIRA_RECORD` | `False` | Record the screen with ffmpeg into `recording.mp4` (embedded in the report) |
 | `record_fps` | — | `12` | Recording frame rate |
+| `record_window` | `QIRA_RECORD_WINDOW` | `False` | **Windows + airtest only.** Record just the window under test (auto-resolved from the first action) instead of the full screen; falls back to full screen otherwise |
+| `record_audio` | `QIRA_RECORD_AUDIO` | `False` | **Windows only.** Capture system audio into the recording. `True` auto-detects a loopback device, or pass a DirectShow device name |
+| `record_audio_offset` | `QIRA_AUDIO_OFFSET` | `None` | A/V sync offset in seconds (usually negative, e.g. `-0.4`) applied to the audio input |
 | `screenshot_annotate` | — | `True` | Draw a red crosshair at click/type coordinates |
 | `screenshot_format` | — | `"jpeg"` | Saved screenshot format (`"jpeg"` or `"png"`) |
 | `screenshot_quality` | — | `80` | JPEG quality, 1–100 |
@@ -421,6 +424,35 @@ Requires the `ffmpeg` binary on PATH (`brew install ffmpeg` /
 best-effort: a missing ffmpeg or denied permission only warns and never fails
 the task (check `recording.ffmpeg.log` in the run dir). Dropping your own
 `recording.mp4` into `report_dir` is still embedded just the same.
+
+**Per-window capture + system audio (Windows).** On Windows you can record just
+the window under test and capture its sound:
+
+```python
+from airtest.core.api import connect_device
+dev = connect_device("Windows:///?title_re=Notepad.*")   # a concrete window
+bot = Qirabot(record=True, record_window=True, record_audio=True)
+bot.ai(dev, "type a note")          # recording starts here, following the window
+bot.close()                         # recording.mp4 = just that window, with sound
+```
+
+- `record_window=True` records only the window under test instead of the whole
+  desktop. The window is resolved automatically from the action target, so it
+  only works with the **airtest Windows** backend (other backends and any
+  resolution failure fall back to full screen). You can also target a window
+  explicitly with `bot.start_recording(window="Window Title")`, which works for
+  any Windows backend. Keep the window visible — `gdigrab` produces black/frozen
+  frames for a minimized, occluded, or GPU-composited (game) window; for games,
+  record full screen instead.
+- `record_audio=True` records **system audio**. ffmpeg has no native loopback on
+  Windows, so this needs a DirectShow source that exposes the system mix —
+  install [screen-capture-recorder](https://github.com/rdp/screen-capture-recorder-to-video-windows-free)
+  (provides `virtual-audio-capturer`) or enable "Stereo Mix" in the Sound
+  control panel. The device is auto-detected; override with a specific name via
+  `record_audio="My Device"` or `QIRA_AUDIO_DEVICE`. List candidates with
+  `ffmpeg -list_devices true -f dshow -i dummy`. If none is found it records
+  silently with a warning. If audio lags the video, nudge it with
+  `record_audio_offset=-0.4` (or `QIRA_AUDIO_OFFSET`).
 
 **Multiple monitors (macOS).** The full screen is captured one display at a
 time; by default that's the primary display (`Capture screen 0`). To record a

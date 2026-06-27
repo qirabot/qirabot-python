@@ -191,6 +191,10 @@ def main() -> int:
     # 5. ffmpeg (optional)
     if not shutil.which("ffmpeg"):
         line(WARN, "ffmpeg not found", "Optional — only needed for record=True screen recording.")
+    elif is_windows:
+        line(WARN, "ffmpeg ok",
+             "record_audio=True (system sound) also needs a DirectShow loopback device — "
+             "install screen-capture-recorder (virtual-audio-capturer) or enable 'Stereo Mix'.")
 
     print()
     if hard_ok:

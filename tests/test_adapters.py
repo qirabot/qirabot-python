@@ -591,6 +591,40 @@ class TestSeleniumPressKey:
         inst.perform.assert_called_once()
 
 
+class TestAirtestWindowInfo:
+    """window_info() identifies the window under test for per-window recording:
+    Windows only; other platforms and unidentifiable/unconnected devices -> None."""
+
+    def _adapter(self, platform: str):
+        from qirabot.adapters.airtest_adapter import AirtestAdapter
+
+        dev = MagicMock()  # snapshot/get_current_resolution -> concrete-device path
+        dev.platform = platform
+        return AirtestAdapter(dev), dev
+
+    def test_windows_returns_title_and_handle(self):
+        a, dev = self._adapter("windows")
+        dev.handle = 12345
+        dev.get_title.return_value = ["My App"]  # airtest returns list[str]
+        assert a.window_info() == {"title": "My App", "hwnd": 12345}
+
+    def test_non_windows_returns_none(self):
+        a, _ = self._adapter("android")
+        assert a.window_info() is None
+
+    def test_windows_handle_only_when_title_unavailable(self):
+        a, dev = self._adapter("windows")
+        dev.handle = 999
+        dev.get_title.side_effect = RuntimeError("not connected")  # @require_app
+        assert a.window_info() == {"title": None, "hwnd": 999}
+
+    def test_windows_none_when_nothing_identifiable(self):
+        a, dev = self._adapter("windows")
+        dev.handle = None
+        dev.get_title.side_effect = RuntimeError("not connected")
+        assert a.window_info() is None
+
+
 class TestAirtestPressKey:
     """Windows prefers the DirectInput scancode path (key_press/key_release) so
     games receive the keys; only keys the scancode table can't express fall back

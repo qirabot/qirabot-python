@@ -153,7 +153,11 @@ screenshot in the report.
 
 - **Desktop / browser** → let the SDK record the host screen for you:
   `Qirabot(record=True)` (or env `QIRA_RECORD=1`) runs ffmpeg into
-  `recording.mp4`, no extra code.
+  `recording.mp4`, no extra code. On **Windows** you can additionally record
+  only the window under test and capture its sound:
+  `Qirabot(record=True, record_window=True, record_audio=True)` — `record_window`
+  follows the airtest window automatically (else full screen), `record_audio`
+  needs a loopback device (`virtual-audio-capturer` / "Stereo Mix").
 - **Android / iOS (or any native framework)** → host capture can't see the
   device, so record the **device** with its own recorder and write it to
   `bot.report_dir/recording.mp4`. Start before `bot.ai` and **stop before
