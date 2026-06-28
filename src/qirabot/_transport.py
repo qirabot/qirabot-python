@@ -14,6 +14,22 @@ from qirabot.exceptions import QirabotConnectionError, QirabotTimeoutError, rais
 logger = logging.getLogger("qirabot")
 
 
+def _parse_error_body(response: httpx.Response) -> dict[str, Any]:
+    """Normalize an error response body into a dict raise_for_error can read.
+
+    When an upstream proxy (nginx, ELB) returns an HTML error page for 5xx /
+    504, response.json() raises and the raw HTML used to flow into the log
+    line as the error message. Collapse those cases to a one-line summary so
+    retry warnings stay readable.
+    """
+    try:
+        data: dict[str, Any] = response.json()
+        return data
+    except Exception:
+        reason = response.reason_phrase or "Error"
+        return {"error": {"message": f"HTTP {response.status_code} {reason}"}}
+
+
 class Transport:
     """HTTP client for Qirabot API."""
 
@@ -60,10 +76,7 @@ class Transport:
         with self._mapped_errors():
             response = self._client.request(method, path, json=json_data)
         if response.status_code >= 400:
-            try:
-                data = response.json()
-            except Exception:
-                data = {"error": {"message": response.text or "Unknown error"}}
+            data = _parse_error_body(response)
             raise_for_error(response.status_code, data)
         if response.status_code == 204:
             return {}
@@ -92,10 +105,7 @@ class Transport:
         with self._mapped_errors():
             response = self._client.post(path, files=files, data=data)
         if response.status_code >= 400:
-            try:
-                resp_data = response.json()
-            except Exception:
-                resp_data = {"error": {"message": response.text or "Unknown error"}}
+            resp_data = _parse_error_body(response)
             raise_for_error(response.status_code, resp_data)
         try:
             result: dict[str, Any] = response.json()
@@ -113,10 +123,7 @@ class Transport:
         with self._mapped_errors():
             response = self._client.get(path)
         if response.status_code >= 400:
-            try:
-                data = response.json()
-            except Exception:
-                data = {"error": {"message": response.text or "Unknown error"}}
+            data = _parse_error_body(response)
             raise_for_error(response.status_code, data)
         return response.content
 
