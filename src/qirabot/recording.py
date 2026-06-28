@@ -15,12 +15,22 @@ Per platform the screen input differs:
 * Linux  → ``-f x11grab`` (needs an X display; Wayland without XWayland can't be
   captured this way)
 
-On Windows the recorder can additionally capture a single window (``window=``)
-and the system audio (``audio=``). Both are best-effort: a missing audio device
-or an unmappable window degrades to full-screen / silent capture with a warning.
-Note that ``gdigrab`` per-window capture yields black/frozen frames for a
-minimized, occluded, or GPU-composited (game) window — keep the window visible,
-or fall back to full-screen for games.
+On Windows the recorder can additionally capture a single window and the system
+audio (``audio=``). There are two window-capture modes, both best-effort (a
+missing audio device or an unmappable window degrades to full-screen / silent
+capture with a warning):
+
+* ``region=(x, y, w, h)`` — grab the desktop and crop to that rectangle. This
+  captures the *composited* frame the user actually sees, so it works for
+  GPU/DirectX (game) windows that the per-window path renders black. The caller
+  supplies physical pixels (see :func:`window_region`); whatever overlaps the
+  rectangle on screen is recorded, so the window must be visible/foreground.
+* ``window=`` (title or hwnd) — ``gdigrab`` per-window capture. Works for normal
+  GDI windows even when partly occluded/background, but yields black/frozen
+  frames for a minimized or GPU-composited (game) window.
+
+When both are given, ``region`` wins. Prefer ``region`` for games and ``window``
+when you must follow a background/occluded non-GPU window.
 
 Typical usage is via the SDK (``Qirabot(record=True)`` or
 ``bot.start_recording()``), but it can be used standalone::
@@ -58,6 +68,72 @@ def _find_ffmpeg() -> str | None:
     return shutil.which("ffmpeg")
 
 
+# Win32 DPI-awareness context handles for SetThreadDpiAwarenessContext. We only
+# need PER_MONITOR_AWARE_V2 (-4); the value is a sentinel HANDLE, not a real one.
+_DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+# DwmGetWindowAttribute index for the rectangle the window *visually* occupies
+# (excludes the invisible resize border that GetWindowRect includes on Win10/11).
+_DWMWA_EXTENDED_FRAME_BOUNDS = 9
+
+
+def window_region(hwnd: int) -> tuple[int, int, int, int] | None:
+    """Visible bounds of ``hwnd`` as ``(x, y, w, h)`` in **physical** pixels.
+
+    For feeding :func:`record`/:class:`ScreenRecorder`'s ``region=`` so a desktop
+    grab can be cropped to exactly the window. Two Win10/11 quirks are handled:
+
+    * The result comes from ``DWMWA_EXTENDED_FRAME_BOUNDS`` rather than
+      ``GetWindowRect`` so it excludes the ~7px invisible resize border (which
+      would otherwise show as empty margins / an offset in the recording).
+    * The query runs under a temporary per-monitor DPI-awareness *thread*
+      context so the rect is in physical pixels regardless of the host process's
+      DPI awareness — and without permanently changing it. ``gdigrab`` works in
+      physical pixels, so the two line up.
+
+    Windows-only; returns ``None`` on any other platform or on failure. Width and
+    height are rounded down to even numbers (libx264 yuv420p requires it).
+    """
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    prev_ctx = None
+    user32 = ctypes.windll.user32
+    try:
+        # Save/restore the thread context so we don't leak awareness changes.
+        try:
+            prev_ctx = user32.SetThreadDpiAwarenessContext(
+                _DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+            )
+        except Exception:
+            prev_ctx = None  # pre-1607: GetWindowRect path below is best-effort
+        rect = wintypes.RECT()
+        hr = ctypes.windll.dwmapi.DwmGetWindowAttribute(
+            wintypes.HWND(hwnd),
+            ctypes.c_uint(_DWMWA_EXTENDED_FRAME_BOUNDS),
+            ctypes.byref(rect),
+            ctypes.sizeof(rect),
+        )
+        if hr != 0:  # not S_OK (e.g. DWM disabled) — fall back to GetWindowRect
+            if not user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
+                return None
+        x, y = rect.left, rect.top
+        w, h = rect.right - rect.left, rect.bottom - rect.top
+        if w <= 0 or h <= 0:
+            return None
+        return x, y, w - (w % 2), h - (h % 2)
+    except Exception:
+        logger.debug("window_region(%r) failed", hwnd, exc_info=True)
+        return None
+    finally:
+        if prev_ctx:
+            try:
+                user32.SetThreadDpiAwarenessContext(prev_ctx)
+            except Exception:
+                pass
+
+
 def _detect_audio_device(ffmpeg: str) -> str | None:
     """Resolve a Windows DirectShow *system audio* device name (Windows only).
 
@@ -74,13 +150,17 @@ def _detect_audio_device(ffmpeg: str) -> str | None:
         proc = subprocess.run(
             [ffmpeg, "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
             capture_output=True,
+            # UTF-8 + replace, not the OS locale codec: a GBK decode of ffmpeg's
+            # output crashes the stdio reader thread and leaves stderr=None.
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
         )
     except (OSError, subprocess.SubprocessError):
         return None
     # Device names are quoted; the audio block lists them as `"name" (audio)`.
-    names: list[str] = re.findall(r'"([^"]+)"', proc.stderr)
+    names: list[str] = re.findall(r'"([^"]+)"', proc.stderr or "")
     lowered = [(n, n.lower()) for n in names]
     for hint in _WIN_SYSTEM_AUDIO_HINTS:
         for name, low in lowered:
@@ -104,12 +184,15 @@ def _detect_screen_index(ffmpeg: str) -> str:
         proc = subprocess.run(
             [ffmpeg, "-f", "avfoundation", "-list_devices", "true", "-i", ""],
             capture_output=True,
+            # UTF-8 + replace, not the OS locale codec (see _detect_audio_device).
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
         )
     except (OSError, subprocess.SubprocessError):
         return _DEFAULT_SCREEN_INDEX
-    for line in proc.stderr.splitlines():
+    for line in (proc.stderr or "").splitlines():
         if "Capture screen" in line:
             m = re.search(r"\[(\d+)\]\s*Capture screen", line)
             if m:
@@ -138,6 +221,7 @@ def _build_input_args(
     *,
     screen_index: str = _DEFAULT_SCREEN_INDEX,
     window: str | None = None,
+    region: tuple[int, int, int, int] | None = None,
     audio_device: str | None = None,
     audio_offset: float | None = None,
 ) -> list[str] | None:
@@ -148,9 +232,12 @@ def _build_input_args(
     beyond ``DISPLAY``) so it's unit-testable; ``screen_index`` is resolved by
     the caller for macOS.
 
-    ``window``/``audio_device`` are Windows-only for now (per-window capture and
-    system-audio loopback); other platforms ignore them and keep full-screen,
-    silent capture.
+    ``window``/``region``/``audio_device`` are Windows-only for now (per-window
+    capture, desktop-crop capture, and system-audio loopback); other platforms
+    ignore them and keep full-screen, silent capture. ``region`` (a physical-px
+    ``(x, y, w, h)``) takes precedence over ``window``: it grabs the desktop and
+    crops to the rectangle, which — unlike per-window capture — works for
+    GPU/game windows.
     """
     if plat == "darwin":
         return [
@@ -163,7 +250,18 @@ def _build_input_args(
         args = ["-f", "gdigrab", "-framerate", str(fps)]
         if not capture_cursor:
             args += ["-draw_mouse", "0"]  # gdigrab draws the cursor by default
-        args += ["-i", _win_video_target(window)]
+        if region is not None:
+            # Desktop grab cropped to the window rect. Captures the composited
+            # frame (works for GPU windows); offsets/size are physical pixels.
+            x, y, w, h = region
+            args += [
+                "-offset_x", str(x),
+                "-offset_y", str(y),
+                "-video_size", f"{w}x{h}",
+                "-i", "desktop",
+            ]
+        else:
+            args += ["-i", _win_video_target(window)]
         if audio_device:
             # Second input: system audio via DirectShow. rtbufsize/thread_queue
             # absorb loopback bursts; itsoffset (negative) compensates the
@@ -197,18 +295,22 @@ class ScreenRecorder:
         fps: int = 12,
         capture_cursor: bool = True,
         window: str | None = None,
+        region: tuple[int, int, int, int] | None = None,
         audio: bool | str = False,
         audio_offset: float | None = None,
     ):
         self.output = output
         self.fps = fps
         self.capture_cursor = capture_cursor
-        # Windows-only extras. ``window``: a window title (or numeric handle) to
-        # capture instead of the whole desktop. ``audio``: True = auto-detect a
-        # system-audio device, a str = explicit dshow device name, False = no
-        # audio. ``audio_offset``: seconds (usually negative) to shift audio for
-        # A/V sync. All degrade gracefully when unavailable.
+        # Windows-only extras. ``region``: physical-px (x, y, w, h) to crop a
+        # desktop grab to (works for GPU/game windows; takes precedence over
+        # ``window``). ``window``: a window title (or numeric handle) for
+        # per-window capture instead of the whole desktop. ``audio``: True =
+        # auto-detect a system-audio device, a str = explicit dshow device name,
+        # False = no audio. ``audio_offset``: seconds (usually negative) to shift
+        # audio for A/V sync. All degrade gracefully when unavailable.
         self.window = window
+        self.region = region
         self.audio = audio
         self.audio_offset = audio_offset
         self._proc: subprocess.Popen[bytes] | None = None
@@ -252,6 +354,7 @@ class ScreenRecorder:
             sys.platform, self.fps, self.capture_cursor,
             screen_index=index,
             window=self.window,
+            region=self.region,
             audio_device=audio_device,
             audio_offset=self.audio_offset,
         )
@@ -287,7 +390,12 @@ class ScreenRecorder:
             self._proc = None
             return False
 
-        scope = f"window {self.window!r}" if self.window else "full screen"
+        if self.region is not None:
+            scope = f"region {self.region}"
+        elif self.window:
+            scope = f"window {self.window!r}"
+        else:
+            scope = "full screen"
         sound = f"audio={audio_device}" if audio_device else "no audio"
         logger.info("recording started (%dfps, %s, %s) -> %s", self.fps, scope, sound, self.output)
         return True
@@ -350,20 +458,24 @@ def record(
     filename: str = "recording.mp4",
     fps: int = 12,
     window: str | None = None,
+    region: tuple[int, int, int, int] | None = None,
     audio: bool | str = False,
     audio_offset: float | None = None,
 ) -> ScreenRecorder:
     """Convenience factory: a :class:`ScreenRecorder` writing ``report_dir/filename``.
 
     ``with record(bot.report_dir): ...`` records the full screen for the block.
-    ``window`` (Windows: a window title/handle) records just that window and
-    ``audio`` (Windows: True to auto-detect system audio, or a dshow device
-    name) adds sound — both degrade to full-screen / silent elsewhere.
+    On Windows, ``region`` (physical-px ``(x, y, w, h)``, e.g. from
+    :func:`window_region`) crops a desktop grab to one window — the
+    GPU/game-safe path — while ``window`` (a title/handle) does per-window
+    capture; ``audio`` (True to auto-detect system audio, or a dshow device
+    name) adds sound. All degrade to full-screen / silent elsewhere.
     """
     return ScreenRecorder(
         os.path.join(report_dir, filename),
         fps=fps,
         window=window,
+        region=region,
         audio=audio,
         audio_offset=audio_offset,
     )

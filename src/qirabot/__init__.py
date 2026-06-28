@@ -3,6 +3,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from qirabot._applaunch import launch_app
+from qirabot._dotenv import load_dotenv
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
 from qirabot.client import Qirabot, RunResult, StepResult
 from qirabot.exceptions import (
@@ -15,7 +16,7 @@ from qirabot.exceptions import (
     QirabotTimeoutError,
     RateLimitError,
 )
-from qirabot.recording import ScreenRecorder, record
+from qirabot.recording import ScreenRecorder, record, window_region
 
 try:
     __version__ = version("qirabot")
@@ -40,5 +41,7 @@ __all__ = [
     "ScreenRecorder",
     "StepResult",
     "launch_app",
+    "load_dotenv",
     "record",
+    "window_region",
 ]

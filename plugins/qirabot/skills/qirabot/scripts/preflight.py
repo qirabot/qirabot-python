@@ -27,6 +27,27 @@ def line(status: str, label: str, hint: str = "") -> None:
         print(f"       -> {hint}")
 
 
+def load_dotenv(path: str = ".env") -> None:
+    """Populate os.environ from ./.env (stdlib only; mirrors qirabot.load_dotenv).
+
+    Runs before qirabot is importable, so the key check below sees a key that
+    lives only in .env. A real exported env var still wins (setdefault).
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return
+    for raw in lines:
+        s = raw.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        key, _, value = s.partition("=")
+        key = key.removeprefix("export ").strip()
+        if key:
+            os.environ.setdefault(key, value.strip().strip('"').strip("'"))
+
+
 def check_import(module: str, extra: str, label: str = "") -> bool:
     """Hard-check that an optional extra imports on THIS interpreter.
 
@@ -74,10 +95,12 @@ def main() -> int:
         line(WARN, "airtest (window-scoped) desktop backend wants Python 3.10-3.12",
              "pyautogui (whole-screen) is fine on any 3.10+; only the airtest path pins numpy<2.")
 
-    # 2. API key
+    # 2. API key (also accept it from ./.env, like the templates' load_dotenv())
+    load_dotenv()
     has_key = bool(os.environ.get("QIRA_API_KEY"))
     line(OK if has_key else NO, "QIRA_API_KEY is set",
-         "" if has_key else "Get a key at https://app.qirabot.com, then: export QIRA_API_KEY=qk_...")
+         "" if has_key else "Get a key at https://app.qirabot.com, then put it in ./.env: "
+         "echo 'QIRA_API_KEY=qk_...' > .env  (or export QIRA_API_KEY=qk_...)")
     hard_ok = hard_ok and has_key
 
     # 3. qirabot importable
@@ -89,7 +112,7 @@ def main() -> int:
                  "ios": "appium", "desktop": "desktop"}[target]
         line(NO, "qirabot importable",
              f"pip install 'qirabot[{extra}]'  (prefer a venv: "
-             "python -m venv .qira-venv && source .qira-venv/bin/activate)")
+             "python -m venv .venv && source .venv/bin/activate)")
         hard_ok = False
 
     # 4. target-specific

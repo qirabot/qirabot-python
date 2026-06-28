@@ -17,9 +17,9 @@ Prereqs (real device):
        `python`):  python scripts/preflight.py ios
 
 Install:
-    python -m venv .qira-venv && source .qira-venv/bin/activate
+    python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
     pip install "qirabot[appium]"
-    export QIRA_API_KEY="qk_..."
+    echo 'QIRA_API_KEY=qk_...' > .env    # load_dotenv() reads this (also QIRA_BASE_URL)
 
 The HTML report is written to ./qira_runs/<date>/<run>/report.html on close.
 """
@@ -27,7 +27,10 @@ The HTML report is written to ./qira_runs/<date>/<run>/report.html on close.
 from appium import webdriver
 from appium.options.ios import XCUITestOptions
 
-from qirabot import Qirabot, StepResult
+from qirabot import Qirabot, StepResult, load_dotenv
+
+# Read QIRA_API_KEY / QIRA_BASE_URL from ./.env (a real exported env var wins).
+load_dotenv()
 
 # TODO: fill in your device + app, and the task.
 UDID = "<your-device-udid>"           # `idevice_id -l`, or Xcode › Window › Devices

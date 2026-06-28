@@ -11,9 +11,9 @@ Appium, pyautogui (whole-screen desktop, any OS), or Airtest (window-scoped
 Windows desktop) variants at the bottom.
 
 Run (Selenium):
-    python -m venv .qira-venv && source .qira-venv/bin/activate
+    python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
     pip install qirabot selenium        # Appium: qirabot[appium] · desktop: qirabot[desktop]
-    export QIRA_API_KEY="qk_..."
+    echo 'QIRA_API_KEY=qk_...' > .env    # load_dotenv() reads this (also QIRA_BASE_URL)
     python bolt_on.py
 
 The HTML report is written to ./qira_runs/<date>/<run>/report.html on close.
@@ -21,7 +21,10 @@ The HTML report is written to ./qira_runs/<date>/<run>/report.html on close.
 
 from selenium import webdriver
 
-from qirabot import Qirabot, StepResult
+from qirabot import Qirabot, StepResult, load_dotenv
+
+# Read QIRA_API_KEY / QIRA_BASE_URL from ./.env (a real exported env var wins).
+load_dotenv()
 
 # TODO: the task to perform (and the start URL / app for your target)
 START_URL = "https://www.wikipedia.org"
@@ -70,6 +73,11 @@ driver.quit()
 #     result = bot.ai("Open Display settings and turn on Dark theme")
 #     print(result.success, result.output)
 # driver.quit()
+
+
+# NOTE (Windows): if the target app/game runs as Administrator (common for games
+# with anti-cheat), run this script as Administrator too — else Windows UIPI
+# silently drops clicks/keystrokes (cursor moves, nothing happens, no error).
 
 
 # --- Native desktop via pyautogui (drives the WHOLE primary screen, any OS) --

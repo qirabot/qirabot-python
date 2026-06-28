@@ -197,6 +197,17 @@ class Qirabot:
         self._current_section = "setup"
         # ai() instruction -> success, for per-section PASS/FAIL in the report.
         self._section_outcomes: dict[str, bool] = {}
+        # Session-wide totals for the report header. Token/timing data rides in
+        # each ai() step result, not in _log, so we accumulate it here as steps
+        # run and hand the totals to the report at render time.
+        self._stats: dict[str, int] = {
+            "ai_steps": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "thinking_tokens": 0,
+            "step_duration_ms": 0,
+            "llm_decision_duration_ms": 0,
+        }
         self._screenshot_counter = 0
         self._screenshot_config = ScreenshotConfig(
             format=screenshot_format,
@@ -233,6 +244,12 @@ class Qirabot:
         # Windows-only recording extras: follow the window under test (resolved
         # lazily from the first action's target) and capture system audio.
         self._record_window = record_window or _env_truthy(os.environ.get("QIRA_RECORD_WINDOW", ""))
+        # By default record_window crops a desktop grab to the window's visible
+        # rect (works for GPU/game windows the per-window path renders black).
+        # QIRA_RECORD_WINDOW_NATIVE=1 forces the legacy gdigrab per-window mode,
+        # which can follow a background/occluded *non-GPU* window but goes black
+        # on games.
+        self._record_window_native = _env_truthy(os.environ.get("QIRA_RECORD_WINDOW_NATIVE", ""))
         self._record_audio = record_audio or _env_truthy(os.environ.get("QIRA_RECORD_AUDIO", ""))
         if record_audio_offset is None:
             env_off = os.environ.get("QIRA_AUDIO_OFFSET", "")
@@ -608,6 +625,7 @@ class Qirabot:
         adapter = self._get_adapter(target)
         if not locate:
             adapter.execute("mouse_up", {})
+            self._record_local_step(adapter, "mouse_up")
             return self._result(adapter)
         self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
         self._ai_action(
@@ -632,6 +650,7 @@ class Qirabot:
         """
         adapter = self._get_adapter(target)
         adapter.execute("key_down", {"key": key})
+        self._record_local_step(adapter, "key_down", {"key": key})
         return self._result(adapter)
 
     def key_up(self, target: Any, key: str) -> Any:
@@ -641,6 +660,7 @@ class Qirabot:
         """
         adapter = self._get_adapter(target)
         adapter.execute("key_up", {"key": key})
+        self._record_local_step(adapter, "key_up", {"key": key})
         return self._result(adapter)
 
     def extract(
@@ -817,6 +837,17 @@ class Qirabot:
                 error_msg = result.get("error", "AI request failed")
                 if result.get("finished"):
                     logger.error("failed: %s", error_msg)
+                    # Record the failure so the report shows *why* the task
+                    # ended — otherwise this branch returns silently and the
+                    # error reason never reaches the timeline.
+                    self._record_step(
+                        screenshot_bytes,
+                        action_type or "ai",
+                        result.get("params") or {},
+                        output=error_msg,
+                        finished=True,
+                        success=False,
+                    )
                     return RunResult(success=False, output=error_msg, steps=steps)
                 raise ActionError(error_msg)
 
@@ -826,13 +857,14 @@ class Qirabot:
             decision = result.get("decision", "")
 
             coords = _extract_coords(action_params)
-            self._record_step(
+            entry = self._record_step(
                 screenshot_bytes,
                 action_type or "ai",
                 action_params,
                 coords,
                 output=result.get("output", ""),
                 finished=finished,
+                decision=decision,
             )
 
             if logger.isEnabledFor(logging.INFO):
@@ -853,6 +885,13 @@ class Qirabot:
 
             step_result = StepResult.from_dict(result, step_num)
             steps.append(step_result)
+
+            self._stats["ai_steps"] += 1
+            self._stats["input_tokens"] += step_result.input_tokens
+            self._stats["output_tokens"] += step_result.output_tokens
+            self._stats["thinking_tokens"] += step_result.thinking_tokens
+            self._stats["step_duration_ms"] += step_result.step_duration_ms
+            self._stats["llm_decision_duration_ms"] += step_result.llm_decision_duration_ms
 
             if on_step:
                 on_step(step_result)
@@ -884,10 +923,32 @@ class Qirabot:
                     last_action_result = "ok"
                 except Exception as e:
                     last_action_result = f"ERROR: {e}"
+                    # The step's screenshot/decision were recorded before this
+                    # action ran, so its outcome only surfaces now. Backfill the
+                    # entry so the report marks it failed (red ✗) and shows why,
+                    # instead of leaving an errored step looking successful. The
+                    # loop still continues — the error is fed back so the model
+                    # can recover on the next step.
+                    if entry is not None:
+                        entry["success"] = False
+                        err = f"execution failed: {e}"
+                        entry["output"] = (
+                            f"{entry['output']}\n{err}" if entry["output"] else err
+                        )
 
             last_was_save_note = action_type == "save_note"
 
         logger.error("failed: max steps (%d) reached", max_steps)
+        # Record the terminal failure so the report shows why the task ended,
+        # mirroring the server-error branch above. Reuses the last screenshot.
+        self._record_step(
+            screenshot_bytes,
+            "ai",
+            {"instruction": instruction, "max_steps": max_steps},
+            output="max steps reached",
+            finished=True,
+            success=False,
+        )
         return RunResult(success=False, output="max steps reached", steps=steps)
 
     def screenshot(self, target: Any) -> Path | None:
@@ -939,6 +1000,26 @@ class Qirabot:
         hwnd = info.get("hwnd")
         return str(hwnd) if hwnd is not None else None
 
+    def _resolve_window_region(self, target: Any) -> tuple[int, int, int, int] | None:
+        """Visible (x, y, w, h) of ``target``'s window for desktop-crop recording.
+
+        Reads the adapter's ``window_info()`` hwnd and resolves its physical-px
+        rect via :func:`qirabot.recording.window_region`. Returns ``None`` (so
+        the caller degrades to per-window or full-screen) when there's no hwnd or
+        the rect can't be resolved.
+        """
+        try:
+            info = self._get_adapter(target).window_info()
+        except Exception:
+            logger.debug("window_info() failed; not using region capture", exc_info=True)
+            return None
+        hwnd = info.get("hwnd") if info else None
+        if hwnd is None:
+            return None
+        from qirabot.recording import window_region
+
+        return window_region(int(hwnd))
+
     def start_recording(
         self,
         *,
@@ -952,9 +1033,13 @@ class Qirabot:
         Records the full screen by default. On Windows it can instead follow a
         single window and capture system audio:
 
-        * ``window`` — a window title (or numeric handle) to record.
+        * ``window`` — a window title (or numeric handle) to record via legacy
+          per-window capture.
         * ``target`` — when ``record_window`` is set, the window is resolved
-          automatically from this action target (airtest/Windows only).
+          automatically from this action target (airtest/Windows only). By
+          default its visible rect is cropped out of a desktop grab (works for
+          GPU/game windows); set ``QIRA_RECORD_WINDOW_NATIVE=1`` to force the
+          legacy per-window mode instead.
         * ``audio`` — ``True`` to auto-detect a system-audio device, a dshow
           device name, or ``False``; defaults to the ``record_audio`` setting.
 
@@ -972,14 +1057,23 @@ class Qirabot:
         # Manual start also claims the slot so a later action's auto-start hook
         # doesn't spawn a second recorder.
         self._record_pending = False
+        region: tuple[int, int, int, int] | None = None
         if window is None and target is not None and self._record_window:
-            window = self._resolve_window_target(target)
+            # Default: crop a desktop grab to the window's visible rect (GPU/game
+            # safe). Fall back to legacy per-window capture when forced via
+            # QIRA_RECORD_WINDOW_NATIVE or when the rect can't be resolved
+            # (non-Windows, no hwnd, DWM off).
+            if not self._record_window_native:
+                region = self._resolve_window_region(target)
+            if region is None:
+                window = self._resolve_window_target(target)
         audio_spec = audio if audio is not None else self._record_audio
         output = os.path.join(self.report_dir, "recording.mp4")
         recorder = ScreenRecorder(
             output,
             fps=fps if fps is not None else self._record_fps,
             window=window,
+            region=region,
             audio=audio_spec,
             audio_offset=self._record_audio_offset,
         )
@@ -1031,6 +1125,7 @@ class Qirabot:
         """
         adapter = self._get_adapter(target)
         adapter.go_back()
+        self._record_local_step(adapter, "go_back")
         return self._result(adapter)
 
     def close_tab(self, target: Any) -> Any:
@@ -1046,6 +1141,7 @@ class Qirabot:
         """
         adapter = self._get_adapter(target)
         adapter.close_tab()
+        self._record_local_step(adapter, "close_tab")
         return self._result(adapter)
 
     def navigate(self, target: Any, url: str) -> Any:
@@ -1061,6 +1157,7 @@ class Qirabot:
             url = "https://" + url
         adapter = self._get_adapter(target)
         adapter.navigate(url)
+        self._record_local_step(adapter, "navigate", {"url": url})
         return self._result(adapter)
 
     def scroll(self, target: Any, direction: str = "down", distance: int = 3, *, x: float | None = None, y: float | None = None) -> None:
@@ -1078,6 +1175,10 @@ class Qirabot:
             x = info.width / 2 if x is None else x
             y = info.height / 2 if y is None else y
         adapter.scroll(float(x), float(y), direction, int(distance))
+        self._record_local_step(
+            adapter, "scroll",
+            {"direction": direction, "amount": distance}, (float(x), float(y)),
+        )
 
     def press_key(self, target: Any, key: str) -> Any:
         """Press a key or key combo. No AI, no billing.
@@ -1095,6 +1196,7 @@ class Qirabot:
         """
         adapter = self._get_adapter(target)
         adapter.execute("press_key", {"key": key})
+        self._record_local_step(adapter, "press_key", {"key": key})
         return self._result(adapter)
 
     def _record_step(
@@ -1107,18 +1209,21 @@ class Qirabot:
         output: str = "",
         finished: bool = False,
         success: bool = True,
-    ) -> None:
+        decision: str = "",
+    ) -> dict[str, Any] | None:
         """Save the screenshot (if reporting) and append a step to the timeline.
 
-        ``assert`` actions (verify / wait_for polls) are control-flow, not visual
-        steps, so they are skipped — otherwise an auto-wait would spam the report
-        and disk with a dozen identical poll frames.
+        Returns the appended log entry so the caller can backfill fields that
+        only become known after recording (e.g. an action's execution result),
+        or ``None`` when reporting is off and nothing was recorded.
+
+        ``assert`` actions (verify / wait_for polls) are recorded like any other
+        step: the server keeps them anyway, and the poll frames are the key
+        evidence when a ``wait_for`` times out.
         """
-        # Reporting off → zero overhead. ``assert`` actions (verify / wait_for
-        # polls) are control-flow, not visual steps, so they are skipped too —
-        # otherwise an auto-wait would spam the report and disk with poll frames.
-        if not self._report or action_type == "assert":
-            return
+        # Reporting off → zero overhead.
+        if not self._report:
+            return None
         # Annotation + thumbnailing share a single PIL decode; never let a
         # malformed/unexpected screenshot break the actual action — degrade to
         # the raw bytes / no thumbnail instead.
@@ -1132,20 +1237,50 @@ class Qirabot:
             except Exception:
                 logger.debug("render step images failed", exc_info=True)
         frame = self._save_frame(annotated, action_type or "action") if data else None
-        self._log.append(
-            {
-                "section": self._current_section,
-                "action_type": action_type or "",
-                "params": params or {},
-                "output": output or "",
-                "finished": bool(finished),
-                "success": bool(success),
-                "coords": list(coords) if coords else None,
-                # relative to report_dir so the html can link it directly
-                "screenshot": f"screenshots/{frame.name}" if frame else "",
-                "thumb": thumb,
-            }
-        )
+        entry: dict[str, Any] = {
+            "section": self._current_section,
+            "action_type": action_type or "",
+            "params": params or {},
+            "decision": decision or "",
+            "output": output or "",
+            "finished": bool(finished),
+            "success": bool(success),
+            "coords": list(coords) if coords else None,
+            # relative to report_dir so the html can link it directly
+            "screenshot": f"screenshots/{frame.name}" if frame else "",
+            "thumb": thumb,
+        }
+        self._log.append(entry)
+        return entry
+
+    def _record_local_step(
+        self,
+        adapter: DeviceAdapter,
+        action_type: str,
+        params: dict[str, Any] | None = None,
+        coords: tuple[float, float] | None = None,
+    ) -> None:
+        """Record a deterministic (non-AI) action in the local report.
+
+        Primitives like :meth:`press_key` / :meth:`scroll` drive the adapter
+        directly and bypass ``/act``, so the server never sees them and they
+        were previously invisible in the report. Capture a post-action
+        screenshot and append a step, mirroring what :meth:`_ai_action` does
+        for AI actions. Best-effort: reporting off → zero overhead, and a
+        failure to capture or persist the frame must never break the action
+        itself — recording is a side channel, not part of the operation.
+        """
+        if not self._report:
+            return
+        try:
+            data = adapter.screenshot(self._screenshot_config)
+            # Only record once we actually have image bytes; anything else
+            # (a stubbed adapter, a backend returning None) is skipped rather
+            # than written to disk.
+            if isinstance(data, (bytes, bytearray)):
+                self._record_step(bytes(data), action_type, params or {}, coords)
+        except Exception:
+            logger.debug("local step recording failed", exc_info=True)
 
     def _save_frame(self, data: bytes, label: str) -> Path | None:
         """Write a full-resolution screenshot to ``report_dir/screenshots/``."""
@@ -1419,6 +1554,8 @@ class Qirabot:
                 outcomes=self._section_outcomes,
                 recording=recording,
                 record_error=record_error,
+                stats=self._stats,
+                model=self._model_alias,
             )
             logger.info("report written: %s", out)
             return out

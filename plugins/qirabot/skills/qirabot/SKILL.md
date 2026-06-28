@@ -30,18 +30,22 @@ over the user's global Python (and **re-run preflight with that venv's Python**
 so it becomes the validated interpreter):
 
 ```bash
-# browser / iOS / desktop can share one venv:
-python3 -m venv .qira-venv && source .qira-venv/bin/activate   # Windows: .qira-venv\Scripts\activate
+# One backend per project → use the conventional .venv (IDEs auto-detect it):
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install "qirabot[browser]"      # → also: playwright install chromium
 #   or  qirabot[appium]  (iOS: + Appium server & WebDriverAgent)  /  qirabot[desktop]
+#   or  qirabot[airtest]  (Android, iOS, window-scoped Windows desktop; Python 3.10-3.12)
 
-# the airtest backends (Android, iOS, and window-scoped Windows desktop) need
-# their OWN venv on Python 3.10-3.12 — airtest pins numpy<2 and would conflict a
-# shared env:
-python3.12 -m venv .qira-venv-airtest && source .qira-venv-airtest/bin/activate
-pip install "qirabot[airtest]"
+# CAVEAT: airtest pins numpy<2, which conflicts with the browser/desktop extras.
+# Only if ONE project genuinely needs airtest AND another backend, give airtest
+# its own separately-named env instead of sharing .venv:
+#   python3.12 -m venv .venv-airtest && source .venv-airtest/bin/activate
+#   pip install "qirabot[airtest]"
 
-export QIRA_API_KEY="qk_..."        # from https://app.qirabot.com
+# Credentials go in a .env file (the templates call qirabot.load_dotenv() to read
+# it; a real exported env var still wins). Never hard-code the key in the script.
+echo 'QIRA_API_KEY=qk_...' > .env         # from https://app.qirabot.com
+# optional self-host: echo 'QIRA_BASE_URL=https://...' >> .env
 ```
 
 ## Step 1 — Pick a target and start from a template
@@ -156,8 +160,9 @@ screenshot in the report.
   `recording.mp4`, no extra code. On **Windows** you can additionally record
   only the window under test and capture its sound:
   `Qirabot(record=True, record_window=True, record_audio=True)` — `record_window`
-  follows the airtest window automatically (else full screen), `record_audio`
-  needs a loopback device (`virtual-audio-capturer` / "Stereo Mix").
+  follows the airtest window automatically (else full screen) and crops the
+  desktop to it, so **GPU/game windows record correctly** (keep them visible);
+  `record_audio` needs a loopback device (`virtual-audio-capturer` / "Stereo Mix").
 - **Android / iOS (or any native framework)** → host capture can't see the
   device, so record the **device** with its own recorder and write it to
   `bot.report_dir/recording.mp4`. Start before `bot.ai` and **stop before
@@ -177,6 +182,11 @@ See `references/REFERENCE.md` (the `record` row) for details.
   (log in once, later runs start authenticated — see `references/REFERENCE.md`).
   NOTE: pass an **absolute** path — qirabot/Playwright do NOT expand `~`, so a
   literal `"~/..."` creates a `./~/` dir in the CWD. Use `os.path.expanduser`.
+- **Windows desktop/games: run elevated to drive elevated targets.** If the
+  target app/game runs as Administrator (common for games with anti-cheat), run
+  the script as Administrator too — else Windows UIPI silently drops
+  clicks/keystrokes (cursor moves, nothing happens, no error). Script privilege
+  must be ≥ the target's.
 - **Confirm before irreversible or outward-facing actions** done under the
   user's identity (posting a comment, purchasing, deleting): gather/read first,
   report exactly what you're about to do, get the user's go-ahead, then act.

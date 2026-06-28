@@ -1,16 +1,19 @@
 """Qirabot browser automation template — Qirabot launches its own Chromium.
 
 Fill in the TODOs, then run:
-    python -m venv .qira-venv && source .qira-venv/bin/activate
+    python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
     pip install "qirabot[browser]" && playwright install chromium
-    export QIRA_API_KEY="qk_..."
+    echo 'QIRA_API_KEY=qk_...' > .env    # load_dotenv() reads this (also QIRA_BASE_URL)
     python browser.py
 
 A self-contained HTML report (with screenshots) is written to
 ./qira_runs/<date>/<run>/report.html on close — open it to verify the run.
 """
 
-from qirabot import Qirabot, StepResult
+from qirabot import Qirabot, StepResult, load_dotenv
+
+# Read QIRA_API_KEY / QIRA_BASE_URL from ./.env (a real exported env var wins).
+load_dotenv()
 
 # TODO: starting URL + the task to perform
 START_URL = "https://www.saucedemo.com"

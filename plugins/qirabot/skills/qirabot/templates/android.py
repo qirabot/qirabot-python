@@ -2,9 +2,9 @@
 
 Fill in APP and TASK, then run:
     # use Python 3.10-3.12 for the airtest extra
-    python -m venv .qira-venv && source .qira-venv/bin/activate
+    python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
     pip install "qirabot[airtest]"
-    export QIRA_API_KEY="qk_..."
+    echo 'QIRA_API_KEY=qk_...' > .env    # load_dotenv() reads this (also QIRA_BASE_URL)
     adb devices            # confirm a device/emulator is connected
     python android.py
 
@@ -14,7 +14,10 @@ The HTML report is written to ./qira_runs/<date>/<run>/report.html on close.
 
 from airtest.core.api import G, auto_setup, start_app, stop_app
 
-from qirabot import Qirabot, StepResult
+from qirabot import Qirabot, StepResult, load_dotenv
+
+# Read QIRA_API_KEY / QIRA_BASE_URL from ./.env (a real exported env var wins).
+load_dotenv()
 
 # TODO: the app under test and what you want done
 APP = "com.android.settings"

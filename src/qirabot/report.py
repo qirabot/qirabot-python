@@ -24,6 +24,8 @@ body { font: 14px/1.5 -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-se
        margin: 0; padding: 24px; background: #f6f7f9; color: #1a1a1a; }
 h1 { font-size: 20px; margin: 0 0 4px; }
 .meta { color: #666; font-size: 12px; margin-bottom: 16px; }
+.stats { color: #555; font-size: 12px; margin: -10px 0 16px;
+         font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .summary { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
 .badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
 .pass { background: #d7f5dd; color: #06632b; }
@@ -40,9 +42,14 @@ section > h2 { font-size: 15px; margin: 0; padding: 12px 16px; background: #fafb
 .head { font-weight: 600; color: #888; font-size: 11px; text-transform: uppercase;
         background: #fcfcfd; }
 .act { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
+.steps > div.fail-row { background: #fff5f5; }
+.steps > .act.fail-row { color: #8a1010; }
 .detail { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
           color: #333; white-space: pre-wrap; word-break: break-word; }
 .detail .out { color: #555; }
+.detail .decision { display: block; color: #777; font-style: italic; font-size: 11px;
+                    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+                    margin-bottom: 4px; }
 .shot img { width: 100%; border-radius: 6px; border: 1px solid #e3e5e8; display: block;
             transition: transform .08s ease; }
 .shot a { display: block; cursor: zoom-in; }
@@ -80,6 +87,10 @@ video { max-width: 100%; border-radius: 8px; margin-bottom: 18px; }
   section > h2 { background: #22262c; border-color: #2c3036; }
   .head { background: #1a1d22; }
   .steps > div { border-color: #262a30; }
+  .steps > div.fail-row { background: #3a1d1d; }
+  .steps > .act.fail-row { color: #f3a6a6; }
+  .stats { color: #9aa0a6; }
+  .detail .decision { color: #9aa0a6; }
   .notice { background: #3a2f12; color: #f0d493; }
 }
 """
@@ -133,6 +144,46 @@ def _summarize_params(params: dict[str, Any]) -> str:
 
 def _badge(label: str, kind: str) -> str:
     return f'<span class="badge {kind}">{html.escape(label)}</span>'
+
+
+def _fmt_tokens(n: int) -> str:
+    """Compact token count: 1234 -> ``1.2k``, 980 -> ``980``."""
+    return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
+
+
+def _fmt_ms(ms: int) -> str:
+    """Human duration from milliseconds: ``820ms`` / ``23.4s`` / ``2m03s``."""
+    if ms < 1000:
+        return f"{ms}ms"
+    secs = ms / 1000
+    if secs < 60:
+        return f"{secs:.1f}s"
+    return f"{int(secs // 60)}m{int(secs % 60):02d}s"
+
+
+def _render_stats(stats: dict[str, int], model: str) -> str:
+    """A one-line run summary (steps · tokens · timing · model).
+
+    Returns an empty string when there were no AI steps, so non-AI runs
+    (standalone click/type actions) don't get a meaningless zero line.
+    """
+    if not stats.get("ai_steps"):
+        return ""
+    inp = stats.get("input_tokens", 0)
+    out = stats.get("output_tokens", 0)
+    think = stats.get("thinking_tokens", 0)
+    total = inp + out + think
+    bits = [f"{stats['ai_steps']} AI steps"]
+    if total:
+        bits.append(
+            f"{_fmt_tokens(total)} tokens "
+            f"(in {_fmt_tokens(inp)} / out {_fmt_tokens(out)} / think {_fmt_tokens(think)})"
+        )
+    if stats.get("step_duration_ms"):
+        bits.append(_fmt_ms(stats["step_duration_ms"]))
+    if model:
+        bits.append(f"model {model}")
+    return f"<div class='stats'>{html.escape(' · '.join(bits))}</div>"
 
 
 _LIGHTBOX_JS = """
@@ -214,9 +265,12 @@ def write_html(
     outcomes: dict[str, bool] | None = None,
     recording: str = "",
     record_error: str = "",
+    stats: dict[str, int] | None = None,
+    model: str = "",
 ) -> Path:
     """Render ``log`` to a self-contained HTML report at ``path``."""
     outcomes = outcomes or {}
+    stats = stats or {}
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -244,6 +298,7 @@ def write_html(
     if task_id:
         meta += f" · task {html.escape(task_id)}"
     parts.append(f"<div class='meta'>{meta}</div>")
+    parts.append(_render_stats(stats, model))
 
     # Summary badges
     parts.append("<div class='summary'>")
@@ -279,11 +334,19 @@ def write_html(
             "<div class='head'>detail</div><div class='head'>screenshot</div>"
         )
         for i, e in enumerate(grouped[sec], 1):
-            detail = html.escape(_summarize_params(e.get("params") or {}))
+            detail = ""
+            decision = e.get("decision") or ""
+            if decision:
+                detail += f"<span class='decision'>{html.escape(decision)}</span>"
+            detail += html.escape(_summarize_params(e.get("params") or {}))
             output = e.get("output") or ""
             if output:
                 detail += f"<br><span class='out'>{html.escape(output)}</span>"
-            mark = " ✓" if e.get("finished") else ""
+            # A step explicitly recorded as failed gets a ✗ and a tinted row;
+            # otherwise the terminal step gets the completion ✓.
+            failed = e.get("success") is False
+            row_cls = " fail-row" if failed else ""
+            mark = " ✗" if failed else (" ✓" if e.get("finished") else "")
             action = (e.get("action_type") or "") + mark
             shot = ""
             thumb = e.get("thumb") or ""
@@ -299,11 +362,12 @@ def write_html(
                 img = f"<img src='{thumb}' loading='lazy'>"
                 href = html.escape(full or "#")
                 shot = f"<a href='{href}' onclick='return openLb({idx})'>{img}</a>"
+            num_div = f"<div class='fail-row'>{i}</div>" if failed else f"<div>{i}</div>"
             parts.append(
-                f"<div>{i}</div>"
-                f"<div class='act'>{html.escape(action)}</div>"
-                f"<div class='detail'>{detail}</div>"
-                f"<div class='shot'>{shot}</div>"
+                num_div
+                + f"<div class='act{row_cls}'>{html.escape(action)}</div>"
+                f"<div class='detail{row_cls}'>{detail}</div>"
+                f"<div class='shot{row_cls}'>{shot}</div>"
             )
         parts.append("</div></section>")
 

@@ -61,6 +61,27 @@ class TestBuildInputArgs:
         assert args is not None
         assert args[-2:] == ["-i", "hwnd=13579"]
 
+    def test_windows_region_crops_desktop(self):
+        # region grabs the desktop and crops via offset/video_size.
+        args = _build_input_args("win32", 30, True, region=(100, 200, 640, 480))
+        assert args is not None
+        assert args[-2:] == ["-i", "desktop"]
+        assert args[args.index("-offset_x") + 1] == "100"
+        assert args[args.index("-offset_y") + 1] == "200"
+        assert args[args.index("-video_size") + 1] == "640x480"
+
+    def test_windows_region_beats_window(self):
+        # When both are given, region (crop) wins over per-window capture.
+        args = _build_input_args("win32", 30, True, window="13579", region=(0, 0, 800, 600))
+        assert args is not None
+        assert args[-1] == "desktop"
+        assert "hwnd=13579" not in args
+
+    def test_non_windows_ignores_region(self):
+        args = _build_input_args("linux", 15, True, region=(0, 0, 800, 600))
+        assert args is not None
+        assert "-offset_x" not in args and "-video_size" not in args
+
     def test_windows_system_audio_second_input(self):
         args = _build_input_args(
             "win32", 30, True, audio_device="virtual-audio-capturer", audio_offset=-0.4
@@ -174,6 +195,28 @@ class TestDetectAudioDevice:
             raise OSError("no ffmpeg")
 
         monkeypatch.setattr(recording.subprocess, "run", boom)
+        assert _detect_audio_device("ffmpeg") is None
+
+    def test_decodes_as_utf8_with_replacement(self, monkeypatch):
+        # On a non-UTF-8 console a locale (e.g. GBK) decode crashes the stdio
+        # reader thread; the probe must force UTF-8 + replace, not the default.
+        monkeypatch.delenv("QIRA_AUDIO_DEVICE", raising=False)
+        seen = {}
+
+        def fake_run(*a, **k):
+            seen.update(k)
+            return _FakeCompleted('"virtual-audio-capturer" (audio)\n')
+
+        monkeypatch.setattr(recording.subprocess, "run", fake_run)
+        assert _detect_audio_device("ffmpeg") == "virtual-audio-capturer"
+        assert seen.get("encoding") == "utf-8"
+        assert seen.get("errors") == "replace"
+
+    def test_none_stderr_does_not_crash(self, monkeypatch):
+        # A crashed reader thread leaves stderr=None; the probe must degrade to
+        # None instead of raising TypeError from re.findall(None).
+        monkeypatch.delenv("QIRA_AUDIO_DEVICE", raising=False)
+        monkeypatch.setattr(recording.subprocess, "run", lambda *a, **k: _FakeCompleted(None))
         assert _detect_audio_device("ffmpeg") is None
 
 
@@ -328,10 +371,11 @@ class _FakeRecorder:
 
     instances: list["_FakeRecorder"] = []
 
-    def __init__(self, output, *, fps=12, capture_cursor=True, window=None, audio=False, audio_offset=None):
+    def __init__(self, output, *, fps=12, capture_cursor=True, window=None, region=None, audio=False, audio_offset=None):
         self.output = output
         self.fps = fps
         self.window = window
+        self.region = region
         self.audio = audio
         self.audio_offset = audio_offset
         self.started = False
@@ -469,7 +513,7 @@ class TestClientRecordingWiring:
 class _FailingRecorder:
     """Recorder whose start() fails (e.g. ffmpeg missing)."""
 
-    def __init__(self, output, *, fps=12, capture_cursor=True, window=None, audio=False, audio_offset=None):
+    def __init__(self, output, *, fps=12, capture_cursor=True, window=None, region=None, audio=False, audio_offset=None):
         self.output = output
 
     def start(self):
@@ -488,7 +532,7 @@ class TestReportRecordingNotice:
         out = report_mod.write_html(
             [_LOG_ENTRY], tmp_path / "r.html", record_error="ffmpeg not found"
         )
-        markup = out.read_text()
+        markup = out.read_text(encoding="utf-8")
         assert "class='notice'" in markup
         assert "ffmpeg not found" in markup
 
@@ -497,7 +541,7 @@ class TestReportRecordingNotice:
             [_LOG_ENTRY], tmp_path / "r.html",
             recording="recording.mp4", record_error="ignored",
         )
-        markup = out.read_text()
+        markup = out.read_text(encoding="utf-8")
         assert "<video" in markup
         assert "class='notice'" not in markup
 
@@ -507,7 +551,7 @@ class TestReportRecordingNotice:
         assert bot._recorder is None  # start() failed
         bot._log.append(dict(_LOG_ENTRY))
         out = bot.report(str(tmp_path / "report.html"))
-        markup = Path(out).read_text()
+        markup = Path(out).read_text(encoding="utf-8")
         assert "Recording was requested but not produced" in markup
         assert "<video" not in markup
 
@@ -517,7 +561,7 @@ class TestReportRecordingNotice:
         (Path(bot.report_dir) / "recording.mp4").write_bytes(b"")  # 0 bytes
         bot._log.append(dict(_LOG_ENTRY))
         out = bot.report(str(tmp_path / "report.html"))
-        markup = Path(out).read_text()
+        markup = Path(out).read_text(encoding="utf-8")
         assert "Recording was requested but not produced" in markup
         assert "<video" not in markup
 
@@ -527,7 +571,7 @@ class TestReportRecordingNotice:
         (Path(bot.report_dir) / "recording.mp4").write_bytes(b"data")
         bot._log.append(dict(_LOG_ENTRY))
         out = bot.report(str(tmp_path / "report.html"))
-        markup = Path(out).read_text()
+        markup = Path(out).read_text(encoding="utf-8")
         assert "<video" in markup
         assert "Recording was requested but not produced" not in markup
 
@@ -535,7 +579,7 @@ class TestReportRecordingNotice:
         bot = Qirabot(api_key="k", task_id="t", report_dir=str(tmp_path))
         bot._log.append(dict(_LOG_ENTRY))
         out = bot.report(str(tmp_path / "report.html"))
-        markup = Path(out).read_text()
+        markup = Path(out).read_text(encoding="utf-8")
         assert "Recording was requested but not produced" not in markup
 
 
@@ -546,7 +590,7 @@ class _InterruptingRecorder:
     """Recorder whose stop() raises KeyboardInterrupt — simulates a Ctrl+C
     landing while ffmpeg is being finalized in close()."""
 
-    def __init__(self, output, *, fps=12, capture_cursor=True, window=None, audio=False, audio_offset=None):
+    def __init__(self, output, *, fps=12, capture_cursor=True, window=None, region=None, audio=False, audio_offset=None):
         self.output = output
 
     def start(self):

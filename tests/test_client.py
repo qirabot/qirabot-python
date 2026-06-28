@@ -1,5 +1,6 @@
 """Tests for Qirabot client, StepResult, and RunResult."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -167,13 +168,14 @@ class TestQirabotInit:
         monkeypatch.setenv("QIRA_REPORT_DIR", "/tmp/shots")
         bot = Qirabot(api_key="k", task_id="t")
         # env sets only the root; date/run subdirs are appended automatically.
-        assert str(bot._report_dir).startswith("/tmp/shots/")
+        # Compare via Path ancestry so the assertion is OS-separator agnostic.
+        assert Path("/tmp/shots") in bot._report_dir.parents
         bot.close()
 
     def test_report_dir_param_overrides_env(self, monkeypatch):
         monkeypatch.setenv("QIRA_REPORT_DIR", "/tmp/shots")
         bot = Qirabot(api_key="k", report_dir="./local", task_id="t")
-        assert str(bot._report_dir).startswith("local/")
+        assert Path("local") in bot._report_dir.parents
         bot.close()
 
     def test_settle_seconds_default_none(self):
@@ -587,6 +589,37 @@ class TestPressKey:
         bot.bind(target).press_key("Enter")
 
         adapter.execute.assert_called_once_with("press_key", {"key": "Enter"})
+        bot.close()
+
+    def test_records_local_step_into_report_log(self, tmp_path):
+        # press_key bypasses /act, so the server never sees it; it must
+        # self-record into the local report or it stays invisible there.
+        bot = Qirabot(api_key="k", task_id="t", report_dir=str(tmp_path))
+        target = object()
+        adapter = MagicMock()
+        adapter.current_target = target
+        adapter.screenshot.return_value = b""  # bytes → recorded, no disk frame
+        bot._adapters[id(target)] = adapter
+
+        bot.press_key(target, "Enter")
+
+        assert len(bot._log) == 1
+        entry = bot._log[0]
+        assert entry["action_type"] == "press_key"
+        assert entry["params"] == {"key": "Enter"}
+        bot.close()
+
+    def test_local_step_skipped_when_reporting_off(self):
+        bot = Qirabot(api_key="k", task_id="t", report=False)
+        target = object()
+        adapter = MagicMock()
+        adapter.current_target = target
+        bot._adapters[id(target)] = adapter
+
+        bot.press_key(target, "Enter")
+
+        assert bot._log == []
+        adapter.screenshot.assert_not_called()  # zero overhead when off
         bot.close()
 
 
