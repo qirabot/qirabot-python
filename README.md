@@ -1,8 +1,8 @@
 # Qirabot Python SDK
 
-AI-powered automation SDK that bolts onto your existing browser/mobile automation framework. Let AI see the screen, click, type, extract data, and verify results — with any framework you already use.
+Cross-platform GUI automation, driven by multimodal AI vision. Drive browsers, mobile apps, full desktops, and games through pixels — no DOM, no selectors — reaching what frameworks like Playwright, Selenium, and Appium cannot.
 
-Use it two ways: as a **Python library** (let qirabot launch a Playwright browser for you via `bot.open()`, or bolt onto a Playwright / Selenium / Appium / Airtest / pyautogui session you already drive), or inside your **pytest suite**.
+Run it standalone (`bot.open()` launches a browser for you), bolt it onto your existing Playwright / Selenium / Appium / Airtest / pyautogui session, drop it into a pytest suite, or bind by HWND to drive a Unity / Unreal / native desktop game. Same API across all of them.
 
 ## Installation
 
@@ -145,13 +145,15 @@ live page via `bot.current_page()`.
 
 ## Examples
 
-Runnable examples live in [examples/](examples/), in two styles:
+Runnable examples live in [examples/](examples/), in three styles:
 
 - **Bolt onto your existing tests (pytest)** — add AI to a suite you already
   have: [playwright/](examples/playwright/), [selenium/](examples/selenium/),
   [appium/](examples/appium/), [desktop/](examples/desktop/).
 - **Standalone automation (plain scripts)** — scraping / RPA / agents, run with
   `python`: [automation/](examples/automation/).
+- **Drive a desktop game (Windows)** — bind by HWND, audit in-game UI with
+  deterministic steps + `bot.ai()`: [game/](examples/game/).
 
 See [examples/README.md](examples/README.md) for which to pick.
 

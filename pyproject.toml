@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qirabot"
-version = "1.5.12"
-description = "AI automation bolt-on for any framework"
+version = "1.5.13"
+description = "AI vision-driven GUI automation across browsers, mobile, desktop, and games"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
     { name = "Qirabot Team", email = "support@qirabot.com" }
 ]
-keywords = ["qirabot", "automation", "testing", "ai", "sdk", "rpa"]
+keywords = ["qirabot", "automation", "ai", "vision", "gui", "rpa", "cross-platform", "sdk", "testing"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
