@@ -204,6 +204,19 @@ class DeviceAdapter(ABC):
     def device_info(self) -> DeviceInfo:
         ...
 
+    def annotation_scale(self) -> float:
+        """Screenshot pixels per coordinate-space logical unit.
+
+        Crosshair annotation in the report is drawn on the raw screenshot, so
+        coords from the model (in whatever space ``device_info`` advertises)
+        must be multiplied by this factor to land at the visual click position.
+        1.0 when the screenshot and coordinate space are the same — true for
+        every adapter except Appium iOS, where ``get_window_size()`` reports
+        logical points (e.g. 393x852) but ``get_screenshot_as_base64()`` returns
+        physical pixels (e.g. 1179x2556 on a Retina display).
+        """
+        return 1.0
+
     def window_info(self) -> dict[str, Any] | None:
         """Identify the window under test, for per-window screen recording.
 

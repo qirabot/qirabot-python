@@ -842,7 +842,7 @@ class Qirabot:
                     # error reason never reaches the timeline.
                     self._record_step(
                         screenshot_bytes,
-                        action_type or "ai",
+                        result.get("actionType") or "ai",
                         result.get("params") or {},
                         output=error_msg,
                         finished=True,
@@ -862,9 +862,11 @@ class Qirabot:
                 action_type or "ai",
                 action_params,
                 coords,
+                end_coords=_extract_end_coords(action_params),
                 output=result.get("output", ""),
                 finished=finished,
                 decision=decision,
+                coord_scale=adapter.annotation_scale(),
             )
 
             if logger.isEnabledFor(logging.INFO):
@@ -1206,10 +1208,12 @@ class Qirabot:
         params: dict[str, Any] | None,
         coords: tuple[float, float] | None = None,
         *,
+        end_coords: tuple[float, float] | None = None,
         output: str = "",
         finished: bool = False,
         success: bool = True,
         decision: str = "",
+        coord_scale: float = 1.0,
     ) -> dict[str, Any] | None:
         """Save the screenshot (if reporting) and append a step to the timeline.
 
@@ -1232,7 +1236,11 @@ class Qirabot:
         if data:
             try:
                 annotated, thumb = _render_step_images(
-                    data, coords, self._screenshot_config
+                    data,
+                    coords,
+                    self._screenshot_config,
+                    end_coords=end_coords,
+                    coord_scale=coord_scale,
                 )
             except Exception:
                 logger.debug("render step images failed", exc_info=True)
@@ -1278,7 +1286,14 @@ class Qirabot:
             # (a stubbed adapter, a backend returning None) is skipped rather
             # than written to disk.
             if isinstance(data, (bytes, bytearray)):
-                self._record_step(bytes(data), action_type, params or {}, coords)
+                self._record_step(
+                    bytes(data),
+                    action_type,
+                    params or {},
+                    coords,
+                    end_coords=_extract_end_coords(params),
+                    coord_scale=adapter.annotation_scale(),
+                )
         except Exception:
             logger.debug("local step recording failed", exc_info=True)
 
@@ -1463,9 +1478,11 @@ class Qirabot:
             result.get("actionType") or action.get("type", "action"),
             result.get("params") or action.get("params") or {},
             coords,
+            end_coords=_extract_end_coords(result.get("params")),
             output=result.get("output", ""),
             finished=result.get("finished", False),
             success=result.get("success", True),
+            coord_scale=adapter.annotation_scale(),
         )
 
         if execute_result and result.get("actionType"):
@@ -1671,11 +1688,27 @@ def _extract_coords(params: dict[str, Any] | None) -> tuple[float, float] | None
     return None
 
 
+def _extract_end_coords(
+    params: dict[str, Any] | None,
+) -> tuple[float, float] | None:
+    """Drag's terminal point; used together with ``_extract_coords`` (= start)
+    so the report can draw the full start→end path, not just the anchor."""
+    if not params:
+        return None
+    x = params.get("end_x")
+    y = params.get("end_y")
+    if x is not None and y is not None:
+        return (float(x), float(y))
+    return None
+
+
 def _render_step_images(
     data: bytes,
     coords: tuple[float, float] | None,
     config: ScreenshotConfig | None = None,
     *,
+    end_coords: tuple[float, float] | None = None,
+    coord_scale: float = 1.0,
     thumb_max_edge: int = 800,
     thumb_quality: int = 60,
 ) -> tuple[bytes, str]:
@@ -1683,10 +1716,15 @@ def _render_step_images(
 
     Annotates a crosshair at ``coords`` when given and ``config.annotate`` is on;
     otherwise the full-res output is just the source re-encoded in the configured
-    format. The thumbnail is always a downscaled JPEG embedded as a data URI so
-    the HTML report stays self-contained.
+    format. ``end_coords`` is drag's terminal point — when set, a line + arrow is
+    drawn from ``coords`` to it and a hollow ring marks the end. ``coord_scale``
+    maps the model's coordinate space onto the screenshot pixel space — 1.0
+    everywhere except Appium iOS, where coords arrive in logical points and the
+    screenshot is at physical Retina pixels. The thumbnail is always a downscaled
+    JPEG embedded as a data URI so the HTML report stays self-contained.
     """
     import base64
+    import math
 
     from PIL import Image, ImageDraw
 
@@ -1702,7 +1740,7 @@ def _render_step_images(
         line_len = int(radius * 1.5)
         width = 3 if short_side > 2000 else 2
         gap = radius + 2
-        cx, cy = int(coords[0]), int(coords[1])
+        cx, cy = int(coords[0] * coord_scale), int(coords[1] * coord_scale)
         draw.ellipse(
             [cx - radius, cy - radius, cx + radius, cy + radius],
             outline=color, width=width,
@@ -1711,6 +1749,34 @@ def _render_step_images(
         draw.line([(cx + gap, cy), (cx + gap + line_len, cy)], fill=color, width=width)
         draw.line([(cx, cy - gap - line_len), (cx, cy - gap)], fill=color, width=width)
         draw.line([(cx, cy + gap), (cx, cy + gap + line_len)], fill=color, width=width)
+
+        if end_coords is not None:
+            ex, ey = int(end_coords[0] * coord_scale), int(end_coords[1] * coord_scale)
+            dx, dy = ex - cx, ey - cy
+            dist = math.hypot(dx, dy)
+            # Skip degenerate drags (start == end) — a zero-length arrow would
+            # just draw an artifact on top of the start cross.
+            if dist >= 1:
+                ux, uy = dx / dist, dy / dist
+                # Stop the shaft outside the end ring so they don't overlap.
+                sx = cx + int(ux * (radius + gap))
+                sy = cy + int(uy * (radius + gap))
+                tx = ex - int(ux * (radius + gap))
+                ty = ey - int(uy * (radius + gap))
+                draw.line([(sx, sy), (tx, ty)], fill=color, width=width)
+                # Arrowhead: two short segments rotated ±25° back from the tip.
+                head_len = max(8, radius * 2)
+                angle = math.atan2(uy, ux)
+                for offset in (math.radians(150), math.radians(-150)):
+                    hx = tx + int(math.cos(angle + offset) * head_len)
+                    hy = ty + int(math.sin(angle + offset) * head_len)
+                    draw.line([(tx, ty), (hx, hy)], fill=color, width=width)
+                # Hollow end ring, same radius as the start cross's circle so the
+                # two endpoints read as a matched pair.
+                draw.ellipse(
+                    [ex - radius, ey - radius, ex + radius, ey + radius],
+                    outline=color, width=width,
+                )
 
     # Full-res output in the configured format (jpeg has no alpha channel, so
     # flatten RGBA → RGB first).

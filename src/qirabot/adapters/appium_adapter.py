@@ -16,6 +16,7 @@ class AppiumAdapter(DeviceAdapter):
         self._driver = driver
         caps = driver.capabilities or {}
         self._platform = (caps.get("platformName") or "").lower()
+        self._annotation_scale: float | None = None
 
     @classmethod
     def accepts(cls, target: Any) -> bool:
@@ -29,6 +30,23 @@ class AppiumAdapter(DeviceAdapter):
     def screenshot(self, config: ScreenshotConfig | None = None) -> bytes:
         cfg = config or ScreenshotConfig()
         png_bytes = base64.b64decode(self._driver.get_screenshot_as_base64())
+        # iOS screenshots come back at physical pixels (Retina 2x/3x) but
+        # get_window_size() reports logical points; cache the ratio so report
+        # annotations can be drawn at the visual click position. Probe once,
+        # cheaply, by decoding only the PNG header here when scale isn't known
+        # yet (PIL lazy-loads; the full decode below for JPEG re-uses the same
+        # bytes). Best-effort: any failure leaves scale unset (defaults to 1.0).
+        if self._platform == "ios" and self._annotation_scale is None:
+            try:
+                from PIL import Image
+
+                with Image.open(io.BytesIO(png_bytes)) as probe:
+                    size = self._driver.get_window_size()
+                    logical_w = size.get("width") or 0
+                    if logical_w:
+                        self._annotation_scale = probe.width / logical_w
+            except Exception:
+                pass
         if cfg.format == "png":
             return png_bytes
         from PIL import Image
@@ -40,6 +58,11 @@ class AppiumAdapter(DeviceAdapter):
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=cfg.quality)
         return buf.getvalue()
+
+    def annotation_scale(self) -> float:
+        # Set lazily by screenshot() on iOS; defaults to 1.0 everywhere else
+        # (Android: window_size and screenshot already share pixel space).
+        return self._annotation_scale if self._annotation_scale else 1.0
 
     def _tap(self, x: float, y: float, pause: float = 0.1) -> None:
         from selenium.webdriver.common.action_chains import ActionChains
