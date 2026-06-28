@@ -53,11 +53,12 @@ Constructor options:
 | `api_key` | `QIRA_API_KEY` | — | API key for authentication |
 | `base_url` | `QIRA_BASE_URL` | `https://app.qirabot.com` | API server URL |
 | `timeout` | — | `120.0` | HTTP request timeout (seconds) |
-| `model_alias` | — | `""` | Default model alias for all operations |
-| `language` | — | `""` | Default response language |
+| `verify_ssl` | — | `True` | Verify the server's TLS certificate (set `False` for self-hosted / self-signed) |
+| `model_alias` | — | `balanced_pro` | Model alias for all operations; pass `""` for the server default |
+| `language` | — | server default | Response language, e.g. `"zh"` / `"en"`; `""` = server default |
 | `task_name` | — | `""` | Optional name for the task (visible in dashboard) |
 | `report` | — | `True` | Write an HTML run report (+ screenshots) on close |
-| `report_dir` | `QIRA_REPORT_DIR` | `""` | Output root; default `./qira_runs/<date>/<time-id>/` |
+| `report_dir` | `QIRA_REPORT_DIR` | `./qira_runs/<date>/<time-id>/` | Output root; the `<date>/<time-id>/` subdirs are always appended |
 | `record` | `QIRA_RECORD` | `False` | Record the screen with ffmpeg into `recording.mp4` (embedded in the report) |
 | `record_fps` | — | `12` | Recording frame rate |
 | `record_window` | `QIRA_RECORD_WINDOW` | `False` | **Windows + airtest only.** Record just the window under test (auto-resolved from the first action) instead of the full screen; falls back to full screen otherwise |
@@ -95,7 +96,7 @@ short language tag like `"zh"` or `"en"` — empty means the server default:
 
 ```python
 bot = Qirabot(language="zh")                      # extract/ai answers in Chinese
-text = bot.extract(page, "获取主标题", language="zh")
+text = bot.extract(page, "Get the main heading", language="zh")
 ```
 
 ## Quick Start
