@@ -169,9 +169,11 @@ intended pattern for any auth-gated automation.
 - Appium = iOS / Android. On **iOS** Qirabot uses only screenshots + coordinates
   (no element finding), so Appium's job is just building WDA and forwarding. Once
   WebDriverAgent is running on :8100, reuse it via `webDriverAgentUrl` +
-  `usePrebuiltWDA` to skip xcodebuild on every run (see `templates/ios.py`). On a
-  real device WDA must be built/signed once (Xcode or `appium driver run xcuitest
-  open-wda`); a simulator lets Appium build it automatically.
+  `usePrebuiltWDA` to skip xcodebuild on every run (see `templates/ios_appium.py`).
+  On a real device WDA must be built/signed once (Xcode or `appium driver run
+  xcuitest open-wda`); a simulator lets Appium build it automatically. To skip
+  the Appium server entirely and drive WDA over HTTP, use `templates/ios_airtest.py`
+  (airtest's facebook-wda backend) — same WDA, fewer moving parts.
 - Airtest = Android / iOS / Windows desktop — one framework spanning mobile and
   desktop. Its **desktop** backend (pywinauto) is **Windows-only (no macOS)**;
   reports as `desktop`, scopes to one window by HWND (`connect_device("Windows:///<hwnd>")`).

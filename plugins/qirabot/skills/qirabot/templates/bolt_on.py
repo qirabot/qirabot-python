@@ -4,7 +4,8 @@ Use this for native desktop, or any case where you already construct a
 Selenium / Appium driver: build the framework object as usual, `bind()` it once,
 then drive it by natural language. (For "Qirabot launches Chromium" use
 templates/browser.py; for Android over Airtest use templates/android.py; for
-iOS use templates/ios.py — it has the real-device capabilities and WDA reuse.)
+iOS use templates/ios_airtest.py or templates/ios_appium.py — both cover
+real-device WDA reuse.)
 
 The concrete example below is Selenium. Swap the marked block for one of the
 Appium, pyautogui (whole-screen desktop, any OS), or Airtest (window-scoped
@@ -59,8 +60,9 @@ driver.quit()
 
 
 # --- Android via Appium UiAutomator2 (needs a running Appium server) ---------
-# For iOS use templates/ios.py instead — it covers real-device capabilities
-# (udid / WDA reuse / signing) and device screen recording.
+# For iOS use templates/ios_airtest.py or templates/ios_appium.py instead —
+# they cover real-device capabilities (udid / WDA reuse / signing) and, in the
+# Appium case, device screen recording.
 # from appium import webdriver
 # from appium.options.android import UiAutomator2Options
 #

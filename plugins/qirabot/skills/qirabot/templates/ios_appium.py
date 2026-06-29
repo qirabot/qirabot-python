@@ -10,7 +10,8 @@ Prereqs (real device):
     1. WDA already running and reachable — verify it returns "ready":
            curl http://localhost:8100/status
        (On a fresh machine, build/sign WDA once via Xcode or
-        `appium driver run xcuitest open-wda`, then keep it running.)
+        `appium driver run xcuitest open-wda`, then keep it running. USB
+        forwarding to :8100 is typically `iproxy 8100 8100` in another terminal.)
     2. Appium server up in another terminal:
            appium --address 127.0.0.1 --port 4723
     3. Run THIS script with the interpreter preflight echoed (not a bare
@@ -20,6 +21,14 @@ Install:
     python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
     pip install "qirabot[appium]"
     echo 'QIRA_API_KEY=qk_...' > .env    # load_dotenv() reads this (also QIRA_BASE_URL)
+
+When to pick this over ios_airtest.py:
+    - Simulators (Appium can build WDA itself — see Variant A below).
+    - No pre-running WDA: let Appium build/sign on every run (Variant B).
+    - You want Appium's first-party device APIs (screen recording, file
+      transfer, deep XCUITest features).
+    Pick ios_airtest.py instead if WDA is already on :8100 and you want the
+    minimal-deps path (no `appium` server, no XCUITest driver).
 
 The HTML report is written to ./qira_runs/<date>/<run>/report.html on close.
 """
