@@ -5,7 +5,13 @@ from importlib.metadata import PackageNotFoundError, version
 from qirabot._applaunch import launch_app
 from qirabot._dotenv import load_dotenv
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
-from qirabot.client import Qirabot, RunResult, StepResult
+from qirabot.client import (
+    ExtractResult,
+    Qirabot,
+    RunResult,
+    StepResult,
+    VerifyResult,
+)
 from qirabot.exceptions import (
     ActionError,
     AuthenticationError,
@@ -29,6 +35,7 @@ __all__ = [
     "AuthenticationError",
     "DeviceAdapter",
     "DeviceInfo",
+    "ExtractResult",
     "ScreenshotConfig",
     "InsufficientBalanceError",
     "MissingDependencyError",
@@ -40,6 +47,7 @@ __all__ = [
     "RunResult",
     "ScreenRecorder",
     "StepResult",
+    "VerifyResult",
     "launch_app",
     "load_dotenv",
     "record",

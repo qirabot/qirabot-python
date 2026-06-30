@@ -6,7 +6,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
-from qirabot.client import Qirabot, StepResult, RunResult, _render_step_images
+from qirabot.client import (
+    ExtractResult,
+    Qirabot,
+    StepResult,
+    RunResult,
+    VerifyResult,
+    _render_step_images,
+)
 from qirabot.exceptions import AuthenticationError
 
 
@@ -77,6 +84,65 @@ class TestStepResult:
         s = StepResult.from_dict({"finished": True, "output": "done"}, step=5)
         assert s.finished is True
         assert s.output == "done"
+
+
+class TestVerifyResult:
+    def test_from_dict_passed(self):
+        r = VerifyResult.from_dict({
+            "finished": True,
+            "output": "the banner is visible",
+            "inputTokens": 500,
+            "outputTokens": 60,
+            "thinkingTokens": 20,
+        })
+        assert r.passed is True
+        assert r.reason == "the banner is visible"
+        assert r.input_tokens == 500
+        assert r.output_tokens == 60
+        assert r.thinking_tokens == 20
+
+    def test_bool_truthy_when_passed(self):
+        assert bool(VerifyResult.from_dict({"finished": True})) is True
+        assert VerifyResult.from_dict({"finished": True})  # usable in if/assert
+
+    def test_bool_falsy_when_failed(self):
+        r = VerifyResult.from_dict({"finished": False, "output": "no banner"})
+        assert bool(r) is False
+        assert not r
+        assert r.reason == "no banner"  # reason still readable on a failed check
+
+    def test_from_dict_empty(self):
+        r = VerifyResult.from_dict({})
+        assert r.passed is False
+        assert r.reason == ""
+        assert r.input_tokens == 0
+
+
+class TestExtractResult:
+    def test_is_str_subclass(self):
+        r = ExtractResult.from_dict({"output": "hello", "inputTokens": 10, "outputTokens": 5})
+        assert isinstance(r, str)
+        assert r == "hello"
+        assert r.upper() == "HELLO"
+        assert r + "!" == "hello!"
+
+    def test_carries_tokens(self):
+        r = ExtractResult.from_dict({
+            "output": "42",
+            "inputTokens": 700,
+            "outputTokens": 30,
+            "thinkingTokens": 8,
+        })
+        assert r.input_tokens == 700
+        assert r.output_tokens == 30
+        assert r.thinking_tokens == 8
+        assert float(r) == 42.0
+
+    def test_from_dict_empty(self):
+        r = ExtractResult.from_dict({})
+        assert r == ""
+        assert r.input_tokens == 0
+        assert r.output_tokens == 0
 
 
 class TestRunResult:

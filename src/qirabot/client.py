@@ -102,6 +102,76 @@ class StepResult:
 
 
 @dataclass
+class VerifyResult:
+    """Result of bot.verify(). Truthy when the assertion holds.
+
+    Use directly as a bool (``if bot.verify(...)`` / ``assert bot.verify(...)``);
+    read ``reason`` for the model's explanation, e.g. when an assertion fails
+    unexpectedly. ``output_tokens`` already includes ``thinking_tokens``
+    (Anthropic semantics), so this call's spend is ``input_tokens +
+    output_tokens`` — do not add thinking again.
+    """
+
+    passed: bool
+    reason: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    thinking_tokens: int = 0
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> VerifyResult:
+        return cls(
+            passed=data.get("finished", False),
+            reason=data.get("output", ""),
+            input_tokens=data.get("inputTokens", 0),
+            output_tokens=data.get("outputTokens", 0),
+            thinking_tokens=data.get("thinkingTokens", 0),
+        )
+
+    def __bool__(self) -> bool:
+        return self.passed
+
+
+class ExtractResult(str):
+    """Text extracted by bot.extract(); usable directly as a str.
+
+    Behaves as the extracted string for every str operation and additionally
+    carries the extraction's token usage. ``output_tokens`` already includes
+    ``thinking_tokens`` (Anthropic semantics): this call's spend is
+    ``input_tokens + output_tokens``. Note: str operations that build a new
+    string (slicing, concatenation, ``.strip()``) return a plain str and drop
+    these attributes — read tokens on the value returned by extract() itself.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    thinking_tokens: int
+
+    def __new__(
+        cls,
+        text: str,
+        *,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        thinking_tokens: int = 0,
+    ) -> ExtractResult:
+        obj = super().__new__(cls, text)
+        obj.input_tokens = input_tokens
+        obj.output_tokens = output_tokens
+        obj.thinking_tokens = thinking_tokens
+        return obj
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ExtractResult:
+        return cls(
+            data.get("output", ""),
+            input_tokens=data.get("inputTokens", 0),
+            output_tokens=data.get("outputTokens", 0),
+            thinking_tokens=data.get("thinkingTokens", 0),
+        )
+
+
+@dataclass
 class RunResult:
     """Result of bot.ai() multi-step operation."""
 
@@ -671,8 +741,13 @@ class Qirabot:
         retry: int | None = None,
         model_alias: str = "",
         language: str = "",
-    ) -> str:
-        """Extract data from the screen using AI. Returns extracted text."""
+    ) -> ExtractResult:
+        """Extract data from the screen using AI.
+
+        Returns an :class:`ExtractResult` — a str subclass that is the extracted
+        text, with the call's token usage attached (``input_tokens`` /
+        ``output_tokens`` / ``thinking_tokens``). Usable anywhere a str is.
+        """
         result = self._ai_action(
             target,
             action={"type": "extract", "params": {"instruction": instruction}},
@@ -681,7 +756,8 @@ class Qirabot:
             execute_result=False,
             retry=retry,
         )
-        return str(result.get("output", ""))
+        self._accumulate_stats(result)
+        return ExtractResult.from_dict(result)
 
     def verify(
         self,
@@ -691,8 +767,13 @@ class Qirabot:
         retry: int | None = None,
         model_alias: str = "",
         language: str = "",
-    ) -> bool:
-        """Verify a visual assertion. Returns True if the assertion holds."""
+    ) -> VerifyResult:
+        """Verify a visual assertion.
+
+        Returns a :class:`VerifyResult` that is truthy when the assertion holds,
+        so ``assert bot.verify(...)`` keeps working; read ``reason`` for the
+        model's explanation and the token fields for this call's usage.
+        """
         result = self._ai_action(
             target,
             action={"type": "assert", "params": {"assertion": assertion}},
@@ -701,7 +782,23 @@ class Qirabot:
             execute_result=False,
             retry=retry,
         )
-        return bool(result.get("finished", False))
+        self._accumulate_stats(result)
+        return VerifyResult.from_dict(result)
+
+    def _accumulate_stats(self, result: dict[str, Any]) -> None:
+        """Fold a one-shot /act result's usage into the run stats.
+
+        verify()/extract() are single AI calls outside the ai() loop, so their
+        tokens would otherwise never reach the report. Count each as an AI step
+        (mirroring the ai() loop) so the summary line shows up and totals are
+        complete even for pure verify/extract scripts.
+        """
+        self._stats["ai_steps"] += 1
+        self._stats["input_tokens"] += result.get("inputTokens", 0)
+        self._stats["output_tokens"] += result.get("outputTokens", 0)
+        self._stats["thinking_tokens"] += result.get("thinkingTokens", 0)
+        self._stats["step_duration_ms"] += result.get("stepDurationMs", 0)
+        self._stats["llm_decision_duration_ms"] += result.get("llmDecisionDurationMs", 0)
 
     def wait_for(
         self,

@@ -6,7 +6,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
-    from qirabot.client import Qirabot, RunResult, StepResult
+    from qirabot.client import (
+        ExtractResult,
+        Qirabot,
+        RunResult,
+        StepResult,
+        VerifyResult,
+    )
 
 
 class _BoundQirabot:
@@ -195,7 +201,7 @@ class _BoundQirabot:
         retry: int | None = None,
         model_alias: str = "",
         language: str = "",
-    ) -> str:
+    ) -> ExtractResult:
         return self._bot.extract(
             self._target, instruction, retry=retry, model_alias=model_alias, language=language
         )
@@ -207,7 +213,7 @@ class _BoundQirabot:
         retry: int | None = None,
         model_alias: str = "",
         language: str = "",
-    ) -> bool:
+    ) -> VerifyResult:
         return self._bot.verify(
             self._target, assertion, retry=retry, model_alias=model_alias, language=language
         )

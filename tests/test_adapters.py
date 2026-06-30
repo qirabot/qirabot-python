@@ -1085,6 +1085,70 @@ class TestAirtestAdapter:
         assert isinstance(data, bytes) and len(data) > 0
         assert a._last_size == (320, 640)
 
+    def test_screenshot_retries_transient_none_then_succeeds(
+        self, fake_airtest, monkeypatch
+    ):
+        # snapshot() can momentarily return None (adb hiccup / minicap restart);
+        # the adapter retries instead of feeding None into cv2_2_pil.
+        import time
+
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+        dev = _fake_device()
+        dev.snapshot.side_effect = [None, None, "<bgr-ndarray>"]
+        a = self._adapter(dev)
+        data = a.screenshot()
+        assert isinstance(data, bytes) and len(data) > 0
+        assert dev.snapshot.call_count == 3
+
+    def test_screenshot_recovers_from_snapshot_exception(
+        self, fake_airtest, monkeypatch
+    ):
+        # A raised capture error is also transient — retry, don't propagate.
+        import time
+
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+        dev = _fake_device()
+        dev.snapshot.side_effect = [RuntimeError("adb broke"), "<bgr-ndarray>"]
+        a = self._adapter(dev)
+        data = a.screenshot()
+        assert isinstance(data, bytes) and len(data) > 0
+
+    def test_screenshot_empty_frame_raises_qirabot_error(
+        self, fake_airtest, monkeypatch
+    ):
+        # Persistent capture failure surfaces a clear QirabotError, not OpenCV's
+        # raw !_src.empty() C++ assertion.
+        import time
+
+        from qirabot.exceptions import QirabotError
+
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+        dev = _fake_device()
+        dev.snapshot.return_value = None
+        a = self._adapter(dev)
+        with pytest.raises(QirabotError) as exc:
+            a.screenshot()
+        assert exc.value.code == "airtest.snapshot_empty"
+        assert dev.snapshot.call_count == 3
+
+    def test_screenshot_treats_zero_size_ndarray_as_empty(
+        self, fake_airtest, monkeypatch
+    ):
+        # An empty ndarray (size == 0) trips the same assertion as None inside
+        # cv2_2_pil, so it must be treated as a failed capture too.
+        import time
+        import types
+
+        from qirabot.exceptions import QirabotError
+
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+        dev = _fake_device()
+        dev.snapshot.return_value = types.SimpleNamespace(size=0)
+        a = self._adapter(dev)
+        with pytest.raises(QirabotError) as exc:
+            a.screenshot()
+        assert exc.value.code == "airtest.snapshot_empty"
+
     def test_screen_changing_action_settles(self, fake_airtest, monkeypatch):
         import time
 

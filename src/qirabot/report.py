@@ -172,7 +172,9 @@ def _render_stats(stats: dict[str, int], model: str) -> str:
     inp = stats.get("input_tokens", 0)
     out = stats.get("output_tokens", 0)
     think = stats.get("thinking_tokens", 0)
-    total = inp + out + think
+    # thinking tokens are already counted within output tokens (Anthropic
+    # semantics), so the total is input + output — do not add thinking again.
+    total = inp + out
     bits = [f"{stats['ai_steps']} AI steps"]
     if total:
         bits.append(

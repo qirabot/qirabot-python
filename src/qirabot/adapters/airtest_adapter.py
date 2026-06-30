@@ -11,9 +11,11 @@ multi-device switches for free.
 from __future__ import annotations
 
 import io
+import time
 from typing import Any
 
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig, split_combo
+from qirabot.exceptions import QirabotError
 
 
 class AirtestAdapter(DeviceAdapter):
@@ -122,7 +124,26 @@ class AirtestAdapter(DeviceAdapter):
 
         # Airtest's device.snapshot() returns a BGR cv2 ndarray; cv2_2_pil
         # converts BGR -> RGB PIL so we can reuse the shared Pillow pipeline.
-        img = cv2_2_pil(self._device.snapshot())
+        # snapshot() can transiently return None (adb hiccup, minicap restart,
+        # Windows window minimized). Retry a few times so a momentary capture
+        # failure doesn't surface as OpenCV's !_src.empty() assertion.
+        frame = None
+        last_exc: Exception | None = None
+        for _ in range(3):
+            try:
+                frame = self._device.snapshot()
+            except Exception as e:
+                last_exc = e
+                frame = None
+            if frame is not None and getattr(frame, "size", 1) != 0:
+                break
+            time.sleep(0.15)
+        if frame is None or getattr(frame, "size", 1) == 0:
+            raise QirabotError(
+                "device snapshot returned empty frame after 3 retries",
+                code="airtest.snapshot_empty",
+            ) from last_exc
+        img = cv2_2_pil(frame)
         img = self._ensure_upright(img)
         self._last_size = (img.width, img.height)
         buf = io.BytesIO()
