@@ -453,7 +453,7 @@ def doctor(ctx: click.Context) -> None:
             "browser (Playwright — default path, powers bot.open())",
             chromium == "ready",
             chromium_hints.get(
-                chromium,
+                chromium or "",
                 'python -m pip install "qirabot[browser]" && playwright install chromium',
             ),
         ),
