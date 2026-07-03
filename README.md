@@ -85,7 +85,8 @@ That's a complete run: the browser opens, the AI does the task, and the result
 [CLI](#cli).
 
 The same task through the Python SDK — the form you'll use to build real
-automations:
+automations. `bot.ai()` is the same engine the CLI command runs: the AI looks
+at the screen, decides the next action, and loops until the task is done:
 
 ```python
 from qirabot import Qirabot
@@ -93,13 +94,17 @@ from qirabot import Qirabot
 bot = Qirabot()
 page = bot.open("https://www.wikipedia.org")
 
-bot.type_text(page, "Search input", "SpaceX", press_enter=True)
-
-summary = bot.extract(page, "Get the first sentence of the article")
-print(f"Result: {summary}")
+result = bot.ai(page, "Search for SpaceX and get the first sentence of the article")
+print(f"Success: {result.success}")
+print(f"Result: {result.output}")
 
 bot.close()
 ```
+
+When you want to drive each step yourself instead of delegating the whole
+task, the same natural-language targeting is available as single-step calls —
+`bot.click(page, "Login button")`, `bot.type_text(...)`, `bot.extract(...)`,
+`bot.verify(...)` — see [API Reference](#api-reference).
 
 Every run also writes an HTML report with per-step screenshots (see
 [Reports](#reports)), and every knob — model choice, language, recording,

@@ -419,8 +419,18 @@ def doctor(ctx: click.Context) -> None:
         )
         problems += 1
     else:
+        # A diagnostic must fail fast: unless --timeout was passed explicitly,
+        # drop the 120s default (sized for AI task steps) to 10s so an
+        # unreachable server reports in seconds instead of looking like a hang.
+        # Must happen before _transport(), which caches a Transport built from
+        # ctx.obj["timeout"]. The status spinner is transient (and silent when
+        # output is not a terminal) — it names the server so a wrong base_url
+        # is visible while doctor waits, not only after the timeout.
+        if ctx.find_root().get_parameter_source("timeout") != ParameterSource.COMMANDLINE:
+            ctx.obj["timeout"] = 10.0
         try:
-            _transport(ctx).request("GET", "/model-aliases")
+            with console.status(f"checking server ({ctx.obj['base_url']})..."):
+                _transport(ctx).request("GET", "/model-aliases")
             console.print(f"{ok} API key set, server reachable ({ctx.obj['base_url']})")
         except Exception as e:
             console.print(

@@ -671,6 +671,33 @@ class TestDoctor:
         assert result.exit_code == 1
         assert "401 bad key" in out
 
+    def _run_real_transport(self, monkeypatch, *cli_args):
+        """Invoke doctor with probes stubbed but _transport left real, so the
+        Transport construction (and its timeout) can be asserted."""
+        from qirabot.cli import main
+
+        monkeypatch.setattr(main, "_has_module", lambda m: False)
+        monkeypatch.setattr(main, "_chromium_status", lambda: None)
+        monkeypatch.setattr(main, "_display_available", lambda: True)
+        transport_cls = MagicMock(name="Transport")
+        monkeypatch.setattr(main, "Transport", transport_cls)
+
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        CliRunner().invoke(main.cli, [*cli_args, "--api-key", "qk_test", "doctor"])
+        return transport_cls
+
+    def test_server_check_uses_short_timeout_by_default(self, monkeypatch):
+        """doctor is a diagnostic — against an unreachable server the 120s task
+        default reads as a hang, so the server check drops to 10s."""
+        transport_cls = self._run_real_transport(monkeypatch)
+
+        assert transport_cls.call_args.kwargs["timeout"] == 10.0
+
+    def test_server_check_respects_explicit_timeout(self, monkeypatch):
+        transport_cls = self._run_real_transport(monkeypatch, "--timeout", "3")
+
+        assert transport_cls.call_args.kwargs["timeout"] == 3.0
+
     def test_other_backend_alone_is_ready(self, monkeypatch):
         """The default path (browser) is a recommendation, not a requirement —
         an Airtest-only environment is a valid, ready setup."""
