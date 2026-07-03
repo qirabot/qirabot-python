@@ -26,7 +26,12 @@ classifiers = [
 dependencies = [
     "httpx>=0.27.0",
     "Pillow>=10.0",
+    "click>=8.1",
+    "rich>=13.0",
 ]
+
+[project.scripts]
+qirabot = "qirabot.cli.main:main"
 
 [project.urls]
 Homepage = "https://qirabot.com"
@@ -43,6 +48,7 @@ appium = ["Appium-Python-Client>=4.0"]
 # Prefer a dedicated virtualenv. We don't re-pin those here — Airtest declares them.
 airtest = ["airtest>=1.3.0"]
 agent = ["uvicorn>=0.30", "starlette>=0.37"]
+cli = []  # CLI now ships in the core package; kept as a no-op for backward compatibility
 all = ["qirabot[browser,desktop,appium,airtest]"]
 dev = [
     "pytest>=7.0.0",

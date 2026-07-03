@@ -46,6 +46,11 @@ from qirabot import Qirabot
 bot = Qirabot()  # reads QIRA_API_KEY from environment
 ```
 
+Settings can also live in a project `.env` file. Scripts opt in explicitly —
+`from qirabot import load_dotenv; load_dotenv()` — which reads `$QIRA_DOTENV` or
+`./.env` and never overrides exported variables; the `qirabot` CLI loads it
+automatically.
+
 Constructor options:
 
 | Parameter | Env Variable | Default | Description |
@@ -121,6 +126,64 @@ print(f"Result: {summary}")
 
 bot.close()
 ```
+
+## CLI
+
+The `qirabot` command runs a task end-to-end without writing Python. It ships in
+the core package (installed with `pip install qirabot`), but each backend still
+needs its extra — `qirabot[browser]` for `browse`, `[appium]` for `mobile`,
+`[desktop]` for `desktop`.
+
+```bash
+# Browser (needs qirabot[browser] + `playwright install chromium`)
+qirabot browse "Search SpaceX on Google and open the first result" --url google.com
+
+# Mobile via Appium (needs qirabot[appium] + a running Appium server)
+qirabot mobile "Open settings and turn on airplane mode" --platform android
+qirabot mobile "Send hi to Alice on WeChat" --platform ios --bundle-id com.tencent.xin
+
+# Desktop via pyautogui (needs qirabot[desktop])
+qirabot desktop "Create a new note titled Groceries" --app Notes
+
+# Read-only server queries
+qirabot task <task_id>            # status, commands, steps
+qirabot screenshot <task_id>      # download a screenshot (auto-named; use -o to choose a path)
+qirabot models                    # list model aliases
+```
+
+**Commands**
+
+| Command | Purpose |
+|---|---|
+| `browse INSTRUCTION` | Run an AI task in a local browser (Playwright) |
+| `mobile INSTRUCTION` | Run an AI task on an Android/iOS device (Appium) |
+| `desktop INSTRUCTION` | Run an AI task on the desktop screen (pyautogui) |
+| `task TASK_ID` | Print a task's status, commands, and steps |
+| `screenshot TASK_ID` | Download a task screenshot |
+| `models` | List available model aliases |
+
+**Global options** go **before** the subcommand (they configure the connection):
+
+```bash
+qirabot --api-key qk_... --base-url https://app.qirabot.com browse "..."
+```
+
+`--api-key` / `--base-url` fall back to `QIRA_API_KEY` / `QIRA_BASE_URL`; also
+available are `--timeout` and `--verify-ssl` / `--no-verify-ssl`. The CLI loads a
+project `.env` automatically (same rules as [`load_dotenv`](#configuration):
+`$QIRA_DOTENV` or `./.env`; exported variables win). Run `qirabot -h`
+or `qirabot <command> -h` for the full, default-annotated option list.
+
+**Exit codes** are script-friendly: `0` task succeeded, `1` task failed or any
+error, `130` interrupted with Ctrl+C — so `qirabot browse "..." && next-step`
+only proceeds on success.
+
+**Shared run options** (`browse` / `mobile` / `desktop`): `-n/--name` (defaults to
+the instruction text), `-m/--model`, `-l/--language`, `--max-steps`,
+`--report/--no-report`, `--report-dir`, `--annotate/--no-annotate`. `browse` and
+`desktop` additionally take `--record` (screen recording, needs ffmpeg). Runs also
+honor the same env vars as the SDK — `QIRA_REPORT_DIR`, `QIRA_SETTLE_SECONDS`,
+`QIRA_RECORD*`, etc. (see [Configuration](#configuration)).
 
 ## Bind a target (optional)
 
