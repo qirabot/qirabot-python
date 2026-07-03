@@ -19,7 +19,7 @@ Prereqs (real device):
 
 Install:
     python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
-    pip install "qirabot[appium]"
+    python -m pip install "qirabot[appium]"
     echo 'QIRA_API_KEY=qk_...' > .env    # load_dotenv() reads this (also QIRA_BASE_URL)
 
 When to pick this over ios_airtest.py:

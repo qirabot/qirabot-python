@@ -7,7 +7,7 @@ there `bot.ai()` runs the full decision loop: it looks at the screen, picks the
 next action, and repeats until the task is done or max_steps is hit.
 
 Install:
-    pip install qirabot Appium-Python-Client
+    python -m pip install qirabot Appium-Python-Client
 
 Run (start the Appium server and a device first — see README.md):
     export QIRA_API_KEY="qk_..."

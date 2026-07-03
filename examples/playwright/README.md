@@ -5,7 +5,7 @@ Use Qirabot as a bolt-on AI layer on top of your existing Playwright tests.
 ## Install
 
 ```bash
-pip install qirabot pytest-playwright
+python -m pip install qirabot pytest-playwright
 playwright install chromium
 ```
 

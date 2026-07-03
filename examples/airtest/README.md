@@ -11,7 +11,7 @@ natural-language targets and adds multi-step `ai()` / `extract` / `verify`.
 ## Install
 
 ```bash
-pip install "qirabot[airtest]" pytest
+python -m pip install "qirabot[airtest]" pytest
 ```
 
 > ⚠️ Airtest pins `numpy<2.0` and `opencv-contrib-python` 4.4–4.6. Installing into

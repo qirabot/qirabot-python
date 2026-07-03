@@ -8,11 +8,12 @@ from collections.abc import Callable
 from typing import Any, NoReturn, TypeVar
 
 import click
+from click.core import ParameterSource
 
 from qirabot._dotenv import load_dotenv
 from qirabot._optional import require
 from qirabot._transport import Transport
-from qirabot.exceptions import QirabotError
+from qirabot.exceptions import MissingDependencyError, QirabotError
 
 
 def _require_api_key(ctx: click.Context) -> str:
@@ -148,7 +149,8 @@ def _run_local(
 def _fail_setup(bot: Any, e: Exception) -> NoReturn:
     """Report a setup-phase failure (before _run_local takes over) and exit.
 
-    Setup — bot.open() for browse, Appium Remote() for mobile — runs after the
+    Setup — bot.open() for browser, Appium Remote() / airtest connect for
+    android/ios — runs after the
     server task is created but before _run_local starts reporting outcomes. An
     error there leaves the task un-terminalized, so the command's
     finally:bot.close() would otherwise complete it as *succeeded*. Record it as
@@ -186,7 +188,7 @@ _FC = TypeVar("_FC", bound=Callable[..., Any])
 
 
 def _task_options(f: _FC) -> _FC:
-    """Task options shared by browse/mobile/desktop. Applied in reverse so
+    """Task options shared by browser/android/ios/desktop. Applied in reverse so
     --help lists them in reading order (name, model, language, max-steps)."""
     f = click.option("--max-steps", default=20, help="Max steps for AI")(f)
     f = click.option("--language", "-l", default="", help="Language (e.g. zh, en)")(f)
@@ -196,8 +198,8 @@ def _task_options(f: _FC) -> _FC:
 
 
 def _debug_options(record: bool = True) -> Callable[[_FC], _FC]:
-    """Debug options shared by browse/mobile/desktop; mobile has no screen
-    recording, so --record is opt-out there."""
+    """Debug options shared by browser/android/ios/desktop; android/ios have no
+    screen recording, so --record is opt-out there."""
 
     def wrap(f: _FC) -> _FC:
         if record:
@@ -210,18 +212,7 @@ def _debug_options(record: bool = True) -> Callable[[_FC], _FC]:
     return wrap
 
 
-class _AliasGroup(click.Group):
-    """Accept noun aliases so every backend can be addressed by its surface
-    name (`qirabot browser ...` == `qirabot browse ...`); --help lists only
-    the canonical names."""
-
-    _aliases = {"browser": "browse"}
-
-    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
-        return super().get_command(ctx, self._aliases.get(cmd_name, cmd_name))
-
-
-@click.group(cls=_AliasGroup, context_settings=_CONTEXT_SETTINGS)
+@click.group(context_settings=_CONTEXT_SETTINGS)
 @click.version_option(package_name="qirabot", prog_name="qirabot")
 @click.option("--api-key", envvar="QIRA_API_KEY", help="API key")
 @click.option("--base-url", envvar="QIRA_BASE_URL", default="https://app.qirabot.com", help="Server URL")
@@ -232,7 +223,7 @@ def cli(ctx: click.Context, api_key: str, base_url: str, timeout: float, verify_
     """Qirabot CLI — AI automation tool.
 
     Global options (--api-key/--base-url/--timeout/--verify-ssl) go before the
-    subcommand, e.g. `qirabot --base-url ... browse "..."`.
+    subcommand, e.g. `qirabot --base-url ... browser "..."`.
     """
     ctx.ensure_object(dict)
     ctx.obj["api_key"] = api_key
@@ -342,6 +333,177 @@ def models(ctx: click.Context) -> None:
     Console().print(table)
 
 
+def _has_module(module: str) -> bool:
+    """Probe an optional dependency without require()'s raise (doctor only)."""
+    import importlib
+
+    try:
+        importlib.import_module(module)
+        return True
+    except ImportError:
+        return False
+
+
+def _display_available() -> bool:
+    """False only on Linux with no display server — headed launches would fail
+    there, and Qirabot.open() falls back to headless with a warning."""
+    if not sys.platform.startswith("linux"):
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def _chromium_status() -> str | None:
+    """None = playwright not installed; else "ready", "no-browser", or "no-libs".
+
+    Asking playwright for ``chromium.executable_path`` needs the driver process
+    (~1s startup) — acceptable for a diagnostic command, and the only reliable
+    answer: the download location moves with PLAYWRIGHT_BROWSERS_PATH and the
+    bundled browser revision.
+
+    "no-libs" (Linux only): the download exists but ``ldd`` reports unresolved
+    shared libraries (e.g. libnspr4.so on a bare server), so launch would fail —
+    the fix is ``playwright install-deps``, not a re-download.
+    """
+    if not _has_module("playwright.sync_api"):
+        return None
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            exe = p.chromium.executable_path
+        if not os.path.exists(exe):
+            return "no-browser"
+    except Exception:
+        return "no-browser"
+    if sys.platform.startswith("linux"):
+        import subprocess
+
+        try:
+            ldd = subprocess.run(
+                ["ldd", exe], capture_output=True, text=True, timeout=10
+            )
+            if "not found" in ldd.stdout:
+                return "no-libs"
+        except Exception:
+            pass  # no ldd / probe failure: don't fail a browser that may work
+    return "ready"
+
+
+@cli.command()
+@click.pass_context
+def doctor(ctx: click.Context) -> None:
+    """Check the environment: Python, API key + server, and each backend's deps.
+
+    Exits 0 when at least one backend can run end-to-end (key accepted, backend
+    installed), 1 otherwise — so setup scripts and CI can gate on it.
+    """
+    import shutil
+
+    from rich.console import Console
+    from rich.markup import escape
+
+    console = Console()
+    ok, bad, warn = "[green]✓[/green]", "[red]✗[/red]", "[yellow]![/yellow]"
+    problems = 0
+
+    py = ".".join(str(v) for v in sys.version_info[:3])
+    if sys.version_info >= (3, 10):
+        console.print(f"{ok} Python {py}")
+    else:
+        console.print(f"{bad} Python {py} — qirabot requires 3.10+")
+        problems += 1
+
+    if not ctx.obj["api_key"]:
+        console.print(
+            f"{bad} API key not set — export QIRA_API_KEY=qk_... (or put it in ./.env)"
+        )
+        problems += 1
+    else:
+        try:
+            _transport(ctx).request("GET", "/model-aliases")
+            console.print(f"{ok} API key set, server reachable ({ctx.obj['base_url']})")
+        except Exception as e:
+            console.print(
+                f"{bad} API key set but {ctx.obj['base_url']} rejected it or is "
+                f"unreachable: {escape(str(e))}"
+            )
+            problems += 1
+
+    # (label, ready, fix-hint). A missing Chromium download or missing system
+    # libraries both count as not-ready: bot.open() would fail at launch even
+    # though the import succeeds.
+    chromium = _chromium_status()
+    chromium_hints = {
+        "no-browser": "playwright install chromium",
+        "no-libs": "sudo playwright install-deps chromium  "
+        "(Chromium is downloaded but system libraries are missing)",
+    }
+    backends = [
+        (
+            "browser (Playwright — default path, powers bot.open())",
+            chromium == "ready",
+            chromium_hints.get(
+                chromium,
+                'python -m pip install "qirabot[browser]" && playwright install chromium',
+            ),
+        ),
+        (
+            "desktop (pyautogui)",
+            _has_module("pyautogui"),
+            'python -m pip install "qirabot[desktop]"',
+        ),
+        (
+            "android/ios direct (Airtest)",
+            _has_module("airtest"),
+            'python -m pip install "qirabot[airtest]"  (Python 3.10–3.12 recommended)',
+        ),
+        (
+            "android/ios via server (Appium)",
+            _has_module("appium"),
+            'python -m pip install "qirabot[appium]"',
+        ),
+        (
+            "selenium (bring-your-own driver)",
+            _has_module("selenium"),
+            "python -m pip install selenium",
+        ),
+    ]
+
+    console.print("\n[bold]Backends[/bold] — you only need the one you plan to drive:")
+    for label, ready, hint in backends:
+        if ready:
+            console.print(f"  {ok} {escape(label)}")
+        else:
+            console.print(f"  {bad} {escape(label)} — {escape(hint)}")
+        if label.startswith("browser") and ready and not _display_available():
+            console.print(
+                f"    {warn} no display (DISPLAY unset) — headed windows can't open "
+                "here; bot.open() and the CLI fall back to headless automatically"
+            )
+
+    if not any(ready for _, ready, _ in backends):
+        console.print(
+            f"\n{bad} No backend installed. Quickest start: "
+            + escape('python -m pip install "qirabot[browser]" && playwright install chromium')
+        )
+        problems += 1
+
+    console.print("\n[bold]Optional[/bold]:")
+    if shutil.which("ffmpeg"):
+        console.print(f"  {ok} ffmpeg — screen recording (record=True) available")
+    else:
+        console.print(
+            f"  {warn} ffmpeg not on PATH — record=True will warn and skip recording"
+        )
+
+    console.print()
+    if problems:
+        console.print("[bold red]Not ready[/bold red] — fix the ✗ items above.")
+        sys.exit(1)
+    ready_labels = ", ".join(label.split(" (")[0] for label, ready, _ in backends if ready)
+    console.print(f"[bold green]Ready[/bold green] — usable backends: {escape(ready_labels)}.")
+
+
 @cli.command()
 @click.argument("instruction")
 @_task_options
@@ -356,7 +518,7 @@ def models(ctx: click.Context) -> None:
 @click.option("--cdp-url", default="", help="Connect to existing Chrome via CDP (e.g. http://localhost:9222 or wss://chrome.browserless.io?token=xxx). Mutually exclusive with --headless/--user-data-dir/--channel/--browser-arg.")
 @_debug_options()
 @click.pass_context
-def browse(
+def browser(
     ctx: click.Context,
     instruction: str,
     name: str,
@@ -411,50 +573,39 @@ def browse(
         bot.close()
 
 
-@cli.command()
-@click.argument("instruction")
-@_task_options
-# Mobile — basic
-@click.option("--platform", "-p", default="android", type=click.Choice(["android", "ios"]), help="Mobile platform")
-@click.option("--device", "-d", default="", help="Device name or serial")
-@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL")
-# Mobile — Android app launch
-@click.option("--app-package", default="", help="Android app package")
-@click.option("--app-activity", default="", help="Android app activity")
-# Mobile — iOS app launch
-@click.option("--bundle-id", default="", help="iOS app bundle id to launch (e.g. com.tencent.xin)")
-@_debug_options(record=False)
-@click.pass_context
-def mobile(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, platform: str, device: str, appium_url: str, app_package: str, app_activity: str, bundle_id: str, report: bool, report_dir: str, annotate: bool) -> None:
-    """Run an AI task on a mobile device via Appium."""
+def _flag_given(ctx: click.Context, param: str) -> bool:
+    """True when the user explicitly passed the option (vs its default), so
+    engine-specific flags can be rejected under the other engine without
+    tripping on their own default values."""
+    return ctx.get_parameter_source(param) == ParameterSource.COMMANDLINE
+
+
+def _require_airtest() -> None:
+    """require() with the CLI escape hatch appended: airtest is the default
+    engine, so a missing install must also point at --engine appium."""
+    try:
+        require("airtest.core.api", "airtest")
+    except MissingDependencyError as e:
+        raise MissingDependencyError(
+            f"{e} Or pass --engine appium to go through an Appium server instead."
+        ) from e
+
+
+def _run_appium(
+    ctx: click.Context,
+    instruction: str,
+    name: str,
+    model: str,
+    language: str,
+    max_steps: int,
+    appium_url: str,
+    options: Any,
+    report: bool,
+    report_dir: str,
+    annotate: bool,
+) -> None:
+    """Shared android/ios body: build the bot, open an Appium session, run."""
     appium_webdriver = require("appium.webdriver", "appium")
-
-    # Reject cross-platform flag combos early — silently ignoring e.g.
-    # --app-package under iOS would hide a user mistake.
-    if platform == "ios" and (app_package or app_activity):
-        raise click.UsageError("--app-package/--app-activity are Android-only; use --bundle-id with --platform ios")
-    if platform == "android" and bundle_id:
-        raise click.UsageError("--bundle-id is iOS-only; use --app-package/--app-activity with --platform android")
-
-    if platform == "android":
-        from appium.options.android import UiAutomator2Options
-
-        # Union of the two option types via Any: the branches build different
-        # concrete classes and mypy would otherwise flag the reassignment below.
-        options: Any = UiAutomator2Options()
-        if device:
-            options.device_name = device
-        if app_package:
-            options.app_package = app_package
-        if app_activity:
-            options.app_activity = app_activity
-    else:
-        from appium.options.ios import XCUITestOptions
-        options = XCUITestOptions()
-        if device:
-            options.device_name = device
-        if bundle_id:
-            options.bundle_id = bundle_id
 
     # Build the bot first: it validates the API key and reaches the server, and
     # may sys.exit() on failure. Creating the Appium driver before that would
@@ -479,6 +630,178 @@ def mobile(ctx: click.Context, instruction: str, name: str, model: str, language
             driver.quit()
     finally:
         bot.close()
+
+
+def _run_airtest(
+    ctx: click.Context,
+    instruction: str,
+    name: str,
+    model: str,
+    language: str,
+    max_steps: int,
+    connect: Callable[[], Any],
+    report: bool,
+    report_dir: str,
+    annotate: bool,
+) -> None:
+    """Shared android/ios airtest body: build the bot, connect the device, run.
+
+    ``connect`` performs the airtest connect + optional app launch and returns
+    the bind target. Like _run_appium, the bot is built first (it validates the
+    API key and may sys.exit()); unlike Appium there is no remote session to
+    quit, so the only teardown is bot.close().
+    """
+    bot = _make_bot(
+        ctx, model=model, language=language, report=report, report_dir=report_dir,
+        annotate=annotate, task_name=name or _default_task_name(instruction),
+    )
+    try:
+        try:
+            target = connect()
+        except Exception as e:
+            # Same contract as _run_appium: a setup failure before _run_local
+            # takes over reporting must be recorded, or the finally:bot.close()
+            # would complete the task as succeeded.
+            _fail_setup(bot, e)
+        _run_local(bot, target, instruction, max_steps, base_url=ctx.obj["base_url"])
+    finally:
+        bot.close()
+
+
+@cli.command()
+@click.argument("instruction")
+@_task_options
+@click.option("--engine", default="airtest", type=click.Choice(["airtest", "appium"]), help="Automation backend: airtest drives the device directly over adb (no server); appium goes through an Appium server at --appium-url")
+@click.option("--device", "-d", default="", help="Which device: an adb serial from `adb devices` (e.g. emulator-5554 or 192.168.1.8:5555). Optional when exactly one device is connected. Appium engine: passed as deviceName.")
+@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL (appium engine)")
+# Android — app launch
+@click.option("--app-package", default="", help="App package to launch (e.g. com.android.settings)")
+@click.option("--app-activity", default="", help="App activity to launch")
+@_debug_options(record=False)
+@click.pass_context
+def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, device: str, appium_url: str, app_package: str, app_activity: str, report: bool, report_dir: str, annotate: bool) -> None:
+    """Run an AI task on an Android device (direct over adb; --engine appium for Appium).
+
+    \b
+    Default engine — drives the device straight over adb, no server needed:
+      qirabot android "Open settings"                    # the only adb device
+      qirabot android "..." -d emulator-5554             # pick one of several
+      qirabot android "..." -d 192.168.1.8:5555          # network device (adb connect)
+      qirabot android "..." --app-package com.android.settings --app-activity .Settings
+    \b
+    Appium engine — needs a running server (npm i -g appium && appium driver
+    install uiautomator2 && appium), reached via --appium-url:
+      qirabot android "..." --engine appium -d emulator-5554 --app-package com.android.settings
+    """
+    if engine == "appium":
+        require("appium.webdriver", "appium")
+        from appium.options.android import UiAutomator2Options
+
+        options = UiAutomator2Options()
+        if device:
+            options.device_name = device
+        if app_package:
+            options.app_package = app_package
+        if app_activity:
+            options.app_activity = app_activity
+
+        _run_appium(
+            ctx, instruction, name, model, language, max_steps, appium_url, options,
+            report, report_dir, annotate,
+        )
+        return
+
+    if _flag_given(ctx, "appium_url"):
+        raise click.UsageError("--appium-url only applies to --engine appium")
+    _require_airtest()
+    from airtest.core.api import connect_device, start_app
+
+    def connect() -> Any:
+        try:
+            target = connect_device(f"Android:///{device}")
+        except Exception as e:
+            raise RuntimeError(
+                f"could not connect to an adb device ({e}); check `adb devices`, "
+                "or use --engine appium"
+            ) from e
+        if app_package:
+            start_app(app_package, app_activity or None)
+        return target
+
+    _run_airtest(
+        ctx, instruction, name, model, language, max_steps, connect,
+        report, report_dir, annotate,
+    )
+
+
+@cli.command()
+@click.argument("instruction")
+@_task_options
+@click.option("--engine", default="airtest", type=click.Choice(["airtest", "appium"]), help="Automation backend: airtest drives WebDriverAgent directly at --wda-url (no Appium server); appium goes through an Appium server (simulators, auto WDA build)")
+@click.option("--wda-url", default="http://127.0.0.1:8100", help="WebDriverAgent URL — this is how the default engine picks the device (USB real device: run `iproxy 8100 8100` and keep the default; another device = its WDA address)")
+@click.option("--device", "-d", default="", help="Device name for the appium engine (e.g. \"iPhone 15\" simulator). The default engine selects the device via --wda-url instead.")
+@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL (appium engine)")
+# iOS — app launch
+@click.option("--bundle-id", default="", help="App bundle id to launch (e.g. com.tencent.xin)")
+@_debug_options(record=False)
+@click.pass_context
+def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, wda_url: str, device: str, appium_url: str, bundle_id: str, report: bool, report_dir: str, annotate: bool) -> None:
+    """Run an AI task on an iOS device (direct via WDA; --engine appium for Appium).
+
+    \b
+    Default engine — talks to WebDriverAgent directly, no Appium server. WDA
+    must be running on the device (USB real device: `iproxy 8100 8100` first):
+      qirabot ios "..." --bundle-id com.tencent.xin          # WDA on 127.0.0.1:8100
+      qirabot ios "..." --wda-url http://192.168.1.20:8100   # another device's WDA
+    \b
+    Appium engine — needs a running server (npm i -g appium && appium driver
+    install xcuitest && appium); use for simulators or to auto build/sign WDA:
+      qirabot ios "..." --engine appium -d "iPhone 15" --bundle-id com.apple.Preferences
+    """
+    if engine == "appium":
+        if _flag_given(ctx, "wda_url"):
+            raise click.UsageError("--wda-url only applies to --engine airtest")
+        require("appium.webdriver", "appium")
+        from appium.options.ios import XCUITestOptions
+
+        options = XCUITestOptions()
+        if device:
+            options.device_name = device
+        if bundle_id:
+            options.bundle_id = bundle_id
+
+        _run_appium(
+            ctx, instruction, name, model, language, max_steps, appium_url, options,
+            report, report_dir, annotate,
+        )
+        return
+
+    if _flag_given(ctx, "appium_url"):
+        raise click.UsageError("--appium-url only applies to --engine appium")
+    if _flag_given(ctx, "device"):
+        raise click.UsageError("--device only applies to --engine appium; the airtest engine connects via --wda-url")
+    _require_airtest()
+    from airtest.core.api import connect_device
+
+    def connect() -> Any:
+        try:
+            target = connect_device(f"iOS:///{wda_url}")
+        except Exception as e:
+            raise RuntimeError(
+                f"could not reach WDA at {wda_url} ({e}); start WDA (real device: "
+                "`iproxy 8100 8100`), or use --engine appium"
+            ) from e
+        if bundle_id:
+            # Launch via WDA's app_launch, NOT airtest's start_app: start_app
+            # routes through the bundled go-ios CLI, which fails on iOS 17+
+            # without a RemoteXPC tunnel daemon.
+            target.driver.app_launch(bundle_id)
+        return target
+
+    _run_airtest(
+        ctx, instruction, name, model, language, max_steps, connect,
+        report, report_dir, annotate,
+    )
 
 
 @cli.command()

@@ -2,7 +2,7 @@
 
 Fill in the TODOs, then run:
     python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
-    pip install "qirabot[browser]" && playwright install chromium
+    python -m pip install "qirabot[browser]" && playwright install chromium
     echo 'QIRA_API_KEY=qk_...' > .env    # load_dotenv() reads this (also QIRA_BASE_URL)
     python browser.py
 

@@ -9,7 +9,7 @@ appear there). Point Airtest's recorder at ``bot.report_dir`` and the HTML
 report embeds the resulting ``recording.mp4``.
 
 Install:
-    pip install "qirabot[airtest]"
+    python -m pip install "qirabot[airtest]"
 
 Run (connect an emulator/device via adb first):
     export QIRA_API_KEY="qk_..."

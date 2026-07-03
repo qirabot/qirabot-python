@@ -14,7 +14,7 @@ open-ended audits).
 ## Install
 
 ```bash
-pip install "qirabot[airtest]" pywin32
+python -m pip install "qirabot[airtest]" pywin32
 ```
 
 `pywin32` provides the `win32gui` calls used to find the game's renderer

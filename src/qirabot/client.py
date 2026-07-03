@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import signal
+import sys
 import threading
 import time
 import weakref
@@ -393,7 +394,10 @@ class Qirabot:
 
         Args:
             url: optional URL to open. If no scheme present, ``https://`` is prepended.
-            headless: run without a visible window.
+            headless: run without a visible window. On Linux with no display
+                server (``DISPLAY``/``WAYLAND_DISPLAY`` both unset) a headed
+                launch cannot work, so ``headless=False`` falls back to
+                headless with a warning.
             viewport: ``(width, height)`` in pixels. Ignored when ``cdp_url`` is set.
             user_data_dir: persistent profile directory. When set, uses
                 ``launch_persistent_context`` so cookies/history/extensions persist
@@ -416,6 +420,22 @@ class Qirabot:
                 "cdp_url cannot be combined with headless/user_data_dir/channel/args "
                 "(those apply only when launching a browser)"
             )
+
+        # A headed launch cannot succeed without a display server, so on a
+        # display-less Linux box (typical headless VM / CI) fall back rather
+        # than fail. cdp_url is exempt: it attaches to a browser that already
+        # runs elsewhere.
+        if (
+            not headless
+            and not cdp_url
+            and sys.platform.startswith("linux")
+            and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+        ):
+            logger.warning(
+                "no display detected (DISPLAY/WAYLAND_DISPLAY unset) — a headed "
+                "browser cannot start here; launching headless instead"
+            )
+            headless = True
 
         pw = sync_playwright().start()
         self._pw_instances.append(pw)

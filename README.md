@@ -4,146 +4,134 @@ Cross-platform GUI automation, driven by multimodal AI vision. Drive browsers, m
 
 Run it standalone (`bot.open()` launches a browser for you), bolt it onto your existing Playwright / Selenium / Appium / Airtest / pyautogui session, drop it into a pytest suite, or bind by HWND to drive a Unity / Unreal / native desktop game. Same API across all of them.
 
+**Contents:** [Installation](#installation) · [Quick Start](#quick-start) · [CLI](#cli) ·
+[Bolt-On to Any Framework](#bolt-on-to-any-framework) · [API Reference](#api-reference) ·
+[Reports](#reports) · [Configuration](#configuration) · [Error Handling](#error-handling) ·
+[Agent Skill](#agent-skill)
+
 ## Installation
 
-```bash
-pip install qirabot
-```
-
-Requires Python 3.10+.
-
-The core package has no automation engine of its own — install the extra for the
-framework you'll drive:
+New to qirabot? Take the default path — browser automation, no other setup:
 
 ```bash
-pip install "qirabot[browser]"   # Playwright (needed for bot.open())
-pip install "qirabot[desktop]"   # pyautogui (native desktop apps)
-pip install "qirabot[appium]"    # Appium (Android / iOS)
-pip install "qirabot[airtest]"   # Airtest (Android / iOS / Windows, image-based)
-
-pip install selenium             # Selenium is not an extra — bring your own driver
+python3 -m venv .venv && source .venv/bin/activate   # recommended: a fresh virtualenv
+python -m pip install "qirabot[browser]"
+playwright install chromium      # one-time browser download
+export QIRA_API_KEY="qk_your_api_key"   # from your dashboard: https://app.qirabot.com
+qirabot doctor                   # optional: verify the environment end-to-end
 ```
 
-> Airtest itself declares no Python version, but its `numpy<2.0` pin caps the
-> install at **Python 3.12** (numpy 1.26 has no wheels beyond 3.12; on 3.13+ pip
-> builds from source and fails without a compiler). With the qirabot SDK's 3.10
-> floor, **install `qirabot[airtest]` on Python 3.10–3.12**, ideally in a fresh
-> virtualenv. AirtestIDE (the standalone GUI) also targets Python 3.10–3.12.
+Requires Python 3.10+. That's everything the [Quick Start](#quick-start) needs;
+`bot.open()` launches the browser for you.
 
-The Quick Start below uses `bot.open()`, so it needs `qirabot[browser]` plus a
-one-time `playwright install chromium`. With Selenium you create the driver
-yourself and pass it to qirabot — see [examples/selenium/](examples/selenium/).
+> Seeing `error: externally-managed-environment`? You're installing into the
+> system Python (Debian/Ubuntu block that, per PEP 668) — create and activate a
+> virtualenv as above, and prefer `python -m pip` over bare `pip` so the install
+> always targets the interpreter that's actually active.
 
-## Configuration
+> On a fresh **Linux** machine, also run `sudo playwright install-deps chromium`
+> once: the Chromium download doesn't include the system libraries it links
+> against, so launch fails with `error while loading shared libraries:
+> libnspr4.so ...` until they're installed. `qirabot doctor` detects this state
+> and prints the same fix. And on a **display-less** box (headless server / VM,
+> no `DISPLAY`), a visible browser window can't open — `bot.open()` and the CLI
+> detect that and automatically run headless instead, with a warning.
+
+**Already have an automation stack?** Then you don't need the browser extra at
+all. The core package (`python -m pip install qirabot`) has no automation engine of its
+own — it bolts onto the Playwright / Selenium / Appium / Airtest / pyautogui
+session you already run, so your fixtures, CI, and device setup stay untouched
+(see [Bolt-On to Any Framework](#bolt-on-to-any-framework)). Install the extra
+matching your framework — or nothing, if the framework is already in your
+environment:
+
+```bash
+python -m pip install "qirabot[desktop]"   # pyautogui (native desktop apps)
+python -m pip install "qirabot[appium]"    # Appium (Android / iOS)
+python -m pip install "qirabot[airtest]"   # Airtest (Android / iOS / Windows, image-based)
+
+python -m pip install qirabot selenium     # Selenium is not an extra — bring your own driver
+```
+
+> Airtest itself declares no Python version, but its `numpy<2.0` pin means
+> prebuilt wheels stop at **Python 3.12**. On 3.13+ pip builds numpy from
+> source — that works with a C toolchain installed (verified on 3.14) and fails
+> without one. Easiest path: **`qirabot[airtest]` on Python 3.10–3.12**, ideally
+> in a fresh virtualenv. AirtestIDE (the standalone GUI) also targets 3.10–3.12.
+
+Whichever path you took, `qirabot doctor` reports what is installed, what is
+missing (with the exact command to fix it), and whether your API key reaches
+the server.
+
+## Quick Start
+
+If you skipped it during [Installation](#installation): grab an API key from
+your [dashboard](https://app.qirabot.com) and export it (a project `.env` file
+works too — see [Configuration](#configuration)):
 
 ```bash
 export QIRA_API_KEY="qk_your_api_key"
 ```
 
-```python
-from qirabot import Qirabot
-
-bot = Qirabot()  # reads QIRA_API_KEY from environment
-```
-
-Settings can also live in a project `.env` file. Scripts opt in explicitly —
-`from qirabot import load_dotenv; load_dotenv()` — which reads `$QIRA_DOTENV` or
-`./.env` and never overrides exported variables; the `qirabot` CLI loads it
-automatically.
-
-Constructor options:
-
-| Parameter | Env Variable | Default | Description |
-|---|---|---|---|
-| `api_key` | `QIRA_API_KEY` | — | API key for authentication |
-| `base_url` | `QIRA_BASE_URL` | `https://app.qirabot.com` | API server URL |
-| `timeout` | — | `120.0` | HTTP request timeout (seconds) |
-| `verify_ssl` | — | `True` | Verify the server's TLS certificate (set `False` for self-hosted / self-signed) |
-| `model_alias` | — | `balanced_pro` | Model alias for all operations; pass `""` for the server default |
-| `language` | — | server default | Response language, e.g. `"zh"` / `"en"`; `""` = server default |
-| `task_name` | — | `""` | Optional name for the task (visible in dashboard) |
-| `report` | — | `True` | Write an HTML run report (+ screenshots) on close |
-| `report_dir` | `QIRA_REPORT_DIR` | `./qira_runs/<date>/<time-id>/` | Output root; the `<date>/<time-id>/` subdirs are always appended |
-| `record` | `QIRA_RECORD` | `False` | Record the screen with ffmpeg into `recording.mp4` (embedded in the report) |
-| `record_fps` | — | `12` | Recording frame rate |
-| `record_window` | `QIRA_RECORD_WINDOW` | `False` | **Windows + airtest only.** Record just the window under test (auto-resolved from the first action) instead of the full screen; falls back to full screen otherwise |
-| `record_audio` | `QIRA_RECORD_AUDIO` | `False` | **Windows only.** Capture system audio into the recording. `True` auto-detects a loopback device, or pass a DirectShow device name |
-| `record_audio_offset` | `QIRA_AUDIO_OFFSET` | `None` | A/V sync offset in seconds (usually negative, e.g. `-0.4`) applied to the audio input |
-| `screenshot_annotate` | — | `True` | Draw a red crosshair at click/type coordinates |
-| `screenshot_format` | — | `"jpeg"` | Saved screenshot format (`"jpeg"` or `"png"`) |
-| `screenshot_quality` | — | `80` | JPEG quality, 1–100 |
-| `retry` | — | `1` | Retries per action on transient failures |
-| `retry_delay` | — | `1.0` | Seconds between retries |
-| `settle_seconds` | `QIRA_SETTLE_SECONDS` | per-platform | Fixed pause after each action so the UI repaints before the next screenshot |
-
-### Model & language
-
-`model_alias` selects which model backs every operation. The built-in aliases
-trade cost for quality:
-
-| Alias | Trade-off |
-|---|---|
-| `fast` | Cheapest, lowest latency |
-| `balanced` | Good cost/quality balance |
-| `balanced_pro` | The default — stronger than `balanced` |
-| `high_quality` | Best quality, highest cost |
-
-Check your dashboard for the live list your account can use, then pass the
-`name` as `model_alias`; leave it empty for the default:
-
-```python
-bot = Qirabot(model_alias="high_quality")        # applies to all actions
-bot.click(page, "Login", model_alias="fast")     # or override per call
-```
-
-`language` sets the language of AI responses (extracted text, reasoning). It's a
-short language tag like `"zh"` or `"en"` — empty means the server default:
-
-```python
-bot = Qirabot(language="zh")                      # extract/ai answers in Chinese
-text = bot.extract(page, "Get the main heading", language="zh")
-```
-
-## Quick Start
-
-This uses `bot.open()`, so install the browser extra and Chromium first:
+Then, with the default path installed ([Installation](#installation)), the
+fastest way to see it work is one CLI command — no Python file needed:
 
 ```bash
-pip install "qirabot[browser]"
-playwright install chromium
+qirabot browser "Search for SpaceX and get the first sentence of the article" --url wikipedia.org
 ```
+
+That's a complete run: the browser opens, the AI does the task, and the result
+(plus an HTML report) lands in your terminal. All commands and options are in
+[CLI](#cli).
+
+The same task through the Python SDK — the form you'll use to build real
+automations:
 
 ```python
 from qirabot import Qirabot
 
 bot = Qirabot()
-page = bot.open("https://google.com")
+page = bot.open("https://www.wikipedia.org")
 
 bot.type_text(page, "Search input", "SpaceX", press_enter=True)
 
-summary = bot.extract(page, "Get the first search result title")
+summary = bot.extract(page, "Get the first sentence of the article")
 print(f"Result: {summary}")
 
 bot.close()
 ```
 
+Every run also writes an HTML report with per-step screenshots (see
+[Reports](#reports)), and every knob — model choice, language, recording,
+timeouts — is a constructor option (see [Configuration](#configuration)).
+
 ## CLI
 
 The `qirabot` command runs a task end-to-end without writing Python. It ships in
-the core package (installed with `pip install qirabot`), but each backend still
-needs its extra — `qirabot[browser]` for `browse`, `[appium]` for `mobile`,
-`[desktop]` for `desktop`.
+the core package (installed with `python -m pip install qirabot`), but each backend still
+needs its extra — `qirabot[browser]` for `browser`, `[airtest]` for `android`/`ios`
+(their default direct engine; `[appium]` when using `--engine appium`), `[desktop]`
+for `desktop`.
 
 ```bash
 # Browser (needs qirabot[browser] + `playwright install chromium`)
-qirabot browse "Search SpaceX on Google and open the first result" --url google.com
+qirabot browser "Search for SpaceX and get the first sentence of the article" --url wikipedia.org
 
-# Mobile via Appium (needs qirabot[appium] + a running Appium server)
-qirabot mobile "Open settings and turn on airplane mode" --platform android
-qirabot mobile "Send hi to Alice on WeChat" --platform ios --bundle-id com.tencent.xin
+# Android — direct over adb (needs qirabot[airtest]; no Appium server)
+qirabot android "Open settings and turn on airplane mode"
+
+# iOS — direct to WebDriverAgent (needs qirabot[airtest] + WDA running on :8100)
+qirabot ios "Send hi to Alice on WeChat" --bundle-id com.tencent.xin
+
+# Either can go through an Appium server instead (needs qirabot[appium])
+qirabot android "..." --engine appium
+qirabot ios "..." --engine appium --device "iPhone 15"   # e.g. simulators
 
 # Desktop via pyautogui (needs qirabot[desktop])
 qirabot desktop "Create a new note titled Groceries" --app Notes
+
+# Environment check — what's installed, what's missing, is the server reachable
+qirabot doctor
 
 # Read-only server queries
 qirabot task <task_id>            # status, commands, steps
@@ -155,9 +143,11 @@ qirabot models                    # list model aliases
 
 | Command | Purpose |
 |---|---|
-| `browse INSTRUCTION` | Run an AI task in a local browser (Playwright) |
-| `mobile INSTRUCTION` | Run an AI task on an Android/iOS device (Appium) |
+| `browser INSTRUCTION` | Run an AI task in a local browser (Playwright) |
+| `android INSTRUCTION` | Run an AI task on an Android device (adb direct; `--engine appium` for Appium) |
+| `ios INSTRUCTION` | Run an AI task on an iOS device (WDA direct; `--engine appium` for Appium) |
 | `desktop INSTRUCTION` | Run an AI task on the desktop screen (pyautogui) |
+| `doctor` | Check Python, API key/server, and per-backend dependencies; exits non-zero when nothing can run |
 | `task TASK_ID` | Print a task's status, commands, and steps |
 | `screenshot TASK_ID` | Download a task screenshot |
 | `models` | List available model aliases |
@@ -165,7 +155,7 @@ qirabot models                    # list model aliases
 **Global options** go **before** the subcommand (they configure the connection):
 
 ```bash
-qirabot --api-key qk_... --base-url https://app.qirabot.com browse "..."
+qirabot --api-key qk_... --base-url https://app.qirabot.com browser "..."
 ```
 
 `--api-key` / `--base-url` fall back to `QIRA_API_KEY` / `QIRA_BASE_URL`; also
@@ -175,15 +165,181 @@ project `.env` automatically (same rules as [`load_dotenv`](#configuration):
 or `qirabot <command> -h` for the full, default-annotated option list.
 
 **Exit codes** are script-friendly: `0` task succeeded, `1` task failed or any
-error, `130` interrupted with Ctrl+C — so `qirabot browse "..." && next-step`
+error, `130` interrupted with Ctrl+C — so `qirabot browser "..." && next-step`
 only proceeds on success.
 
-**Shared run options** (`browse` / `mobile` / `desktop`): `-n/--name` (defaults to
+**Shared run options** (`browser` / `android` / `ios` / `desktop`): `-n/--name` (defaults to
 the instruction text), `-m/--model`, `-l/--language`, `--max-steps`,
-`--report/--no-report`, `--report-dir`, `--annotate/--no-annotate`. `browse` and
+`--report/--no-report`, `--report-dir`, `--annotate/--no-annotate`. `browser` and
 `desktop` additionally take `--record` (screen recording, needs ffmpeg). Runs also
 honor the same env vars as the SDK — `QIRA_REPORT_DIR`, `QIRA_SETTLE_SECONDS`,
 `QIRA_RECORD*`, etc. (see [Configuration](#configuration)).
+
+## Bolt-On to Any Framework
+
+Qirabot works with your existing automation setup — just pass your page/driver/device object:
+
+### Playwright
+
+```python
+from playwright.sync_api import sync_playwright
+from qirabot import Qirabot
+
+bot = Qirabot()
+
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    page = browser.new_page()
+    page.goto("https://github.com/trending")
+
+    # Mix playwright selectors with AI
+    repos = bot.extract(page, "Get the top 5 trending repo names")
+    print(repos)
+
+    browser.close()
+bot.close()
+```
+
+### Selenium
+
+```python
+from selenium import webdriver
+from qirabot import Qirabot
+
+driver = webdriver.Chrome()
+driver.get("https://www.wikipedia.org")
+bot = Qirabot().bind(driver)   # bind once; the driver is stable for the session
+
+summary = bot.extract("Get the first paragraph of the article")
+print(summary)
+
+driver.quit()
+bot.close()
+```
+
+### Android (Appium)
+
+```python
+from appium import webdriver
+from appium.options.android import UiAutomator2Options
+from qirabot import Qirabot
+
+options = UiAutomator2Options()
+options.platform_name = "Android"
+options.device_name = "emulator-5554"
+options.app_package = "com.android.settings"
+options.app_activity = ".Settings"
+driver = webdriver.Remote("http://localhost:4723", options=options)
+bot = Qirabot().bind(driver)
+
+bot.click("Wi-Fi settings")
+result = bot.ai("Open Display settings and change font size to Large")
+print(f"Success: {result.success}")
+bot.close()
+driver.quit()
+```
+
+### Android / iOS / Windows (Airtest)
+
+Airtest connects to the device itself (no Appium server). `G` resolves the
+current device, so `bind(G)` keeps your usual Airtest style and adds AI on top.
+The minimal form:
+
+```python
+from airtest.core.api import *       # your usual Airtest imports
+from qirabot import Qirabot
+
+auto_setup(__file__)                 # your usual Airtest setup, unchanged
+bot = Qirabot().bind(G)
+
+bot.click("Login button")            # AI-located — replaces brittle Template images
+result = bot.ai("Open Settings and turn on dark mode")
+print(f"Success: {result.success}")
+touch(Template("native.png"))        # native Airtest still works side by side
+bot.close()
+```
+
+#### Full Android example
+
+A real run usually drives a specific app, streams steps, and records the screen.
+This connects to an emulator/device over ADB, runs an AI task in Chinese, and
+records the **device** screen into `bot.report_dir` so the HTML report embeds it
+automatically. Here we use Airtest's `device().start_recording(...)` rather than
+`record=True`: the SDK's built-in recorder captures the *host* screen, which a
+headless device doesn't appear on (a visible emulator window would be captured
+by `record=True` like any other host window):
+
+```python
+# -*- encoding=utf8 -*-
+import os
+from airtest.core.api import *
+from airtest.cli.parser import cli_setup
+
+from qirabot import Qirabot, StepResult
+
+# When launched outside `airtest run ...`, set up the device ourselves.
+# The connection string selects the device and touch backend (MAXTOUCH here).
+if not cli_setup():
+    auto_setup(
+        __file__,
+        logdir=True,
+        devices=["android://127.0.0.1:5037/127.0.0.1:5555?touch_method=MAXTOUCH&"],
+    )
+
+# Credentials — prefer setting these in the environment, not in source.
+# QIRA_BASE_URL is optional: it defaults to https://app.qirabot.com. Set it only
+# for a self-hosted or regional deployment (the URL below is one such example).
+os.environ.setdefault("QIRA_BASE_URL", "https://app.gcp.qirabot.com")
+os.environ.setdefault("QIRA_API_KEY", "qk_...your_key...")
+
+def on_step(step: StepResult) -> None:
+    label = "done" if step.finished else step.action_type
+    print(f"  step {step.step}: {label} {step.params}")
+
+APP = "com.pokercity.lobby"
+TASK = "Check that the UI controls at the top of the poker lobby work correctly"
+
+start_app(APP)
+
+# balanced_pro = stronger model; screenshot_annotate draws a crosshair at each tap.
+bot = Qirabot(model_alias="balanced_pro", screenshot_annotate=True).bind(G)
+
+# Record into the per-run dir so the report embeds it
+# (qira_runs/<date>/<run>/recording.mp4).
+video = os.path.join(bot.report_dir, "recording.mp4")
+device().start_recording(output=video, max_time=1800)
+try:
+    result = bot.ai(TASK, max_steps=25, on_step=on_step, language="en")
+    print(f" Result: {result.output}")
+    sleep(5.0)
+finally:
+    saved = device().stop_recording(output=video)
+    print(f" Recording saved: {saved}")
+    bot.close()                       # writes report.html with the video embedded
+
+stop_app(APP)
+```
+
+Notes on this example:
+
+- **`cli_setup()` guard** lets the same file run both via `airtest run ...` (IDE /
+  CI, which calls `cli_setup()` for you) and as a plain `python script.py`.
+- **`bind(G)`** binds the bot to the current device, so `bot.ai(TASK, ...)` takes
+  the instruction directly (no `target` argument). Bound calls accept
+  `max_steps`, `on_step`, `model_alias`, and `language`.
+- **`on_step`** fires after every action — use it for live logging or to push
+  progress somewhere. `step.finished` marks the terminal step.
+- **Recording** here uses Airtest's native `device().start_recording(...)` to
+  capture the *device* screen (the SDK's `record=True` records the host screen —
+  see [Reports](#reports)). Aim it at `bot.report_dir`, name it `recording.mp4`,
+  and the report picks it up.
+- **`result.output`** is the model's final answer; `result.success` is the
+  pass/fail verdict.
+
+Trade-offs and capability notes (e.g. `navigate` unsupported, `go_back` Android-only)
+are in [examples/airtest/](examples/airtest/). You can also pass `G`, the
+`airtest.core.api` module, or an explicit `connect_device(...)` handle directly
+without `bind()`.
 
 ## Bind a target (optional)
 
@@ -257,29 +413,6 @@ value is that new tab, so reassign it to keep operating on the active page:
 page = bot.click(page, "Open the first video")  # may switch to a new tab
 ```
 
-### Settle delay
-
-After every screen-changing action each adapter pauses briefly so the UI repaints
-before the next screenshot — without it the model can capture a mid-animation frame
-and wrongly conclude the action did nothing. The defaults are tuned per platform
-(desktop `1.0`s, mobile/browser `0.6`s, Airtest `1`s; Playwright relies on its own
-auto-waiting and adds none).
-
-Override the floor globally with `settle_seconds` — useful to slow down for a laggy
-remote device, or speed up a snappy local app. `0` disables it (rely on `wait_for`
-/ `timeout=` polling instead, which is more precise):
-
-```python
-bot = Qirabot(settle_seconds=1.5)   # laggy environment: wait longer
-bot = Qirabot(settle_seconds=0.3)   # fast local app: go quicker
-bot = Qirabot(settle_seconds=0)     # disable; lean on wait_for() instead
-# or, without touching code:  export QIRA_SETTLE_SECONDS=1.5
-```
-
-This is a blunt fixed delay. For "wait until X appears" prefer the auto-wait
-`timeout=`/`wait_for()` polling shown above — it returns as soon as the condition
-holds instead of always sleeping the full interval.
-
 ### Multi-Step AI (`bot.ai()`)
 
 Let AI autonomously complete a complex task using the full decision engine:
@@ -305,6 +438,29 @@ print(f"Success: {result.success}")
 print(f"Output: {result.output}")
 bot.close()
 ```
+
+### Settle delay
+
+After every screen-changing action each adapter pauses briefly so the UI repaints
+before the next screenshot — without it the model can capture a mid-animation frame
+and wrongly conclude the action did nothing. The defaults are tuned per platform
+(desktop `1.0`s, mobile/browser `0.6`s, Airtest `1`s; Playwright relies on its own
+auto-waiting and adds none).
+
+Override the floor globally with `settle_seconds` — useful to slow down for a laggy
+remote device, or speed up a snappy local app. `0` disables it (rely on `wait_for`
+/ `timeout=` polling instead, which is more precise):
+
+```python
+bot = Qirabot(settle_seconds=1.5)   # laggy environment: wait longer
+bot = Qirabot(settle_seconds=0.3)   # fast local app: go quicker
+bot = Qirabot(settle_seconds=0)     # disable; lean on wait_for() instead
+# or, without touching code:  export QIRA_SETTLE_SECONDS=1.5
+```
+
+This is a blunt fixed delay. For "wait until X appears" prefer the auto-wait
+`timeout=`/`wait_for()` polling shown above — it returns as soon as the condition
+holds instead of always sleeping the full interval.
 
 ### Screenshot (No AI)
 
@@ -542,171 +698,75 @@ Call `bot.report("path.html")` to also write the report to a custom location on
 demand. Use `bot.screenshot(target)` for a one-off frame (saved under
 `report_dir/screenshots/`).
 
-## Bolt-On to Any Framework
+## Configuration
 
-Qirabot works with your existing automation setup — just pass your page/driver/device object:
-
-### Playwright
+```bash
+export QIRA_API_KEY="qk_your_api_key"
+```
 
 ```python
-from playwright.sync_api import sync_playwright
 from qirabot import Qirabot
 
-bot = Qirabot()
-
-with sync_playwright() as p:
-    browser = p.chromium.launch()
-    page = browser.new_page()
-    page.goto("https://github.com/trending")
-
-    # Mix playwright selectors with AI
-    repos = bot.extract(page, "Get the top 5 trending repo names")
-    print(repos)
-
-    browser.close()
-bot.close()
+bot = Qirabot()  # reads QIRA_API_KEY from environment
 ```
 
-### Selenium
+Settings can also live in a project `.env` file. Scripts opt in explicitly —
+`from qirabot import load_dotenv; load_dotenv()` — which reads `$QIRA_DOTENV` or
+`./.env` and never overrides exported variables; the `qirabot` CLI loads it
+automatically.
+
+Constructor options:
+
+| Parameter | Env Variable | Default | Description |
+|---|---|---|---|
+| `api_key` | `QIRA_API_KEY` | — | API key for authentication |
+| `base_url` | `QIRA_BASE_URL` | `https://app.qirabot.com` | API server URL |
+| `timeout` | — | `120.0` | HTTP request timeout (seconds) |
+| `verify_ssl` | — | `True` | Verify the server's TLS certificate (set `False` for self-hosted / self-signed) |
+| `model_alias` | — | `balanced_pro` | Model alias for all operations; pass `""` for the server default |
+| `language` | — | server default | Response language, e.g. `"zh"` / `"en"`; `""` = server default |
+| `task_name` | — | `""` | Optional name for the task (visible in dashboard) |
+| `report` | — | `True` | Write an HTML run report (+ screenshots) on close |
+| `report_dir` | `QIRA_REPORT_DIR` | `./qira_runs/<date>/<time-id>/` | Output root; the `<date>/<time-id>/` subdirs are always appended |
+| `record` | `QIRA_RECORD` | `False` | Record the screen with ffmpeg into `recording.mp4` (embedded in the report) |
+| `record_fps` | — | `12` | Recording frame rate |
+| `record_window` | `QIRA_RECORD_WINDOW` | `False` | **Windows + airtest only.** Record just the window under test (auto-resolved from the first action) instead of the full screen; falls back to full screen otherwise |
+| `record_audio` | `QIRA_RECORD_AUDIO` | `False` | **Windows only.** Capture system audio into the recording. `True` auto-detects a loopback device, or pass a DirectShow device name |
+| `record_audio_offset` | `QIRA_AUDIO_OFFSET` | `None` | A/V sync offset in seconds (usually negative, e.g. `-0.4`) applied to the audio input |
+| `screenshot_annotate` | — | `True` | Draw a red crosshair at click/type coordinates |
+| `screenshot_format` | — | `"jpeg"` | Saved screenshot format (`"jpeg"` or `"png"`) |
+| `screenshot_quality` | — | `80` | JPEG quality, 1–100 |
+| `retry` | — | `1` | Retries per action on transient failures |
+| `retry_delay` | — | `1.0` | Seconds between retries |
+| `settle_seconds` | `QIRA_SETTLE_SECONDS` | per-platform | Fixed pause after each action so the UI repaints before the next screenshot |
+
+### Model & language
+
+`model_alias` selects which model backs every operation. The built-in aliases
+trade cost for quality:
+
+| Alias | Trade-off |
+|---|---|
+| `fast` | Cheapest, lowest latency |
+| `balanced` | Good cost/quality balance |
+| `balanced_pro` | The default — stronger than `balanced` |
+| `high_quality` | Best quality, highest cost |
+
+Check your dashboard for the live list your account can use, then pass the
+`name` as `model_alias`; leave it empty for the default:
 
 ```python
-from selenium import webdriver
-from qirabot import Qirabot
-
-driver = webdriver.Chrome()
-driver.get("https://www.wikipedia.org")
-bot = Qirabot().bind(driver)   # bind once; the driver is stable for the session
-
-summary = bot.extract("Get the first paragraph of the article")
-print(summary)
-
-driver.quit()
-bot.close()
+bot = Qirabot(model_alias="high_quality")        # applies to all actions
+bot.click(page, "Login", model_alias="fast")     # or override per call
 ```
 
-### Android (Appium)
+`language` sets the language of AI responses (extracted text, reasoning). It's a
+short language tag like `"zh"` or `"en"` — empty means the server default:
 
 ```python
-from appium import webdriver
-from appium.options.android import UiAutomator2Options
-from qirabot import Qirabot
-
-options = UiAutomator2Options()
-options.platform_name = "Android"
-options.device_name = "emulator-5554"
-options.app_package = "com.android.settings"
-options.app_activity = ".Settings"
-driver = webdriver.Remote("http://localhost:4723", options=options)
-bot = Qirabot().bind(driver)
-
-bot.click("Wi-Fi settings")
-result = bot.ai("Open Display settings and change font size to Large")
-print(f"Success: {result.success}")
-bot.close()
-driver.quit()
+bot = Qirabot(language="zh")                      # extract/ai answers in Chinese
+text = bot.extract(page, "Get the main heading", language="zh")
 ```
-
-### Android / iOS / Windows (Airtest)
-
-Airtest connects to the device itself (no Appium server). `G` resolves the
-current device, so `bind(G)` keeps your usual Airtest style and adds AI on top.
-The minimal form:
-
-```python
-from airtest.core.api import *       # your usual Airtest imports
-from qirabot import Qirabot
-
-auto_setup(__file__)                 # your usual Airtest setup, unchanged
-bot = Qirabot().bind(G)
-
-bot.click("Login button")            # AI-located — replaces brittle Template images
-result = bot.ai("Open Settings and turn on dark mode")
-print(f"Success: {result.success}")
-touch(Template("native.png"))        # native Airtest still works side by side
-bot.close()
-```
-
-#### Full Android example
-
-A real run usually drives a specific app, streams steps, and records the screen.
-This connects to an emulator/device over ADB, runs an AI task in Chinese, and
-records the **device** screen into `bot.report_dir` so the HTML report embeds it
-automatically. Here we use Airtest's `device().start_recording(...)` rather than
-`record=True`: the SDK's built-in recorder captures the *host* screen, which a
-headless device doesn't appear on (a visible emulator window would be captured
-by `record=True` like any other host window):
-
-```python
-# -*- encoding=utf8 -*-
-import os
-from airtest.core.api import *
-from airtest.cli.parser import cli_setup
-
-from qirabot import Qirabot, StepResult
-
-# When launched outside `airtest run ...`, set up the device ourselves.
-# The connection string selects the device and touch backend (MAXTOUCH here).
-if not cli_setup():
-    auto_setup(
-        __file__,
-        logdir=True,
-        devices=["android://127.0.0.1:5037/127.0.0.1:5555?touch_method=MAXTOUCH&"],
-    )
-
-# Credentials — prefer setting these in the environment, not in source.
-# QIRA_BASE_URL is optional: it defaults to https://app.qirabot.com. Set it only
-# for a self-hosted or regional deployment (the URL below is one such example).
-os.environ.setdefault("QIRA_BASE_URL", "https://app.gcp.qirabot.com")
-os.environ.setdefault("QIRA_API_KEY", "qk_...your_key...")
-
-def on_step(step: StepResult) -> None:
-    label = "done" if step.finished else step.action_type
-    print(f"  step {step.step}: {label} {step.params}")
-
-APP = "com.pokercity.lobby"
-TASK = "Check that the UI controls at the top of the poker lobby work correctly"
-
-start_app(APP)
-
-# balanced_pro = stronger model; screenshot_annotate draws a crosshair at each tap.
-bot = Qirabot(model_alias="balanced_pro", screenshot_annotate=True).bind(G)
-
-# Record into the per-run dir so the report embeds it
-# (qira_runs/<date>/<run>/recording.mp4).
-video = os.path.join(bot.report_dir, "recording.mp4")
-device().start_recording(output=video, max_time=1800)
-try:
-    result = bot.ai(TASK, max_steps=25, on_step=on_step, language="en")
-    print(f" Result: {result.output}")
-    sleep(5.0)
-finally:
-    saved = device().stop_recording(output=video)
-    print(f" Recording saved: {saved}")
-    bot.close()                       # writes report.html with the video embedded
-
-stop_app(APP)
-```
-
-Notes on this example:
-
-- **`cli_setup()` guard** lets the same file run both via `airtest run ...` (IDE /
-  CI, which calls `cli_setup()` for you) and as a plain `python script.py`.
-- **`bind(G)`** binds the bot to the current device, so `bot.ai(TASK, ...)` takes
-  the instruction directly (no `target` argument). Bound calls accept
-  `max_steps`, `on_step`, `model_alias`, and `language`.
-- **`on_step`** fires after every action — use it for live logging or to push
-  progress somewhere. `step.finished` marks the terminal step.
-- **Recording** here uses Airtest's native `device().start_recording(...)` to
-  capture the *device* screen (the SDK's `record=True` records the host screen —
-  see [Reports](#reports)). Aim it at `bot.report_dir`, name it `recording.mp4`,
-  and the report picks it up.
-- **`result.output`** is the model's final answer; `result.success` is the
-  pass/fail verdict.
-
-Trade-offs and capability notes (e.g. `navigate` unsupported, `go_back` Android-only)
-are in [examples/airtest/](examples/airtest/). You can also pass `G`, the
-`airtest.core.api` module, or an explicit `connect_device(...)` handle directly
-without `bind()`.
 
 ## Error Handling
 
@@ -750,7 +810,7 @@ bot = Qirabot(task_name="my automation")
 bot.close()  # task marked as completed
 ```
 
-## Context Manager
+Or let a context manager close it:
 
 ```python
 with Qirabot(task_name="my automation") as bot:

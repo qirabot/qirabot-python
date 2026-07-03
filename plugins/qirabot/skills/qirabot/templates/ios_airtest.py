@@ -21,7 +21,7 @@ Prereqs (real device):
 
 Install:
     python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
-    pip install "qirabot[airtest]"       # 3.10-3.12 fully supported (3.13 needs a C toolchain)
+    python -m pip install "qirabot[airtest]"       # 3.10-3.12 installs out of the box; 3.13+ builds numpy from source (needs a C toolchain)
     echo 'QIRA_API_KEY=qk_...' > .env    # load_dotenv() reads this (also QIRA_BASE_URL)
 
 When to pick this over ios_appium.py:

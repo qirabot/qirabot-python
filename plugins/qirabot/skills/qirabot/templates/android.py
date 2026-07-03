@@ -1,9 +1,9 @@
 """Qirabot Android automation template (Airtest — no Appium server needed).
 
 Fill in APP and TASK, then run:
-    # use Python 3.10-3.12 for the airtest extra
+    # Python 3.10-3.12 installs out of the box; 3.13+ builds numpy from source (needs a C toolchain)
     python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
-    pip install "qirabot[airtest]"
+    python -m pip install "qirabot[airtest]"
     echo 'QIRA_API_KEY=qk_...' > .env    # load_dotenv() reads this (also QIRA_BASE_URL)
     adb devices            # confirm a device/emulator is connected
     python android.py

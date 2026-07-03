@@ -61,8 +61,9 @@ class QirabotConnectionError(QirabotError):
 class MissingDependencyError(QirabotError, ImportError):
     """An optional backend dependency (e.g. playwright, pyautogui) is not installed.
 
-    Raised by :func:`qirabot._optional.require` with an actionable ``pip install
-    "qirabot[<extra>]"`` hint instead of a bare ``ModuleNotFoundError`` traceback.
+    Raised by :func:`qirabot._optional.require` with an actionable ``python -m pip
+    install "qirabot[<extra>]"`` hint instead of a bare ``ModuleNotFoundError``
+    traceback.
     """
 
 

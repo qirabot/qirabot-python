@@ -5,7 +5,7 @@ Use Qirabot with pyautogui for OS-level automation — desktop apps, embedded br
 ## Install
 
 ```bash
-pip install qirabot pyautogui pytest
+python -m pip install qirabot pyautogui pytest
 ```
 
 ## Run

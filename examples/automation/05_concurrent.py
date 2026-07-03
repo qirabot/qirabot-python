@@ -10,7 +10,7 @@ Use threads instead of processes only if your work is I/O-bound and you don't
 need separate profiles; for real browser fan-out, processes are the safe default.
 
 Install:
-    pip install "qirabot[browser]"
+    python -m pip install "qirabot[browser]"
     playwright install chromium
 
 Run:

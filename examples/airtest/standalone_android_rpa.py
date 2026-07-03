@@ -6,7 +6,7 @@ is a plain script you run with `python`. Airtest connects to the device itself
 the screen, pick the next action, repeat until done or max_steps is hit.
 
 Install:
-    pip install "qirabot[airtest]"
+    python -m pip install "qirabot[airtest]"
 
 Run (connect an emulator/device via adb first):
     export QIRA_API_KEY="qk_..."

@@ -853,3 +853,47 @@ class TestRenderStepImages:
         full, thumb = _render_step_images(self._png_bytes(), None)
         assert full
         assert thumb.startswith("data:image/jpeg;base64,")
+
+
+class TestOpenHeadlessFallback:
+    """open(headless=False) on display-less Linux must fall back to headless —
+    a headed launch there can only fail (Missing X server or $DISPLAY)."""
+
+    def _launch_kwargs(self, monkeypatch, *, platform, display=None, wayland=None):
+        """Run bot.open() against a stubbed playwright; return chromium.launch kwargs."""
+        import sys as sys_mod
+
+        import qirabot.client as client_mod
+
+        fake_pw = MagicMock(name="playwright.sync_api")
+        monkeypatch.setattr(client_mod, "require", lambda module, extra: fake_pw)
+        monkeypatch.setattr(sys_mod, "platform", platform)
+        for var, value in (("DISPLAY", display), ("WAYLAND_DISPLAY", wayland)):
+            if value is None:
+                monkeypatch.delenv(var, raising=False)
+            else:
+                monkeypatch.setenv(var, value)
+
+        bot = Qirabot(api_key="k", task_id="t")
+        bot.open()
+        return fake_pw.sync_playwright().start().chromium.launch.call_args.kwargs
+
+    def test_linux_without_display_falls_back_to_headless(self, monkeypatch, caplog):
+        with caplog.at_level("WARNING", logger="qirabot"):
+            kwargs = self._launch_kwargs(monkeypatch, platform="linux")
+
+        assert kwargs["headless"] is True
+        assert "no display detected" in caplog.text
+
+    def test_linux_with_display_stays_headed(self, monkeypatch):
+        kwargs = self._launch_kwargs(monkeypatch, platform="linux", display=":0")
+        assert kwargs["headless"] is False
+
+    def test_linux_with_wayland_stays_headed(self, monkeypatch):
+        kwargs = self._launch_kwargs(monkeypatch, platform="linux", wayland="wayland-0")
+        assert kwargs["headless"] is False
+
+    def test_non_linux_without_display_stays_headed(self, monkeypatch):
+        # macOS/Windows always have a display server; env vars are irrelevant.
+        kwargs = self._launch_kwargs(monkeypatch, platform="darwin")
+        assert kwargs["headless"] is False

@@ -21,7 +21,7 @@ you see progress (and the task_id) as it runs. The stream ends with a
 
 Run it on the dedicated machine, inside a logged-in graphical session:
 
-    pip install "qirabot[desktop]"
+    python -m pip install "qirabot[desktop]"
     export QIRA_API_KEY="qk_..."
     export QIRA_RUNNER_TOKEN="some-shared-secret"   # required unless you set it empty
     python runner.py

@@ -32,15 +32,15 @@ so it becomes the validated interpreter):
 ```bash
 # One backend per project → use the conventional .venv (IDEs auto-detect it):
 python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install "qirabot[browser]"      # → also: playwright install chromium
+python -m pip install "qirabot[browser]"      # → also: playwright install chromium
 #   or  qirabot[appium]  (iOS: + Appium server & WebDriverAgent)  /  qirabot[desktop]
-#   or  qirabot[airtest]  (Android, iOS, window-scoped Windows desktop; Python 3.10-3.12)
+#   or  qirabot[airtest]  (Android, iOS, window-scoped Windows desktop; Python 3.10-3.12, or 3.13+ with a C toolchain)
 
 # CAVEAT: airtest pins numpy<2, which conflicts with the browser/desktop extras.
 # Only if ONE project genuinely needs airtest AND another backend, give airtest
 # its own separately-named env instead of sharing .venv:
 #   python3.12 -m venv .venv-airtest && source .venv-airtest/bin/activate
-#   pip install "qirabot[airtest]"
+#   python -m pip install "qirabot[airtest]"
 
 # Credentials go in a .env file (the templates call qirabot.load_dotenv() to read
 # it; a real exported env var still wins). Never hard-code the key in the script.
@@ -53,8 +53,8 @@ echo 'QIRA_API_KEY=qk_...' > .env         # from https://app.qirabot.com
 | Target | Template | Extra |
 |---|---|---|
 | Web browser (Qirabot launches Chromium) | `templates/browser.py` | `qirabot[browser]` + `playwright install chromium`. Also supports connecting to an existing Chrome via `cdp_url` (e.g. Browserless/Browserbase). |
-| Android — Airtest (no Appium server, fastest start) | `templates/android.py` | `qirabot[airtest]` (Python 3.10-3.12) |
-| iOS — Airtest (drives WDA directly, no Appium server) | `templates/ios_airtest.py` | `qirabot[airtest]` (Python 3.10-3.12). Real device needs WDA running on :8100 (typically via `iproxy 8100 8100`). The template launches apps via WDA's `app_launch`, not airtest's `start_app` — the latter routes through go-ios and breaks on iOS 17+. |
+| Android — Airtest (no Appium server, fastest start) | `templates/android.py` | `qirabot[airtest]` (Python 3.10-3.12; 3.13+ needs a C toolchain) |
+| iOS — Airtest (drives WDA directly, no Appium server) | `templates/ios_airtest.py` | `qirabot[airtest]` (Python 3.10-3.12; 3.13+ needs a C toolchain). Real device needs WDA running on :8100 (typically via `iproxy 8100 8100`). The template launches apps via WDA's `app_launch`, not airtest's `start_app` — the latter routes through go-ios and breaks on iOS 17+. |
 | iOS — Appium XCUITest (simulators, auto WDA build/sign) | `templates/ios_appium.py` | `qirabot[appium]` + a running Appium server & WDA. Real device (iOS 17+) needs a built/signed WDA; simplest is to leave WDA running on :8100 and reuse it via `webDriverAgentUrl` (the template does this). |
 | Any Selenium driver, or other Appium targets (you build the driver, then `bind()`) | `templates/bolt_on.py` | `qirabot` + `selenium` / `qirabot[appium]` |
 | Desktop — Windows & macOS (`bind()` your driver) | `templates/bolt_on.py` | `qirabot[desktop]` (whole screen, any OS) · `qirabot[airtest]` (Windows only, one window) |

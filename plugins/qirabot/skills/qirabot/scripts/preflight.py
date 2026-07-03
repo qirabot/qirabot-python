@@ -62,7 +62,7 @@ def check_import(module: str, extra: str, label: str = "") -> bool:
         return True
     except Exception as exc:  # noqa: BLE001
         line(NO, label or f"{module} importable",
-             f'{type(exc).__name__}: {exc}  ->  pip install "qirabot[{extra}]"')
+             f'{type(exc).__name__}: {exc}  ->  python -m pip install "qirabot[{extra}]"')
         return False
 
 
@@ -85,11 +85,12 @@ def main() -> int:
     v = sys.version_info
     py_ok = (v.major, v.minor) >= (3, 10)
     line(OK if py_ok else NO, f"Python {v.major}.{v.minor} (need >= 3.10)",
-         "" if py_ok else "Install Python 3.10-3.12.")
+         "" if py_ok else "Install Python 3.10+.")
     hard_ok = hard_ok and py_ok
     if target == "android" and not ((3, 10) <= (v.major, v.minor) <= (3, 12)):
-        line(WARN, "airtest extra wants Python 3.10-3.12",
-             "numpy<2 / opencv 4.4-4.6 have prebuilt wheels only up to 3.12.")
+        line(WARN, "airtest extra prefers Python 3.10-3.12",
+             "numpy<2 wheels stop at 3.12; on 3.13+ pip builds numpy from source, "
+             "which needs a C toolchain.")
     if (target == "desktop" and is_windows
             and not ((3, 10) <= (v.major, v.minor) <= (3, 12))):
         line(WARN, "airtest (window-scoped) desktop backend wants Python 3.10-3.12",
@@ -111,7 +112,7 @@ def main() -> int:
         extra = {"browser": "browser", "android": "airtest",
                  "ios": "appium", "desktop": "desktop"}[target]
         line(NO, "qirabot importable",
-             f"pip install 'qirabot[{extra}]'  (prefer a venv: "
+             f"python -m pip install 'qirabot[{extra}]'  (prefer a venv: "
              "python -m venv .venv && source .venv/bin/activate)")
         hard_ok = False
 
@@ -125,7 +126,24 @@ def main() -> int:
                 with sync_playwright() as p:
                     exe = p.chromium.executable_path
                 if os.path.exists(exe):
-                    line(OK, "Chromium installed")
+                    # On Linux the download alone isn't enough — missing system
+                    # libraries (e.g. libnspr4.so on a bare server) only surface
+                    # at launch. ldd catches that here.
+                    missing_libs = False
+                    if sys.platform.startswith("linux"):
+                        try:
+                            ldd = subprocess.run(
+                                ["ldd", exe], capture_output=True, text=True, timeout=10
+                            )
+                            missing_libs = "not found" in ldd.stdout
+                        except Exception:  # noqa: BLE001
+                            pass  # no ldd / probe failure: don't fail a browser that may work
+                    if missing_libs:
+                        line(NO, "Chromium system libraries",
+                             "sudo playwright install-deps chromium")
+                        hard_ok = False
+                    else:
+                        line(OK, "Chromium installed")
                 else:
                     line(NO, "Chromium installed", "playwright install chromium")
                     hard_ok = False
@@ -169,7 +187,7 @@ def main() -> int:
             line(OK, f"iOS client importable ({'/'.join(backends)})")
         else:
             line(NO, "iOS client importable",
-                 'install one: pip install "qirabot[appium]"  (or "qirabot[airtest]")')
+                 'install one: python -m pip install "qirabot[appium]"  (or "qirabot[airtest]")')
             hard_ok = False
         if shutil.which("appium"):
             line(OK, "appium server on PATH")
@@ -203,7 +221,7 @@ def main() -> int:
         if backends:
             line(OK, f"desktop backend importable ({'; '.join(backends)})")
         else:
-            hint = 'pip install "qirabot[desktop]"  (whole screen)'
+            hint = 'python -m pip install "qirabot[desktop]"  (whole screen)'
             if is_windows:
                 hint += '  — or "qirabot[airtest]" for window-scoped'
             line(NO, "desktop backend importable", hint)

@@ -12,7 +12,7 @@ Start Chrome with remote debugging first:
     google-chrome --remote-debugging-port=9222
 
 Install:
-    pip install "qirabot[browser]"
+    python -m pip install "qirabot[browser]"
 
 Run:
     export QIRA_API_KEY="qk_..."

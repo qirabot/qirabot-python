@@ -15,7 +15,7 @@ class _FakeOptions:
 
 @pytest.fixture
 def fake_appium(monkeypatch):
-    """Inject a fake ``appium`` package so the mobile command imports cleanly.
+    """Inject a fake ``appium`` package so the android/ios commands import cleanly.
 
     Returns the MagicMock used for ``webdriver.Remote`` so tests can inspect the
     options object the command built and handed to it.
@@ -46,6 +46,28 @@ def fake_appium(monkeypatch):
 
 
 @pytest.fixture
+def fake_airtest(monkeypatch):
+    """Inject a fake ``airtest`` package (the android/ios default engine).
+
+    Returns the fake ``airtest.core.api`` module so tests can inspect the
+    connect_device/start_app calls and the device object handed to the run.
+    """
+    device = MagicMock(name="airtest_device")
+    api = types.ModuleType("airtest.core.api")
+    api.connect_device = MagicMock(name="connect_device", return_value=device)
+    api.start_app = MagicMock(name="start_app")
+
+    for name, mod in {
+        "airtest": types.ModuleType("airtest"),
+        "airtest.core": types.ModuleType("airtest.core"),
+        "airtest.core.api": api,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    return api
+
+
+@pytest.fixture
 def stub_bot(monkeypatch):
     """Bypass task creation / AI run so the command exercises only wiring."""
     from qirabot.cli import main
@@ -62,8 +84,7 @@ def _invoke(args):
 
 def test_ios_bundle_id_is_passed_to_options(fake_appium, stub_bot):
     result = _invoke([
-        "mobile", "Send hi to honey",
-        "--platform", "ios",
+        "ios", "Send hi to honey", "--engine", "appium",
         "--bundle-id", "com.tencent.xin",
     ])
     assert result.exit_code == 0, result.output
@@ -73,11 +94,136 @@ def test_ios_bundle_id_is_passed_to_options(fake_appium, stub_bot):
 
 
 def test_ios_without_bundle_id_sets_no_bundle(fake_appium, stub_bot):
-    result = _invoke(["mobile", "do something", "--platform", "ios"])
+    result = _invoke(["ios", "do something", "--engine", "appium"])
     assert result.exit_code == 0, result.output
 
     options = fake_appium.call_args.kwargs["options"]
     assert not hasattr(options, "bundle_id")
+
+
+def test_android_app_launch_flags_are_passed_to_options(fake_appium, stub_bot):
+    result = _invoke([
+        "android", "Open Display settings", "--engine", "appium",
+        "--device", "emulator-5554",
+        "--app-package", "com.android.settings",
+        "--app-activity", ".Settings",
+    ])
+    assert result.exit_code == 0, result.output
+
+    options = fake_appium.call_args.kwargs["options"]
+    assert options.device_name == "emulator-5554"
+    assert options.app_package == "com.android.settings"
+    assert options.app_activity == ".Settings"
+
+
+class TestAirtestEngine:
+    """android/ios default to the direct engine (adb / WDA via airtest) — no
+    Appium server involved."""
+
+    def test_android_defaults_to_airtest(self, fake_airtest, fake_appium, stub_bot):
+        result = _invoke([
+            "android", "Open Display settings",
+            "--device", "emulator-5554",
+            "--app-package", "com.android.settings",
+            "--app-activity", ".Settings",
+        ])
+        assert result.exit_code == 0, result.output
+
+        fake_airtest.connect_device.assert_called_once_with("Android:///emulator-5554")
+        fake_airtest.start_app.assert_called_once_with("com.android.settings", ".Settings")
+        # The default engine must never touch the Appium server.
+        fake_appium.assert_not_called()
+
+    def test_android_without_app_package_skips_launch(self, fake_airtest, stub_bot):
+        result = _invoke(["android", "do something"])
+        assert result.exit_code == 0, result.output
+
+        fake_airtest.connect_device.assert_called_once_with("Android:///")
+        fake_airtest.start_app.assert_not_called()
+
+    def test_ios_defaults_to_wda_direct(self, fake_airtest, fake_appium, stub_bot):
+        result = _invoke(["ios", "Send hi to honey", "--bundle-id", "com.tencent.xin"])
+        assert result.exit_code == 0, result.output
+
+        fake_airtest.connect_device.assert_called_once_with("iOS:///http://127.0.0.1:8100")
+        # iOS launches via WDA's app_launch, never airtest's start_app (go-ios
+        # breaks on iOS 17+).
+        device = fake_airtest.connect_device.return_value
+        device.driver.app_launch.assert_called_once_with("com.tencent.xin")
+        fake_airtest.start_app.assert_not_called()
+        fake_appium.assert_not_called()
+
+    def test_ios_custom_wda_url(self, fake_airtest, stub_bot):
+        result = _invoke(["ios", "do it", "--wda-url", "http://10.0.0.5:8100"])
+        assert result.exit_code == 0, result.output
+
+        fake_airtest.connect_device.assert_called_once_with("iOS:///http://10.0.0.5:8100")
+        fake_airtest.connect_device.return_value.driver.app_launch.assert_not_called()
+
+    def test_connect_failure_reports_fail_with_hint(self, fake_airtest, monkeypatch):
+        from qirabot.cli import main
+
+        bot = MagicMock(name="bot")
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
+        fake_airtest.connect_device.side_effect = RuntimeError("adb: no devices/emulators found")
+
+        result = _invoke(["android", "do something"])
+
+        assert result.exit_code == 1
+        assert "adb devices" in result.output
+        assert "--engine appium" in result.output
+        bot.fail.assert_called_once()
+        bot.close.assert_called_once()
+
+    def test_missing_airtest_error_points_at_appium_engine(self, monkeypatch):
+        # Simulate airtest being absent (the dev env may have it installed):
+        # the default engine must fail with the install hint AND the --engine
+        # appium escape hatch. (MissingDependencyError is rendered one-line by
+        # main(), which CliRunner bypasses — so assert on the exception itself.)
+        from qirabot.cli import main
+        from qirabot.exceptions import MissingDependencyError
+
+        def missing(module, extra=None):
+            raise MissingDependencyError(
+                'Install it with:  python -m pip install "qirabot[airtest]"'
+            )
+
+        monkeypatch.setattr(main, "require", missing)
+
+        result = _invoke(["android", "do something"])
+
+        assert result.exit_code == 1
+        assert 'qirabot[airtest]' in str(result.exception)
+        assert "--engine appium" in str(result.exception)
+
+
+class TestEngineFlagValidation:
+    """Engine-specific URL/device flags are rejected under the other engine
+    (only when explicitly passed — defaults never trip the guard)."""
+
+    def test_android_airtest_rejects_appium_url(self, fake_airtest, stub_bot):
+        result = _invoke(["android", "do it", "--appium-url", "http://x:4723"])
+
+        assert result.exit_code != 0
+        assert "--engine appium" in result.output
+
+    def test_ios_airtest_rejects_appium_url(self, fake_airtest, stub_bot):
+        result = _invoke(["ios", "do it", "--appium-url", "http://x:4723"])
+
+        assert result.exit_code != 0
+        assert "--engine appium" in result.output
+
+    def test_ios_airtest_rejects_device(self, fake_airtest, stub_bot):
+        result = _invoke(["ios", "do it", "--device", "iPhone 15"])
+
+        assert result.exit_code != 0
+        assert "--engine appium" in result.output
+
+    def test_ios_appium_rejects_wda_url(self, fake_appium, stub_bot):
+        result = _invoke(["ios", "do it", "--engine", "appium", "--wda-url", "http://x:8100"])
+
+        assert result.exit_code != 0
+        assert "--engine airtest" in result.output
 
 
 class TestRunLocalAbort:
@@ -121,7 +267,7 @@ class TestRunLocalAbort:
 
     def test_failed_result_reports_failure_and_exits_1(self):
         # A failed run must exit non-zero so scripts/CI can detect it — exiting
-        # 0 here made `qirabot browse ... && deploy` silently proceed on failure.
+        # 0 here made `qirabot browser ... && deploy` silently proceed on failure.
         from qirabot.cli.main import _run_local
         from qirabot.client import RunResult
 
@@ -152,33 +298,34 @@ class TestSetupFailureReporting:
     failure, never left for the command's finally:bot.close() to complete as
     succeeded."""
 
-    def test_browse_open_failure_reports_fail(self, monkeypatch):
+    def test_browser_open_failure_reports_fail(self, monkeypatch):
         from qirabot.cli import main
 
         bot = MagicMock(name="bot")
         bot.open.side_effect = RuntimeError("chromium launch failed")
         monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
 
-        result = _invoke(["browse", "do something", "--url", "example.com"])
+        result = _invoke(["browser", "do something", "--url", "example.com"])
 
         assert result.exit_code == 1
         bot.fail.assert_called_once()
         bot.close.assert_called_once()
 
-    def test_mobile_remote_failure_reports_fail(self, fake_appium, monkeypatch):
+    @pytest.mark.parametrize("command", ["android", "ios"])
+    def test_appium_remote_failure_reports_fail(self, fake_appium, monkeypatch, command):
         from qirabot.cli import main
 
         bot = MagicMock(name="bot")
         monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
         fake_appium.side_effect = RuntimeError("appium server unreachable")
 
-        result = _invoke(["mobile", "do something"])
+        result = _invoke([command, "do something", "--engine", "appium"])
 
         assert result.exit_code == 1
         bot.fail.assert_called_once()
         bot.close.assert_called_once()
 
-    def test_mobile_quit_error_after_success_is_not_a_failure(self, fake_appium, monkeypatch):
+    def test_quit_error_after_success_is_not_a_failure(self, fake_appium, monkeypatch):
         # driver.quit() raising after a successful run must NOT be turned into a
         # task failure — the setup except is scoped to Remote() only.
         from qirabot.cli import main
@@ -190,7 +337,7 @@ class TestSetupFailureReporting:
         driver.quit.side_effect = RuntimeError("quit boom")
         fake_appium.return_value = driver
 
-        _invoke(["mobile", "do something"])
+        _invoke(["android", "do something", "--engine", "appium"])
 
         bot.fail.assert_not_called()
         bot.close.assert_called_once()
@@ -246,7 +393,7 @@ class TestMakeBotErrors:
 
         monkeypatch.setattr(qirabot, "Qirabot", boom)
 
-        result = _invoke(["browse", "do something"])
+        result = _invoke(["browser", "do something"])
 
         assert result.exit_code == 1
         assert "Could not connect to https://x" in result.output
@@ -256,7 +403,7 @@ class TestMakeBotErrors:
 
         from qirabot.cli.main import cli
 
-        result = CliRunner().invoke(cli, ["browse", "do something"])
+        result = CliRunner().invoke(cli, ["browser", "do something"])
 
         assert result.exit_code == 1
         assert "Set QIRA_API_KEY or pass --api-key" in result.output
@@ -301,7 +448,7 @@ class TestRunOptionWiring:
     def test_name_defaults_to_instruction(self, monkeypatch):
         captured = self._capture_make_bot(monkeypatch)
 
-        result = _invoke(["browse", "Find the cheapest flight to Tokyo"])
+        result = _invoke(["browser", "Find the cheapest flight to Tokyo"])
 
         assert result.exit_code == 0, result.output
         assert captured["task_name"] == "Find the cheapest flight to Tokyo"
@@ -311,7 +458,7 @@ class TestRunOptionWiring:
     def test_explicit_name_and_no_report(self, monkeypatch):
         captured = self._capture_make_bot(monkeypatch)
 
-        result = _invoke(["browse", "do it", "--name", "smoke-test", "--no-report", "--record"])
+        result = _invoke(["browser", "do it", "--name", "smoke-test", "--no-report", "--record"])
 
         assert result.exit_code == 0, result.output
         assert captured["task_name"] == "smoke-test"
@@ -319,18 +466,31 @@ class TestRunOptionWiring:
         assert captured["record"] is True
 
 
-class TestMobileCrossPlatformValidation:
-    def test_ios_with_android_flags_errors(self, fake_appium, stub_bot):
-        result = _invoke(["mobile", "do it", "--platform", "ios", "--app-package", "com.x"])
+class TestMobileSplit:
+    """`mobile` was split into `android`/`ios`; cross-platform flags are now
+    rejected by click itself as unknown options instead of hand-rolled guards."""
+
+    def test_mobile_command_is_gone(self):
+        from qirabot.cli.main import cli
+
+        ctx = click.Context(cli)
+        commands = cli.list_commands(ctx)
+        assert "android" in commands
+        assert "ios" in commands
+        assert "mobile" not in commands
+        assert cli.get_command(ctx, "mobile") is None
+
+    def test_ios_rejects_android_flags(self, fake_appium, stub_bot):
+        result = _invoke(["ios", "do it", "--app-package", "com.x"])
 
         assert result.exit_code != 0
-        assert "Android-only" in result.output
+        assert "--app-package" in result.output
 
-    def test_android_with_bundle_id_errors(self, fake_appium, stub_bot):
-        result = _invoke(["mobile", "do it", "--platform", "android", "--bundle-id", "com.x"])
+    def test_android_rejects_bundle_id(self, fake_appium, stub_bot):
+        result = _invoke(["android", "do it", "--bundle-id", "com.x"])
 
         assert result.exit_code != 0
-        assert "iOS-only" in result.output
+        assert "--bundle-id" in result.output
 
 
 class TestScreenshotDownload:
@@ -385,16 +545,18 @@ class TestScreenshotDownload:
                 assert f.read().startswith(b"\x89PNG")
 
 
-class TestBrowserAlias:
-    def test_browser_resolves_to_browse_and_stays_out_of_help(self):
+class TestBrowserCommand:
+    def test_browser_is_canonical_and_browse_is_gone(self):
         from qirabot.cli.main import cli
 
         ctx = click.Context(cli)
-        assert cli.get_command(ctx, "browser") is cli.get_command(ctx, "browse")
-        # The alias must not show up as a separate command in --help.
-        assert "browser" not in cli.list_commands(ctx)
+        commands = cli.list_commands(ctx)
+        assert "browser" in commands
+        # The old verb name must no longer resolve after the rename.
+        assert "browse" not in commands
+        assert cli.get_command(ctx, "browse") is None
 
-    def test_browser_alias_runs(self, stub_bot):
+    def test_browser_runs(self, stub_bot):
         result = _invoke(["browser", "do something"])
 
         assert result.exit_code == 0, result.output
@@ -418,3 +580,101 @@ class TestDesktopKeyCheckBeforeAppLaunch:
         assert result.exit_code == 1
         assert "Set QIRA_API_KEY or pass --api-key" in result.output
         launch.assert_not_called()
+
+
+class TestDoctor:
+    """doctor is pure wiring around probes — stub the probes, assert the verdict."""
+
+    def _run(
+        self, monkeypatch, *, has=(), chromium=None, key=True, server_ok=True, display=True
+    ):
+        """Invoke doctor with stubbed probes; returns the click result."""
+        from qirabot.cli import main
+
+        monkeypatch.setattr(main, "_has_module", lambda m: m.split(".")[0] in has)
+        monkeypatch.setattr(main, "_chromium_status", lambda: chromium)
+        monkeypatch.setattr(main, "_display_available", lambda: display)
+        transport = MagicMock(name="transport")
+        if not server_ok:
+            transport.request.side_effect = RuntimeError("401 bad key")
+        monkeypatch.setattr(main, "_transport", lambda ctx: transport)
+
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        args = (["--api-key", "qk_test"] if key else []) + ["doctor"]
+        return CliRunner().invoke(main.cli, args)
+
+    @staticmethod
+    def _flat(result):
+        """Rich wraps long lines at the console width; normalize whitespace so
+        substring assertions don't break on a wrap point."""
+        return " ".join(result.output.split())
+
+    def test_ready_when_key_and_one_backend(self, monkeypatch):
+        result = self._run(monkeypatch, has={"playwright"}, chromium="ready")
+
+        assert result.exit_code == 0, result.output
+        assert "Ready" in self._flat(result)
+
+    def test_nothing_installed_exits_1_with_hints(self, monkeypatch):
+        result = self._run(monkeypatch, key=False)
+
+        out = self._flat(result)
+        assert result.exit_code == 1
+        assert "API key not set" in out
+        assert 'python -m pip install "qirabot[browser]" && playwright install chromium' in out
+        # Selenium is not an extra — the hint must be a plain pip install.
+        assert "python -m pip install selenium" in out
+        assert "qirabot[selenium]" not in out
+        assert "Not ready" in out
+
+    def test_playwright_without_chromium_is_not_ready(self, monkeypatch):
+        """An importable playwright with no browser download can't run bot.open();
+        doctor must point at the missing `playwright install chromium` step."""
+        result = self._run(monkeypatch, has={"playwright"}, chromium="no-browser")
+
+        out = self._flat(result)
+        assert result.exit_code == 1
+        assert "playwright install chromium" in out
+
+    def test_no_display_notes_headless_fallback_but_stays_ready(self, monkeypatch):
+        """A display-less Linux box is still a working browser environment
+        (open() falls back to headless) — doctor informs, not fails."""
+        result = self._run(
+            monkeypatch, has={"playwright"}, chromium="ready", display=False
+        )
+
+        out = self._flat(result)
+        assert result.exit_code == 0, result.output
+        assert "fall back to headless" in out
+
+    def test_display_available_prints_no_headless_note(self, monkeypatch):
+        result = self._run(monkeypatch, has={"playwright"}, chromium="ready")
+
+        assert "fall back to headless" not in self._flat(result)
+
+    def test_chromium_missing_system_libs_is_not_ready(self, monkeypatch):
+        """A downloaded Chromium whose shared libraries don't resolve (bare Linux
+        server) fails at launch; the fix is install-deps, not a re-download."""
+        result = self._run(monkeypatch, has={"playwright"}, chromium="no-libs")
+
+        out = self._flat(result)
+        assert result.exit_code == 1
+        assert "sudo playwright install-deps chromium" in out
+        assert "system libraries are missing" in out
+
+    def test_server_rejection_is_a_problem(self, monkeypatch):
+        result = self._run(
+            monkeypatch, has={"pyautogui"}, chromium=None, server_ok=False
+        )
+
+        out = self._flat(result)
+        assert result.exit_code == 1
+        assert "401 bad key" in out
+
+    def test_other_backend_alone_is_ready(self, monkeypatch):
+        """The default path (browser) is a recommendation, not a requirement —
+        an Airtest-only environment is a valid, ready setup."""
+        result = self._run(monkeypatch, has={"airtest"}, chromium=None)
+
+        assert result.exit_code == 0, result.output
+        assert "Ready" in self._flat(result)

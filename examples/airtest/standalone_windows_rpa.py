@@ -5,7 +5,7 @@ Windows apps (a surface Appium doesn't cover); `bot.ai()` runs the full decision
 loop. Opens the app, lets the AI work, then closes it.
 
 Install:
-    pip install "qirabot[airtest]"
+    python -m pip install "qirabot[airtest]"
 
 Run (Windows only):
     set QIRA_API_KEY=qk_...

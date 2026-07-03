@@ -12,7 +12,7 @@ augmenting a test suite. For the "bolt AI onto my existing tests" style, see the
 ## Install
 
 ```bash
-pip install "qirabot[browser]"
+python -m pip install "qirabot[browser]"
 playwright install chromium
 export QIRA_API_KEY="qk_..."
 ```

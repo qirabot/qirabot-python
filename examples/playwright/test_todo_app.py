@@ -1,7 +1,7 @@
 """Bolt-on AI to Playwright: test a Todo app.
 
 Install:
-    pip install qirabot pytest-playwright
+    python -m pip install qirabot pytest-playwright
     playwright install chromium
 
 Run:

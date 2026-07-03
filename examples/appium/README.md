@@ -7,7 +7,7 @@ AI is especially useful on mobile — element IDs change across Android versions
 ## Install
 
 ```bash
-pip install qirabot Appium-Python-Client pytest
+python -m pip install qirabot Appium-Python-Client pytest
 ```
 
 ## Start Appium server

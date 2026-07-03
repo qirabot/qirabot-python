@@ -5,7 +5,7 @@ Use Qirabot as a bolt-on AI layer on top of your existing Selenium tests.
 ## Install
 
 ```bash
-pip install qirabot selenium pytest
+python -m pip install qirabot selenium pytest
 ```
 
 Make sure ChromeDriver is installed and in your PATH.
