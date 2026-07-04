@@ -15,7 +15,7 @@ import time
 import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 
 from qirabot._optional import require
 from qirabot._transport import Transport
@@ -172,13 +172,33 @@ class ExtractResult(str):
         )
 
 
+# How a bot.ai() run ended. "max_steps" matches the server's task-level
+# max_steps event name; the server itself records the command as plain
+# "failed", so this is the SDK's finer-grained local view.
+RunStatus = Literal["completed", "goal_failed", "max_steps", "error"]
+
+
 @dataclass
 class RunResult:
-    """Result of bot.ai() multi-step operation."""
+    """Result of bot.ai() multi-step operation.
+
+    ``success`` is the pass/fail verdict (True only when the model declared the
+    goal achieved); ``status`` says *how* the run ended:
+
+    - ``"completed"``: model declared done and the goal was achieved
+    - ``"goal_failed"``: model concluded the goal is unreachable (login wall,
+      captcha, frozen app)
+    - ``"max_steps"``: step budget ran out before the model finished — a
+      truncation, not a capability verdict; consider raising ``max_steps``
+    - ``"error"``: the server reported a terminal error
+
+    ``success`` is True iff ``status == "completed"``.
+    """
 
     success: bool
     output: str = ""
     steps: list[StepResult] = field(default_factory=list)
+    status: RunStatus = "completed"
 
 
 class Qirabot:
@@ -266,8 +286,9 @@ class Qirabot:
         # section ai() runs are grouped under (standalone actions = "setup").
         self._log: list[dict[str, Any]] = []
         self._current_section = "setup"
-        # ai() instruction -> success, for per-section PASS/FAIL in the report.
-        self._section_outcomes: dict[str, bool] = {}
+        # ai() instruction -> RunStatus, for the per-section badge in the
+        # report (completed / goal_failed / max_steps / error).
+        self._section_outcomes: dict[str, str] = {}
         # Session-wide totals for the report header. Token/timing data rides in
         # each ai() step result, not in _log, so we accumulate it here as steps
         # run and hand the totals to the report at render time.
@@ -873,10 +894,12 @@ class Qirabot:
                 model_alias=model_alias,
                 language=language,
             )
-            self._section_outcomes[self._current_section] = result.success
+            self._section_outcomes[self._current_section] = result.status
             return result
         except Exception:
-            self._section_outcomes[self._current_section] = False
+            # Any exception on the way out — ActionError, timeout, adapter
+            # failure — is an "error" ending, distinct from goal_failed.
+            self._section_outcomes[self._current_section] = "error"
             raise
         finally:
             self._current_section = prev_section
@@ -965,7 +988,9 @@ class Qirabot:
                         finished=True,
                         success=False,
                     )
-                    return RunResult(success=False, output=error_msg, steps=steps)
+                    return RunResult(
+                        success=False, output=error_msg, steps=steps, status="error"
+                    )
                 raise ActionError(error_msg)
 
             action_type = result.get("actionType")
@@ -1034,6 +1059,7 @@ class Qirabot:
                     success=goal_ok,
                     output=output,
                     steps=steps,
+                    status="completed" if goal_ok else "goal_failed",
                 )
 
             if action_type and action_type != "done":
@@ -1057,9 +1083,10 @@ class Qirabot:
 
             last_was_save_note = action_type == "save_note"
 
-        logger.error("failed: max steps (%d) reached", max_steps)
-        # Record the terminal failure so the report shows why the task ended,
-        # mirroring the server-error branch above. Reuses the last screenshot.
+        # A truncation, not an error: the budget ran out before the model
+        # finished. warning-level, and the recorded step is marked warn so the
+        # report tints it amber instead of failure red.
+        logger.warning("stopped: step budget exhausted (%d/%d)", max_steps, max_steps)
         self._record_step(
             screenshot_bytes,
             "ai",
@@ -1067,8 +1094,12 @@ class Qirabot:
             output="max steps reached",
             finished=True,
             success=False,
+            warn=True,
         )
-        return RunResult(success=False, output="max steps reached", steps=steps)
+        # Output string is load-bearing: callers may match "max steps reached".
+        return RunResult(
+            success=False, output="max steps reached", steps=steps, status="max_steps"
+        )
 
     def screenshot(self, target: Any) -> Path | None:
         """Take a screenshot and save it to ``report_dir/screenshots/``.
@@ -1329,6 +1360,7 @@ class Qirabot:
         output: str = "",
         finished: bool = False,
         success: bool = True,
+        warn: bool = False,
         decision: str = "",
         coord_scale: float = 1.0,
     ) -> dict[str, Any] | None:
@@ -1375,6 +1407,11 @@ class Qirabot:
             "screenshot": f"screenshots/{frame.name}" if frame else "",
             "thumb": thumb,
         }
+        # warn marks a truncation (max steps), not a failure — the report
+        # renders it amber instead of red. Only set when true to keep the log
+        # lean and older entries unchanged.
+        if warn:
+            entry["warn"] = True
         self._log.append(entry)
         return entry
 

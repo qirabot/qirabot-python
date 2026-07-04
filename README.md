@@ -339,7 +339,8 @@ Notes on this example:
   see [Reports](#reports)). Aim it at `bot.report_dir`, name it `recording.mp4`,
   and the report picks it up.
 - **`result.output`** is the model's final answer; `result.success` is the
-  pass/fail verdict.
+  pass/fail verdict, and `result.status` says how the run ended (see
+  [Error Handling](#error-handling)).
 
 Trade-offs and capability notes (e.g. `navigate` unsupported, `go_back` Android-only)
 are in [examples/airtest/](examples/airtest/). You can also pass `G`, the
@@ -611,13 +612,19 @@ Output layout per run:
 
 ```
 qira_runs/2026-06-07/192335-3f9ab2c1/
-  report.html          # self-contained: embedded thumbnails + PASS/FAIL per ai() task
+  report.html          # self-contained: embedded thumbnails + outcome badge per ai() task
   screenshots/         # full-resolution frames (click a thumbnail to open)
     001_click.jpg
     002_type_text.jpg
     ...
   recording.mp4        # full-screen recording — embedded in the report if present
 ```
+
+Each `ai()` task gets an outcome badge matching `result.status` (see
+[Error Handling](#error-handling)): green `PASS`, red `FAIL` / `ERROR`, or amber
+`MAX STEPS` for step-budget truncations. The header summary is green when
+everything passed, amber when the only misses are truncations, red when
+anything truly failed.
 
 `screenshot_annotate=True` (default) draws a red crosshair at the resolved
 click/type coordinates.
@@ -799,6 +806,28 @@ except QirabotError as e:
 finally:
     bot.close()
 ```
+
+### How an ai() run ended: `result.status`
+
+`result.success` is the two-state pass/fail verdict, but a failed run can mean
+very different things. `result.status` says which one you got:
+
+| status | meaning | `success` |
+|---|---|---|
+| `"completed"` | model declared the goal achieved | `True` |
+| `"goal_failed"` | model concluded the goal is unreachable (login wall, captcha) | `False` |
+| `"max_steps"` | step budget ran out before the model finished — a truncation, not a capability verdict | `False` |
+| `"error"` | the server reported a terminal error | `False` |
+
+```python
+result = bot.ai(page, "Find the cheapest flight and hold it")
+if result.status == "max_steps":
+    # not a real failure — the budget was too small; retry with headroom
+    result = bot.ai(page, "Find the cheapest flight and hold it", max_steps=50)
+```
+
+Runs that end by raising (e.g. `ActionError`) never produce a `RunResult`; in
+the report their section is badged `ERROR`.
 
 ## Task Lifecycle
 

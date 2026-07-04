@@ -14,7 +14,7 @@ from qirabot.client import (
     VerifyResult,
     _render_step_images,
 )
-from qirabot.exceptions import AuthenticationError
+from qirabot.exceptions import ActionError, AuthenticationError
 
 
 class _SettleFakeAdapter(DeviceAdapter):
@@ -178,6 +178,7 @@ class TestAiLoopFinish:
         result = bot.ai(object(), "do thing", max_steps=3)
         assert result.success is True
         assert result.output == "all good"
+        assert result.status == "completed"
         bot.close()
 
     def test_done_success_false_yields_failure(self):
@@ -189,6 +190,7 @@ class TestAiLoopFinish:
         result = bot.ai(object(), "do thing", max_steps=3)
         assert result.success is False
         assert result.output == "blocked: login wall"
+        assert result.status == "goal_failed"
         bot.close()
 
     def test_done_missing_flag_defaults_success(self):
@@ -199,6 +201,67 @@ class TestAiLoopFinish:
         })
         result = bot.ai(object(), "do thing", max_steps=3)
         assert result.success is True
+        assert result.status == "completed"
+        bot.close()
+
+
+class TestAiLoopStatus:
+    """Each of ai()'s terminal paths reports a distinct RunResult.status, and
+    the section outcome recorded for the report carries the same value —
+    success stays a two-state bool (True only for "completed")."""
+
+    def _bot_returning(self, act_result):
+        bot = Qirabot(api_key="k", task_id="t")
+        bot._get_adapter = lambda target: _SettleFakeAdapter()
+        bot._record_step = lambda *a, **k: None
+        bot._execute_action = lambda *a, **k: None
+        bot._post_act_retrying = lambda **kw: act_result
+        return bot
+
+    def test_server_terminal_error_yields_error(self):
+        bot = self._bot_returning({
+            "success": False, "finished": True, "error": "session expired",
+        })
+        result = bot.ai(object(), "do thing", max_steps=3)
+        assert result.success is False
+        assert result.status == "error"
+        assert result.output == "session expired"
+        assert bot._section_outcomes["do thing"] == "error"
+        bot.close()
+
+    def test_max_steps_yields_max_steps(self):
+        # Never finishes: every step is a successful non-terminal action.
+        bot = self._bot_returning({
+            "success": True, "finished": False, "actionType": "wait", "params": {},
+        })
+        result = bot.ai(object(), "do thing", max_steps=2)
+        assert result.success is False
+        assert result.status == "max_steps"
+        assert result.output == "max steps reached"
+        assert len(result.steps) == 2
+        assert bot._section_outcomes["do thing"] == "max_steps"
+        bot.close()
+
+    def test_non_terminal_error_raises_and_records_error(self):
+        bot = self._bot_returning({
+            "success": False, "finished": False, "error": "element not found",
+        })
+        with pytest.raises(ActionError):
+            bot.ai(object(), "do thing", max_steps=3)
+        assert bot._section_outcomes["do thing"] == "error"
+        bot.close()
+
+    def test_max_steps_terminal_step_recorded_as_warn(self):
+        # The synthetic terminal record for a max-steps ending is marked
+        # warn=True so the report tints it amber, not failure red.
+        bot = self._bot_returning({
+            "success": True, "finished": False, "actionType": "wait", "params": {},
+        })
+        recorded = []
+        bot._record_step = lambda *a, **k: recorded.append(k) or None
+        bot.ai(object(), "do thing", max_steps=1)
+        assert recorded[-1].get("warn") is True
+        assert recorded[-1].get("output") == "max steps reached"
         bot.close()
 
 

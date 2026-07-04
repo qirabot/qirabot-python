@@ -15,6 +15,7 @@ from __future__ import annotations
 import html
 import json
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ h1 { font-size: 20px; margin: 0 0 4px; }
 .badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
 .pass { background: #d7f5dd; color: #06632b; }
 .fail { background: #fbdcdc; color: #8a1010; }
+.warn { background: #fdeec8; color: #7a5200; }
 .neutral { background: #e6e8eb; color: #444; }
 .notice { background: #fff4d6; color: #7a5200; padding: 10px 14px; border-radius: 8px;
           margin-bottom: 18px; font-size: 13px; }
@@ -44,6 +46,8 @@ section > h2 { font-size: 15px; margin: 0; padding: 12px 16px; background: #fafb
 .act { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
 .steps > div.fail-row { background: #fff5f5; }
 .steps > .act.fail-row { color: #8a1010; }
+.steps > div.warn-row { background: #fffaef; }
+.steps > .act.warn-row { color: #7a5200; }
 .detail { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
           color: #333; white-space: pre-wrap; word-break: break-word; }
 .detail .out { color: #555; }
@@ -89,6 +93,9 @@ video { max-width: 100%; border-radius: 8px; margin-bottom: 18px; }
   .steps > div { border-color: #262a30; }
   .steps > div.fail-row { background: #3a1d1d; }
   .steps > .act.fail-row { color: #f3a6a6; }
+  .warn { background: #3a2f12; color: #f0d493; }
+  .steps > div.warn-row { background: #332a14; }
+  .steps > .act.warn-row { color: #e8c877; }
   .stats { color: #9aa0a6; }
   .detail .decision { color: #9aa0a6; }
   .notice { background: #3a2f12; color: #f0d493; }
@@ -144,6 +151,30 @@ def _summarize_params(params: dict[str, Any]) -> str:
 
 def _badge(label: str, kind: str) -> str:
     return f'<span class="badge {kind}">{html.escape(label)}</span>'
+
+
+# RunStatus -> (badge label, css class). Unknown statuses fall back to FAIL —
+# a status we don't recognize should read as broken, never silently green.
+_STATUS_KINDS = {
+    "completed": ("PASS", "pass"),
+    "goal_failed": ("FAIL", "fail"),
+    "max_steps": ("MAX STEPS", "warn"),
+    "error": ("ERROR", "fail"),
+}
+
+
+def _normalize_status(value: bool | str) -> str:
+    """Map legacy bool outcomes onto the status vocabulary.
+
+    ``outcomes`` historically held ``dict[str, bool]``; external callers of
+    :func:`write_html` may still pass bools, which carried no more meaning
+    than pass/fail.
+    """
+    if value is True:
+        return "completed"
+    if value is False:
+        return "goal_failed"
+    return str(value)
 
 
 def _fmt_tokens(n: int) -> str:
@@ -264,7 +295,7 @@ def write_html(
     *,
     title: str = "",
     task_id: str = "",
-    outcomes: dict[str, bool] | None = None,
+    outcomes: Mapping[str, bool | str] | None = None,
     recording: str = "",
     record_error: str = "",
     stats: dict[str, int] | None = None,
@@ -288,7 +319,8 @@ def write_html(
 
     def section_kind(sec: str) -> tuple[str, str]:
         if sec in outcomes:
-            return ("PASS", "pass") if outcomes[sec] else ("FAIL", "fail")
+            status = _normalize_status(outcomes[sec])
+            return _STATUS_KINDS.get(status, ("FAIL", "fail"))
         return (f"{len(grouped[sec])} steps", "neutral")
 
     parts: list[str] = []
@@ -302,13 +334,25 @@ def write_html(
     parts.append(f"<div class='meta'>{meta}</div>")
     parts.append(_render_stats(stats, model))
 
-    # Summary badges
+    # Summary badges. max_steps counts toward the total but not toward passed:
+    # a truncated run isn't a pass, but as long as nothing truly failed the
+    # header is amber (raise the budget) rather than red (something broke).
     parts.append("<div class='summary'>")
-    passed = sum(1 for s in sections if outcomes.get(s) is True)
-    total_judged = sum(1 for s in sections if s in outcomes)
+    statuses = [_normalize_status(outcomes[s]) for s in sections if s in outcomes]
+    passed = sum(1 for st in statuses if st == "completed")
+    truncated = sum(1 for st in statuses if st == "max_steps")
+    total_judged = len(statuses)
     if total_judged:
-        kind = "pass" if passed == total_judged else "fail"
-        parts.append(_badge(f"{passed}/{total_judged} passed", kind))
+        if passed == total_judged:
+            kind = "pass"
+        elif passed + truncated == total_judged:
+            kind = "warn"
+        else:
+            kind = "fail"
+        label = f"{passed}/{total_judged} passed"
+        if truncated:
+            label += f" · {truncated} truncated"
+        parts.append(_badge(label, kind))
     for sec in sections:
         label, kind = section_kind(sec)
         parts.append(_badge(f"{sec}: {label}", kind))
@@ -344,11 +388,14 @@ def write_html(
             output = e.get("output") or ""
             if output:
                 detail += f"<br><span class='out'>{html.escape(output)}</span>"
-            # A step explicitly recorded as failed gets a ✗ and a tinted row;
-            # otherwise the terminal step gets the completion ✓.
-            failed = e.get("success") is False
-            row_cls = " fail-row" if failed else ""
-            mark = " ✗" if failed else (" ✓" if e.get("finished") else "")
+            # A step explicitly recorded as failed gets a ✗ and a red row —
+            # unless it's marked warn (max-steps truncation), which gets ⚠ and
+            # amber to match its section badge. The terminal step otherwise
+            # gets the completion ✓.
+            warned = bool(e.get("warn"))
+            failed = e.get("success") is False and not warned
+            row_cls = " fail-row" if failed else (" warn-row" if warned else "")
+            mark = " ✗" if failed else (" ⚠" if warned else (" ✓" if e.get("finished") else ""))
             action = (e.get("action_type") or "") + mark
             shot = ""
             thumb = e.get("thumb") or ""
@@ -364,7 +411,7 @@ def write_html(
                 img = f"<img src='{thumb}' loading='lazy'>"
                 href = html.escape(full or "#")
                 shot = f"<a href='{href}' onclick='return openLb({idx})'>{img}</a>"
-            num_div = f"<div class='fail-row'>{i}</div>" if failed else f"<div>{i}</div>"
+            num_div = f"<div class='{row_cls.strip()}'>{i}</div>" if row_cls else f"<div>{i}</div>"
             parts.append(
                 num_div
                 + f"<div class='act{row_cls}'>{html.escape(action)}</div>"

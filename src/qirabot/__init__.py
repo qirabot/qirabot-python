@@ -9,6 +9,7 @@ from qirabot.client import (
     ExtractResult,
     Qirabot,
     RunResult,
+    RunStatus,
     StepResult,
     VerifyResult,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "QirabotTimeoutError",
     "RateLimitError",
     "RunResult",
+    "RunStatus",
     "ScreenRecorder",
     "StepResult",
     "VerifyResult",
