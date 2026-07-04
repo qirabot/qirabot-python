@@ -46,6 +46,8 @@ def _make_bot(
     report_dir: str = "",
     annotate: bool = True,
     record: bool = False,
+    record_mjpeg_url: str = "",
+    record_device: bool = False,
     task_name: str = "",
 ) -> Any:
     from qirabot import Qirabot
@@ -65,6 +67,8 @@ def _make_bot(
             report_dir=report_dir,
             screenshot_annotate=annotate,
             record=record,
+            record_mjpeg_url=record_mjpeg_url or None,
+            record_device=record_device,
         )
     except Exception as e:
         # No special-casing needed: Transport already maps connection failures to
@@ -198,8 +202,9 @@ def _task_options(f: _FC) -> _FC:
 
 
 def _debug_options(record: bool = True) -> Callable[[_FC], _FC]:
-    """Debug options shared by browser/android/ios/desktop; android/ios have no
-    screen recording, so --record is opt-out there."""
+    """Debug options shared by browser/android/ios/desktop. This --record is
+    the host-screen (ffmpeg) recorder, so it's opted out for android/ios —
+    they define their own device-screen --record instead."""
 
     def wrap(f: _FC) -> _FC:
         if record:
@@ -613,8 +618,13 @@ def _run_appium(
     report: bool,
     report_dir: str,
     annotate: bool,
+    record: bool = False,
 ) -> None:
-    """Shared android/ios body: build the bot, open an Appium session, run."""
+    """Shared android/ios body: build the bot, open an Appium session, run.
+
+    ``record`` uses Appium's own screen-recording API (record_device), so it
+    captures the device screen on both android and ios.
+    """
     appium_webdriver = require("appium.webdriver", "appium")
 
     # Build the bot first: it validates the API key and reaches the server, and
@@ -623,7 +633,8 @@ def _run_appium(
     # never runs if _make_bot exits before the try is entered).
     bot = _make_bot(
         ctx, model=model, language=language, report=report, report_dir=report_dir,
-        annotate=annotate, task_name=name or _default_task_name(instruction),
+        annotate=annotate, record=record, record_device=record,
+        task_name=name or _default_task_name(instruction),
     )
     try:
         try:
@@ -637,6 +648,10 @@ def _run_appium(
         try:
             _run_local(bot, driver, instruction, max_steps, base_url=ctx.obj["base_url"])
         finally:
+            # The Appium recording lives in the session: flush it to disk
+            # before quit() destroys it (bot.close() would be too late). A
+            # no-op when nothing is recording.
+            bot.stop_recording()
             driver.quit()
     finally:
         bot.close()
@@ -653,17 +668,24 @@ def _run_airtest(
     report: bool,
     report_dir: str,
     annotate: bool,
+    record: bool = False,
+    record_mjpeg_url: str = "",
+    record_device: bool = False,
 ) -> None:
     """Shared android/ios airtest body: build the bot, connect the device, run.
 
     ``connect`` performs the airtest connect + optional app launch and returns
     the bind target. Like _run_appium, the bot is built first (it validates the
     API key and may sys.exit()); unlike Appium there is no remote session to
-    quit, so the only teardown is bot.close().
+    quit, so the only teardown is bot.close(). Recording is device-side:
+    ``record_mjpeg_url`` for ios (WDA's MJPEG stream), ``record_device`` for
+    android (adb screenrecord, resolved from the airtest device).
     """
     bot = _make_bot(
         ctx, model=model, language=language, report=report, report_dir=report_dir,
-        annotate=annotate, task_name=name or _default_task_name(instruction),
+        annotate=annotate, record=record, record_mjpeg_url=record_mjpeg_url,
+        record_device=record_device,
+        task_name=name or _default_task_name(instruction),
     )
     try:
         try:
@@ -687,9 +709,12 @@ def _run_airtest(
 # Android — app launch
 @click.option("--app-package", default="", help="App package to launch (e.g. com.android.settings)")
 @click.option("--app-activity", default="", help="App activity to launch")
+# Android — device-screen recording: adb screenrecord (direct engine) or
+# Appium's recording API — both capture the phone screen, not the host's.
+@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (direct engine: adb screenrecord, ffmpeg merges runs over 3 min; appium engine: Appium's recording API)")
 @_debug_options(record=False)
 @click.pass_context
-def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, device: str, appium_url: str, app_package: str, app_activity: str, report: bool, report_dir: str, annotate: bool) -> None:
+def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, report: bool, report_dir: str, annotate: bool) -> None:
     """Run an AI task on an Android device (direct over adb; --engine appium for Appium).
 
     \b
@@ -702,6 +727,9 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
     Appium engine — needs a running server (npm i -g appium && appium driver
     install uiautomator2 && appium), reached via --appium-url:
       qirabot android "..." --engine appium -d emulator-5554 --app-package com.android.settings
+    \b
+    Recording — --record saves the device screen (works on both engines):
+      qirabot android "..." --record
     """
     if engine == "appium":
         require("appium.webdriver", "appium")
@@ -717,7 +745,7 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
 
         _run_appium(
             ctx, instruction, name, model, language, max_steps, appium_url, options,
-            report, report_dir, annotate,
+            report, report_dir, annotate, record=record,
         )
         return
 
@@ -741,7 +769,75 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
     _run_airtest(
         ctx, instruction, name, model, language, max_steps, connect,
         report, report_dir, annotate,
+        record=record, record_device=record,
     )
+
+
+def _check_wda_ready(wda_url: str) -> None:
+    """Fail fast when WebDriverAgent isn't reachable, before airtest connects.
+
+    airtest's iOS backend treats a localhost --wda-url as a local USB device
+    and, when WDA isn't up, auto-launches the xctest runner via go-ios/
+    tidevice — on iOS 17+ that dead-ends only after tidevice downloads
+    developer disk images. Probing first turns that into an immediate,
+    actionable error. Local devices are also probed over usbmux, because
+    airtest talks to them that way and works without iproxy.
+    """
+    from urllib.parse import urlsplit
+
+    import wda  # facebook-wda, an airtest dependency
+
+    wda.DEBUG = False
+    url = wda_url if wda_url.startswith("http") else f"http://{wda_url}"
+    if wda.Client(url).is_ready():
+        return
+    if urlsplit(url).hostname in ("localhost", "127.0.0.1"):
+        try:
+            usb = [d for d in wda.list_devices() if d.connection_type == "USB"]
+        except Exception:
+            usb = []
+        if len(usb) == 1 and wda.BaseClient(
+            f"http+usbmux://{usb[0].serial}:8100"
+        ).is_ready():
+            return
+    raise RuntimeError(
+        f"WDA is not running (nothing answered at {wda_url} or over USB); start "
+        "WebDriverAgent first (Xcode: run the WebDriverAgentRunner test scheme on "
+        "the device, or `tidevice3 runwda` / pymobiledevice3), then retry — or "
+        "use --engine appium to have Appium build and launch WDA"
+    )
+
+
+def _wda_mjpeg_url(wda_url: str) -> str:
+    """Default WDA MJPEG stream URL for ``wda_url``: same host, port 9100.
+
+    9100 is WDA's default mjpegServerPort; like 8100, a USB real device needs
+    its own forward (`iproxy 9100 9100`).
+    """
+    from urllib.parse import urlsplit
+
+    url = wda_url if wda_url.startswith("http") else f"http://{wda_url}"
+    host = urlsplit(url).hostname or "127.0.0.1"
+    return f"http://{host}:9100"
+
+
+def _check_mjpeg_ready(mjpeg_url: str) -> None:
+    """Fail fast when --record was asked for but the MJPEG stream isn't up.
+
+    Recording is the one thing that can't be salvaged after the fact — a
+    silent best-effort skip would only be discovered after a full (possibly
+    300-step) run. Probe before the task is even created and exit with the
+    fix instead.
+    """
+    from qirabot.recording import check_mjpeg_stream
+
+    err = check_mjpeg_stream(mjpeg_url)
+    if err:
+        raise click.ClickException(
+            f"{err}. WDA streams the device screen on port 9100 — USB real "
+            "device: run `iproxy 9100 9100` (alongside the usual 8100 forward) "
+            "and retry, or point --mjpeg-url at the stream."
+        )
 
 
 @cli.command()
@@ -749,13 +845,18 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
 @_task_options
 @click.option("--engine", default="airtest", type=click.Choice(["airtest", "appium"]), help="Automation backend: airtest drives WebDriverAgent directly at --wda-url (no Appium server); appium goes through an Appium server (simulators, auto WDA build)")
 @click.option("--wda-url", default="http://127.0.0.1:8100", help="WebDriverAgent URL — this is how the default engine picks the device (USB real device: run `iproxy 8100 8100` and keep the default; another device = its WDA address)")
-@click.option("--device", "-d", default="", help="Device name for the appium engine (e.g. \"iPhone 15\" simulator). The default engine selects the device via --wda-url instead.")
+@click.option("--device", "-d", default="", help="Simulator device type for the appium engine (a name from `xcrun simctl list devicetypes`, e.g. \"iPhone 15\") — simulators only, not a real device's name. Real devices: use the default engine, which selects the device via --wda-url.")
 @click.option("--appium-url", default="http://localhost:4723", help="Appium server URL (appium engine)")
 # iOS — app launch
 @click.option("--bundle-id", default="", help="App bundle id to launch (e.g. com.tencent.xin)")
+# iOS — device-screen recording: the default engine transcodes WDA's MJPEG
+# stream with ffmpeg; the appium engine uses Appium's recording API. Either
+# way this captures the phone screen, unlike the desktop --record.
+@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (default engine: WDA's MJPEG stream, requires ffmpeg, USB real device also needs `iproxy 9100 9100`; appium engine: Appium's recording API)")
+@click.option("--mjpeg-url", default="", help="WDA MJPEG stream URL for --record (default: --wda-url's host on port 9100; airtest engine only)")
 @_debug_options(record=False)
 @click.pass_context
-def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, wda_url: str, device: str, appium_url: str, bundle_id: str, report: bool, report_dir: str, annotate: bool) -> None:
+def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, report: bool, report_dir: str, annotate: bool) -> None:
     """Run an AI task on an iOS device (direct via WDA; --engine appium for Appium).
 
     \b
@@ -767,10 +868,17 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
     Appium engine — needs a running server (npm i -g appium && appium driver
     install xcuitest && appium); use for simulators or to auto build/sign WDA:
       qirabot ios "..." --engine appium -d "iPhone 15" --bundle-id com.apple.Preferences
+    \b
+    Recording — --record saves the device screen. Default engine: WDA's MJPEG
+    stream (port 9100; USB real device: also `iproxy 9100 9100`). Appium
+    engine: Appium's own recording API, no extra setup:
+      qirabot ios "..." --record
     """
     if engine == "appium":
         if _flag_given(ctx, "wda_url"):
             raise click.UsageError("--wda-url only applies to --engine airtest")
+        if _flag_given(ctx, "mjpeg_url"):
+            raise click.UsageError("--mjpeg-url only applies to --engine airtest (the appium engine records via Appium's own API)")
         require("appium.webdriver", "appium")
         from appium.options.ios import XCUITestOptions
 
@@ -782,7 +890,7 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
 
         _run_appium(
             ctx, instruction, name, model, language, max_steps, appium_url, options,
-            report, report_dir, annotate,
+            report, report_dir, annotate, record=record,
         )
         return
 
@@ -790,10 +898,20 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
         raise click.UsageError("--appium-url only applies to --engine appium")
     if _flag_given(ctx, "device"):
         raise click.UsageError("--device only applies to --engine appium; the airtest engine connects via --wda-url")
+    if _flag_given(ctx, "mjpeg_url") and not record:
+        raise click.UsageError("--mjpeg-url only applies with --record")
+    record_mjpeg_url = ""
+    if record:
+        record_mjpeg_url = mjpeg_url or _wda_mjpeg_url(wda_url)
+        _check_mjpeg_ready(record_mjpeg_url)
     _require_airtest()
     from airtest.core.api import connect_device
 
     def connect() -> Any:
+        # Refuse to hand a dead WDA to airtest: its connect would try to
+        # auto-launch the runner (go-ios, then tidevice + disk-image
+        # downloads) and still fail on iOS 17+.
+        _check_wda_ready(wda_url)
         try:
             target = connect_device(f"iOS:///{wda_url}")
         except Exception as e:
@@ -811,6 +929,7 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
     _run_airtest(
         ctx, instruction, name, model, language, max_steps, connect,
         report, report_dir, annotate,
+        record=record, record_mjpeg_url=record_mjpeg_url,
     )
 
 

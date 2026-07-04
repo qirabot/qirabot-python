@@ -43,15 +43,37 @@ Typical usage is via the SDK (``Qirabot(record=True)`` or
 
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
-from typing import IO
+import threading
+import time
+import urllib.request
+from typing import IO, Any, Protocol
 
 logger = logging.getLogger("qirabot")
+
+
+class Recorder(Protocol):
+    """Structural interface shared by every recorder here (host screen, MJPEG
+    stream, Appium session, adb screenrecord): best-effort ``start()``,
+    graceful ``stop()`` returning the saved path (or ``None``), and an
+    ``active`` liveness flag. The client holds one ``Recorder`` slot and never
+    cares which implementation fills it."""
+
+    output: str
+
+    @property
+    def active(self) -> bool: ...
+
+    def start(self) -> bool: ...
+
+    def stop(self, timeout: float = 10.0) -> str | None: ...
 
 # avfoundation screen index used when device probing fails (on this Mac
 # ``Capture screen 0`` is index 1).
@@ -320,20 +342,13 @@ class ScreenRecorder:
     def active(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
-    def start(self) -> bool:
-        """Start recording; return True on success.
+    def _build_cmd(self, ffmpeg: str) -> tuple[list[str], str] | None:
+        """Full ffmpeg command plus a human description for the start log line.
 
-        Best-effort: missing ffmpeg / unsupported platform only warn and return
-        False — they never raise.
+        Returns ``None`` (after warning) when recording isn't possible here —
+        subclasses override this to record a different source with the same
+        start/stop lifecycle.
         """
-        if self._proc is not None:
-            return self.active
-
-        ffmpeg = _find_ffmpeg()
-        if not ffmpeg:
-            logger.warning("recording skipped: ffmpeg not found (install it and ensure it's on PATH: https://ffmpeg.org/download.html)")
-            return False
-
         index = _detect_screen_index(ffmpeg) if sys.platform == "darwin" else _DEFAULT_SCREEN_INDEX
 
         # Resolve system-audio device (Windows only). True -> probe; str -> use
@@ -360,10 +375,7 @@ class ScreenRecorder:
         )
         if input_args is None:
             logger.warning("recording skipped: platform %r not supported", sys.platform)
-            return False
-
-        os.makedirs(os.path.dirname(os.path.abspath(self.output)), exist_ok=True)
-        log_path = os.path.join(os.path.dirname(self.output), "recording.ffmpeg.log")
+            return None
 
         cmd = [
             ffmpeg, "-y",
@@ -375,6 +387,37 @@ class ScreenRecorder:
         if audio_device:
             cmd += ["-c:a", "aac", "-b:a", "160k"]
         cmd.append(self.output)
+
+        if self.region is not None:
+            scope = f"region {self.region}"
+        elif self.window:
+            scope = f"window {self.window!r}"
+        else:
+            scope = "full screen"
+        sound = f"audio={audio_device}" if audio_device else "no audio"
+        return cmd, f"{self.fps}fps, {scope}, {sound}"
+
+    def start(self) -> bool:
+        """Start recording; return True on success.
+
+        Best-effort: missing ffmpeg / unsupported platform only warn and return
+        False — they never raise.
+        """
+        if self._proc is not None:
+            return self.active
+
+        ffmpeg = _find_ffmpeg()
+        if not ffmpeg:
+            logger.warning("recording skipped: ffmpeg not found (install it and ensure it's on PATH: https://ffmpeg.org/download.html)")
+            return False
+
+        built = self._build_cmd(ffmpeg)
+        if built is None:
+            return False
+        cmd, describe = built
+
+        os.makedirs(os.path.dirname(os.path.abspath(self.output)), exist_ok=True)
+        log_path = os.path.join(os.path.dirname(self.output), "recording.ffmpeg.log")
 
         try:
             self._log = open(log_path, "wb")
@@ -390,14 +433,7 @@ class ScreenRecorder:
             self._proc = None
             return False
 
-        if self.region is not None:
-            scope = f"region {self.region}"
-        elif self.window:
-            scope = f"window {self.window!r}"
-        else:
-            scope = "full screen"
-        sound = f"audio={audio_device}" if audio_device else "no audio"
-        logger.info("recording started (%dfps, %s, %s) -> %s", self.fps, scope, sound, self.output)
+        logger.info("recording started (%s) -> %s", describe, self.output)
         return True
 
     def stop(self, timeout: float = 10.0) -> str | None:
@@ -450,6 +486,313 @@ class ScreenRecorder:
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
         self.stop()
+
+
+class MjpegStreamRecorder(ScreenRecorder):
+    """Record an HTTP MJPEG stream (e.g. WebDriverAgent's screen stream) to mp4.
+
+    The host-screen grabbers above can't see a phone's screen, but WDA serves
+    the iOS device screen as an MJPEG stream on its ``mjpegServerPort``
+    (default 9100; a USB real device needs ``iproxy 9100 9100`` alongside the
+    usual 8100 forward). ffmpeg transcodes that stream into the same
+    ``recording.mp4`` the report embeds. Use :func:`check_mjpeg_stream` first
+    when you want to fail fast instead of best-effort.
+    """
+
+    def __init__(self, output: str, url: str):
+        super().__init__(output)
+        self.url = url
+
+    def _build_cmd(self, ffmpeg: str) -> tuple[list[str], str] | None:
+        cmd = [
+            ffmpeg, "-y",
+            "-f", "mjpeg",
+            # The stream carries no timestamps; wallclock keeps the video at
+            # real-time speed regardless of the stream's (variable) frame rate.
+            "-use_wallclock_as_timestamps", "1",
+            "-i", self.url,
+            # Device frames can have odd dimensions; yuv420p needs even ones.
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            "-vcodec", "libx264",
+            "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p",
+            self.output,
+        ]
+        return cmd, f"mjpeg stream {self.url}"
+
+
+def check_mjpeg_stream(url: str, timeout: float = 5.0) -> str | None:
+    """Probe ``url`` for a live MJPEG stream; return an error string, or ``None`` when OK.
+
+    Reads the first body byte so both failure modes are caught up front —
+    connection refused (port not forwarded / WDA down) and connects-but-silent
+    (wrong service on the port) — instead of a long run quietly recording
+    nothing.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            if not resp.read(1):
+                return f"nothing streaming at {url} (connected, but no data)"
+    except Exception as e:
+        return f"cannot read MJPEG stream at {url} ({e})"
+    return None
+
+
+class AppiumScreenRecorder:
+    """Record a device's screen through Appium's session recording API.
+
+    Works for both Android (UiAutomator2 → screenrecord under the hood) and
+    iOS (XCUITest → simctl / stream transcode on the Appium server). The video
+    lives inside the session: ``stop()`` fetches it base64-encoded and writes
+    ``output``, so it MUST run before ``driver.quit()`` — afterwards the
+    recording is gone. Same best-effort contract as the other recorders.
+    """
+
+    def __init__(self, output: str, driver: Any):
+        self.output = output
+        self._driver = driver
+        self._active = False
+
+    @property
+    def active(self) -> bool:
+        return self._active
+
+    def start(self) -> bool:
+        # The drivers' default timeLimit (180s) silently truncates longer runs;
+        # 1800s is the documented maximum. XCUITest's default codec is mjpeg,
+        # which HTML5 <video> can't play, so iOS is pinned to h264. Older
+        # drivers that reject these options get a bare start (their defaults).
+        opts: dict[str, Any] = {"timeLimit": 1800, "forceRestart": True}
+        try:
+            caps = getattr(self._driver, "capabilities", None) or {}
+            if str(caps.get("platformName", "")).lower() == "ios":
+                opts["videoType"] = "libx264"
+        except Exception:
+            pass
+        try:
+            self._driver.start_recording_screen(**opts)
+        except Exception:
+            try:
+                self._driver.start_recording_screen()
+            except Exception as e:
+                logger.warning("appium screen recording failed to start: %s", e)
+                return False
+        self._active = True
+        logger.info("recording started (appium screen recording) -> %s", self.output)
+        return True
+
+    def stop(self, timeout: float = 10.0) -> str | None:
+        if not self._active:
+            return None
+        self._active = False
+        try:
+            payload = self._driver.stop_recording_screen()
+        except Exception as e:
+            logger.warning("appium screen recording failed to stop: %s", e)
+            return None
+        try:
+            data = base64.b64decode(payload or "")
+        except (binascii.Error, ValueError, TypeError) as e:
+            logger.warning("appium screen recording returned undecodable data: %s", e)
+            return None
+        if not data:
+            logger.warning("appium screen recording returned no data")
+            return None
+        os.makedirs(os.path.dirname(os.path.abspath(self.output)), exist_ok=True)
+        with open(self.output, "wb") as f:
+            f.write(data)
+        logger.info("recording saved: %s", self.output)
+        return self.output
+
+
+class AdbScreenRecorder:
+    """Record an Android device's screen via ``adb shell screenrecord``.
+
+    screenrecord runs on the device (nothing to install, no ffmpeg needed to
+    capture) but hard-caps each invocation at 3 minutes, so a background
+    thread chains segments back to back. ``stop()`` signals screenrecord with
+    SIGINT (so it finalizes the mp4's moov atom), pulls the segments, and
+    merges them with ffmpeg when there is more than one; without ffmpeg only
+    the first segment becomes ``recording.mp4`` (with a warning — runs under
+    3 minutes never need ffmpeg at all). No audio: screenrecord doesn't
+    capture it. Note stop() SIGINTs every screenrecord on the device.
+    """
+
+    _SEGMENT_SECONDS = 180  # screenrecord's per-invocation hard cap
+
+    def __init__(self, output: str, adb: list[str]):
+        # ``adb`` is the base command including device selection, e.g.
+        # ["/path/to/adb", "-s", "emulator-5554"].
+        self.output = output
+        self._adb = list(adb)
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._proc: subprocess.Popen[bytes] | None = None
+        self._remote: list[str] = []
+        self._started = False
+
+    @property
+    def active(self) -> bool:
+        return self._started and not self._stop.is_set()
+
+    def start(self) -> bool:
+        if self._started:
+            return self.active
+        self._started = True
+        if not _find_ffmpeg():
+            logger.warning(
+                "recording: ffmpeg not found — a run longer than 3 minutes will "
+                "only embed its first screenrecord segment"
+            )
+        self._thread = threading.Thread(
+            target=self._record_loop, name="qira-adb-record", daemon=True
+        )
+        self._thread.start()
+        logger.info("recording started (adb screenrecord) -> %s", self.output)
+        return True
+
+    def _record_loop(self) -> None:
+        i = 0
+        while not self._stop.is_set():
+            # Host pid in the name so two runs on one device don't clobber
+            # each other's segments.
+            remote = f"/sdcard/qira_rec_{os.getpid()}_{i:03d}.mp4"
+            began = time.monotonic()
+            try:
+                self._proc = subprocess.Popen(
+                    [
+                        *self._adb, "shell", "screenrecord",
+                        "--time-limit", str(self._SEGMENT_SECONDS), remote,
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except OSError as e:
+                logger.warning("adb screenrecord failed to start: %s", e)
+                return
+            self._remote.append(remote)
+            rc = self._proc.wait()
+            if self._stop.is_set():
+                return
+            if rc != 0 or time.monotonic() - began < 2:
+                # Died immediately (no screenrecord binary, permission, device
+                # gone) — bail instead of respawning it in a tight loop.
+                logger.warning("adb screenrecord exited early (rc=%s); recording stopped", rc)
+                return
+            i += 1
+
+    def stop(self, timeout: float = 10.0) -> str | None:
+        if not self._started or self._stop.is_set():
+            return None
+        self._stop.set()
+        try:
+            # SIGINT → screenrecord finalizes the moov atom and exits cleanly.
+            subprocess.run(
+                [*self._adb, "shell", "pkill", "-2", "screenrecord"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.wait(timeout=max(timeout, 5.0))
+            except subprocess.TimeoutExpired:
+                proc.terminate()
+        if self._thread is not None:
+            self._thread.join(timeout=max(timeout, 5.0))
+        return self._collect()
+
+    def _collect(self) -> str | None:
+        """Pull every device-side segment, then merge into ``output``."""
+        os.makedirs(os.path.dirname(os.path.abspath(self.output)), exist_ok=True)
+        parts: list[str] = []
+        for i, remote in enumerate(self._remote):
+            local = f"{self.output}.part{i:03d}.mp4"
+            try:
+                subprocess.run(
+                    [*self._adb, "pull", remote, local],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120,
+                )
+                subprocess.run(
+                    [*self._adb, "shell", "rm", "-f", remote],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
+                )
+            except (OSError, subprocess.SubprocessError):
+                logger.debug("failed to pull %s", remote, exc_info=True)
+            if os.path.exists(local) and os.path.getsize(local) > 0:
+                parts.append(local)
+            elif os.path.exists(local):
+                os.remove(local)
+        if not parts:
+            logger.warning("recording produced no valid file (adb screenrecord)")
+            return None
+        return self._merge(parts)
+
+    def _merge(self, parts: list[str]) -> str | None:
+        if len(parts) == 1:
+            os.replace(parts[0], self.output)
+            logger.info("recording saved: %s", self.output)
+            return self.output
+        ffmpeg = _find_ffmpeg()
+        if ffmpeg:
+            concat_list = self.output + ".concat.txt"
+            with open(concat_list, "w", encoding="utf-8") as f:
+                for p in parts:
+                    # concat-demuxer quoting: wrap in single quotes, escape any.
+                    f.write("file '%s'\n" % os.path.abspath(p).replace("'", "'\\''"))
+            try:
+                subprocess.run(
+                    [
+                        ffmpeg, "-y", "-f", "concat", "-safe", "0",
+                        "-i", concat_list, "-c", "copy", self.output,
+                    ],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=300, check=True,
+                )
+            except (OSError, subprocess.SubprocessError):
+                logger.warning("ffmpeg concat failed; embedding only the first segment")
+            else:
+                for p in parts:
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+                logger.info("recording saved: %s (%d segments)", self.output, len(parts))
+                return self.output
+            finally:
+                try:
+                    os.remove(concat_list)
+                except OSError:
+                    pass
+        else:
+            logger.warning(
+                "ffmpeg not found; embedding only the first of %d screenrecord "
+                "segments (the rest are kept next to it as .partNNN.mp4)", len(parts),
+            )
+        os.replace(parts[0], self.output)
+        return self.output
+
+
+def device_recorder(output: str, target: Any) -> Recorder | None:
+    """Best recorder for ``target``'s own (device) screen, or ``None``.
+
+    Appium drivers (android + ios) expose the session recording API; airtest
+    Android devices carry an adb client usable for screenrecord. Anything
+    else — browsers, pyautogui, airtest iOS — has no device stream here
+    (airtest iOS records via :class:`MjpegStreamRecorder` instead).
+    """
+    if hasattr(target, "start_recording_screen"):
+        return AppiumScreenRecorder(output, target)
+    adb_obj = getattr(target, "adb", None)
+    serial = getattr(adb_obj, "serialno", None) or getattr(target, "serialno", None)
+    if adb_obj is not None and serial:
+        adb_path = getattr(adb_obj, "adb_path", None) or shutil.which("adb")
+        if not adb_path:
+            logger.warning("recording skipped: no adb binary found to run screenrecord")
+            return None
+        return AdbScreenRecorder(output, [str(adb_path), "-s", str(serial)])
+    return None
 
 
 def record(

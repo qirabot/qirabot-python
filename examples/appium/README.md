@@ -29,7 +29,10 @@ npx appium
 ## Start device
 
 - Android: start an emulator or connect a device via USB
-- iOS: start a simulator or connect a device
+- iOS: start a simulator. The iOS example selects the device by `deviceName`
+  only, which works for simulators; a real iOS device additionally needs the
+  `appium:udid` capability (from `xcrun xctrace list devices`) plus a signed
+  WebDriverAgent — add `options.udid = "..."` if you adapt the example for one.
 
 ## Run
 
@@ -46,7 +49,7 @@ Environment variables:
 ```bash
 export APPIUM_URL=http://localhost:4723      # default
 export ANDROID_DEVICE=emulator-5554          # default
-export IOS_DEVICE="iPhone 16"                # default
+export IOS_DEVICE="iPhone 16"                # default (simulator device type name)
 ```
 
 ## How it works

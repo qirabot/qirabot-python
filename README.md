@@ -125,12 +125,14 @@ qirabot browser "Search for SpaceX and get the first sentence of the article" --
 # Android — direct over adb (needs qirabot[airtest]; no Appium server)
 qirabot android "Open settings and turn on airplane mode"
 
-# iOS — direct to WebDriverAgent (needs qirabot[airtest] + WDA running on :8100)
+# iOS — direct to WebDriverAgent (needs qirabot[airtest] + WDA running on :8100).
+# The device is picked by --wda-url, not by name; USB real device: `iproxy 8100 8100`
+# first (see "iOS: real device vs simulator" below)
 qirabot ios "Send hi to Alice on WeChat" --bundle-id com.tencent.xin
 
 # Either can go through an Appium server instead (needs qirabot[appium])
 qirabot android "..." --engine appium
-qirabot ios "..." --engine appium --device "iPhone 15"   # e.g. simulators
+qirabot ios "..." --engine appium --device "iPhone 15"   # simulators only — see below
 
 # Desktop via pyautogui (needs qirabot[desktop])
 qirabot desktop "Create a new note titled Groceries" --app Notes
@@ -175,10 +177,43 @@ only proceeds on success.
 
 **Shared run options** (`browser` / `android` / `ios` / `desktop`): `-n/--name` (defaults to
 the instruction text), `-m/--model`, `-l/--language`, `--max-steps`,
-`--report/--no-report`, `--report-dir`, `--annotate/--no-annotate`. `browser` and
-`desktop` additionally take `--record` (screen recording, needs ffmpeg). Runs also
-honor the same env vars as the SDK — `QIRA_REPORT_DIR`, `QIRA_SETTLE_SECONDS`,
-`QIRA_RECORD*`, etc. (see [Configuration](#configuration)).
+`--report/--no-report`, `--report-dir`, `--annotate/--no-annotate`. All four also
+take `--record`, saving `recording.mp4` into the run dir and embedding it in the
+report — but what gets recorded differs:
+
+- `browser` / `desktop` — the **host** screen via ffmpeg (needs ffmpeg on PATH).
+- `android` — the **device** screen: `adb screenrecord` on the default engine
+  (ffmpeg only needed to merge runs longer than 3 minutes), or Appium's
+  recording API with `--engine appium`.
+- `ios` — the **device** screen: WDA's MJPEG stream on the default engine
+  (needs ffmpeg; a USB real device also needs `iproxy 9100 9100` alongside the
+  usual 8100 forward — the CLI checks the stream before starting and tells you
+  if it isn't reachable), or Appium's recording API with `--engine appium`.
+  `--mjpeg-url` overrides the stream URL (default: the `--wda-url` host on
+  port 9100).
+
+Runs also honor the same env vars as the SDK — `QIRA_REPORT_DIR`,
+`QIRA_SETTLE_SECONDS`, `QIRA_RECORD*`, etc. (see [Configuration](#configuration)).
+
+**iOS: real device vs simulator.** The two engines target different things — pick
+by what you're driving:
+
+- **Real device → default (WDA direct) engine.** The device is selected by
+  `--wda-url`, not by a device name (`-d` is rejected here). Three steps:
+  1. Run WebDriverAgent on the phone and keep it running — in Xcode, run the
+     `WebDriverAgentRunner` scheme against the device with your own signing team
+     (or `xcodebuild ... -destination 'id=<udid>' -allowProvisioningUpdates test`).
+  2. Forward the port over USB: `iproxy 8100 8100` (from `libimobiledevice`).
+     Sanity check: `curl http://127.0.0.1:8100/status` returns JSON.
+  3. `qirabot ios "..." --bundle-id com.example.app` — the default `--wda-url`
+     (`http://127.0.0.1:8100`) now reaches the phone. For multiple devices, run
+     one `iproxy` per device on different local ports and select with `--wda-url`.
+- **Simulator → `--engine appium`.** Here `-d/--device` is a *simulator device
+  type* (a name from `xcrun simctl list devicetypes`, e.g. `iPhone 15`) — Appium
+  creates/boots a matching simulator. It is **not** a real device's name: the CLI
+  currently has no `--udid` option, so the appium engine cannot target real iOS
+  devices; passing a real device's name fails with
+  `Could not create simulator ... device type id '<your name>'`.
 
 ## Bolt-On to Any Framework
 
@@ -267,12 +302,12 @@ bot.close()
 #### Full Android example
 
 A real run usually drives a specific app, streams steps, and records the screen.
-This connects to an emulator/device over ADB, runs an AI task in Chinese, and
-records the **device** screen into `bot.report_dir` so the HTML report embeds it
-automatically. Here we use Airtest's `device().start_recording(...)` rather than
-`record=True`: the SDK's built-in recorder captures the *host* screen, which a
-headless device doesn't appear on (a visible emulator window would be captured
-by `record=True` like any other host window):
+This connects to an emulator/device over ADB, runs an AI task, and records the
+**device** screen into `bot.report_dir` so the HTML report embeds it
+automatically: `record=True, record_device=True` picks the device's own
+recorder (`adb screenrecord` here — see
+[Screen recording](#screen-recording)) instead of capturing the host screen a
+headless device doesn't appear on:
 
 ```python
 # -*- encoding=utf8 -*-
@@ -306,21 +341,20 @@ TASK = "Check that the UI controls at the top of the poker lobby work correctly"
 
 start_app(APP)
 
-# balanced_pro = stronger model; screenshot_annotate draws a crosshair at each tap.
-bot = Qirabot(model_alias="balanced_pro", screenshot_annotate=True).bind(G)
+# balanced_pro = stronger model; screenshot_annotate draws a crosshair at each
+# tap; record_device records the phone screen via adb screenrecord (recording
+# starts with the first action and stops in bot.close()).
+bot = Qirabot(
+    model_alias="balanced_pro", screenshot_annotate=True,
+    record=True, record_device=True,
+).bind(G)
 
-# Record into the per-run dir so the report embeds it
-# (qira_runs/<date>/<run>/recording.mp4).
-video = os.path.join(bot.report_dir, "recording.mp4")
-device().start_recording(output=video, max_time=1800)
 try:
     result = bot.ai(TASK, max_steps=25, on_step=on_step, language="en")
     print(f" Result: {result.output}")
     sleep(5.0)
 finally:
-    saved = device().stop_recording(output=video)
-    print(f" Recording saved: {saved}")
-    bot.close()                       # writes report.html with the video embedded
+    bot.close()                       # stops recording, writes report.html with the video embedded
 
 stop_app(APP)
 ```
@@ -334,10 +368,12 @@ Notes on this example:
   `max_steps`, `on_step`, `model_alias`, and `language`.
 - **`on_step`** fires after every action — use it for live logging or to push
   progress somewhere. `step.finished` marks the terminal step.
-- **Recording** here uses Airtest's native `device().start_recording(...)` to
-  capture the *device* screen (the SDK's `record=True` records the host screen —
-  see [Reports](#reports)). Aim it at `bot.report_dir`, name it `recording.mp4`,
-  and the report picks it up.
+- **Recording** uses `record=True, record_device=True`: the recorder is picked
+  from the device (`adb screenrecord` for airtest Android), runs on the phone,
+  and `bot.close()` pulls the video into `bot.report_dir` as `recording.mp4`
+  (see [Screen recording](#screen-recording)). Airtest's native
+  `device().start_recording(...)` aimed at the same path still works if you
+  prefer it.
 - **`result.output`** is the model's final answer; `result.success` is the
   pass/fail verdict, and `result.status` says how the run ended (see
   [Error Handling](#error-handling)).
@@ -617,7 +653,7 @@ qira_runs/2026-06-07/192335-3f9ab2c1/
     001_click.jpg
     002_type_text.jpg
     ...
-  recording.mp4        # full-screen recording — embedded in the report if present
+  recording.mp4        # screen recording (host or device) — embedded in the report if present
 ```
 
 Each `ai()` task gets an outcome badge matching `result.status` (see
@@ -658,6 +694,33 @@ Requires the `ffmpeg` binary on PATH (`brew install ffmpeg` /
 best-effort: a missing ffmpeg or denied permission only warns and never fails
 the task (check `recording.ffmpeg.log` in the run dir). Dropping your own
 `recording.mp4` into `report_dir` is still embedded just the same.
+
+**Device recording (android / ios).** The default recorder captures the *host*
+screen, which a phone doesn't appear on. Two switches record the device's own
+screen instead (both used by the CLI's `android`/`ios --record`):
+
+```python
+# Android (or any Appium driver): the recorder is picked from the action target.
+bot = Qirabot(record=True, record_device=True)   # or QIRA_RECORD_DEVICE=1
+bot.ai(dev, "open settings")   # airtest Android -> adb screenrecord
+bot.close()                    # pulls the video into report_dir/recording.mp4
+
+# iOS via WDA (no Appium): record WDA's MJPEG stream (port 9100; USB real
+# device: `iproxy 9100 9100`). Needs ffmpeg on the host.
+bot = Qirabot(record=True, record_mjpeg_url="http://127.0.0.1:9100")
+```
+
+- `record_device=True` defers the start until the first action, then resolves a
+  recorder from its target: an **Appium driver** (android *and* ios) uses
+  Appium's session recording API; an **airtest Android** device uses
+  `adb screenrecord` on the phone (segments beyond screenrecord's 3-minute cap
+  are merged with ffmpeg — without ffmpeg only the first segment is kept, with
+  a warning). Unsupported targets skip recording rather than silently capturing
+  the wrong (host) screen. If you quit an Appium driver yourself, call
+  `bot.stop_recording()` first — the video lives in the session.
+- `record_mjpeg_url=...` records any MJPEG-over-HTTP stream with ffmpeg —
+  in practice WDA's device-screen stream for iOS runs driven directly through
+  WDA, where there is no Appium session to record with.
 
 **Per-window capture + system audio (Windows).** On Windows you can record just
 the window under test and capture its sound:
@@ -745,6 +808,8 @@ Constructor options:
 | `record_window` | `QIRA_RECORD_WINDOW` | `False` | **Windows + airtest only.** Record just the window under test (auto-resolved from the first action) instead of the full screen; falls back to full screen otherwise |
 | `record_audio` | `QIRA_RECORD_AUDIO` | `False` | **Windows only.** Capture system audio into the recording. `True` auto-detects a loopback device, or pass a DirectShow device name |
 | `record_audio_offset` | `QIRA_AUDIO_OFFSET` | `None` | A/V sync offset in seconds (usually negative, e.g. `-0.4`) applied to the audio input |
+| `record_device` | `QIRA_RECORD_DEVICE` | `False` | Record the automated **device's** screen instead of the host's: Appium driver → session recording API, airtest Android → `adb screenrecord` (resolved from the first action's target) |
+| `record_mjpeg_url` | `QIRA_RECORD_MJPEG_URL` | `None` | Record this MJPEG-over-HTTP stream instead of the host screen (e.g. WDA's iOS device stream on port 9100); needs ffmpeg |
 | `screenshot_annotate` | — | `True` | Draw a red crosshair at click/type coordinates |
 | `screenshot_format` | — | `"jpeg"` | Saved screenshot format (`"jpeg"` or `"png"`) |
 | `screenshot_quality` | — | `80` | JPEG quality, 1–100 |

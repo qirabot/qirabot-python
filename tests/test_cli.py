@@ -57,13 +57,25 @@ def fake_airtest(monkeypatch):
     api.connect_device = MagicMock(name="connect_device", return_value=device)
     api.start_app = MagicMock(name="start_app")
 
+    # facebook-wda, used by the ios command's WDA pre-check. Defaults to a
+    # reachable WDA (HTTP probe succeeds) so the happy-path tests pass.
+    wda = types.ModuleType("wda")
+    wda.DEBUG = False
+    wda.Client = MagicMock(name="wda.Client")
+    wda.Client.return_value.is_ready.return_value = True
+    wda.BaseClient = MagicMock(name="wda.BaseClient")
+    wda.BaseClient.return_value.is_ready.return_value = True
+    wda.list_devices = MagicMock(name="wda.list_devices", return_value=[])
+
     for name, mod in {
         "airtest": types.ModuleType("airtest"),
         "airtest.core": types.ModuleType("airtest.core"),
         "airtest.core.api": api,
+        "wda": wda,
     }.items():
         monkeypatch.setitem(sys.modules, name, mod)
 
+    api.wda = wda
     return api
 
 
@@ -160,6 +172,54 @@ class TestAirtestEngine:
         fake_airtest.connect_device.assert_called_once_with("iOS:///http://10.0.0.5:8100")
         fake_airtest.connect_device.return_value.driver.app_launch.assert_not_called()
 
+    def test_ios_wda_down_fails_before_airtest_connect(self, fake_airtest, monkeypatch):
+        """A dead WDA must error out BEFORE airtest's connect: handing it a
+        localhost URL triggers its go-ios/tidevice auto-launch, which downloads
+        developer disk images and still fails on iOS 17+."""
+        from qirabot.cli import main
+
+        bot = MagicMock(name="bot")
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
+        fake_airtest.wda.Client.return_value.is_ready.return_value = False
+
+        result = _invoke(["ios", "do it"])
+
+        assert result.exit_code == 1
+        assert "WDA is not running" in result.output
+        assert "--engine appium" in result.output
+        fake_airtest.connect_device.assert_not_called()
+        bot.fail.assert_called_once()
+
+    def test_ios_wda_ready_over_usbmux_without_iproxy(self, fake_airtest, stub_bot):
+        """WDA up on the device but no iproxy: the HTTP probe fails, but the
+        usbmux probe must pass and the run proceed (airtest itself talks to
+        local devices over usbmux, so iproxy isn't required)."""
+        fake_airtest.wda.Client.return_value.is_ready.return_value = False
+        usb = MagicMock(connection_type="USB", serial="00008150-X")
+        fake_airtest.wda.list_devices.return_value = [usb]
+
+        result = _invoke(["ios", "do it"])
+
+        assert result.exit_code == 0, result.output
+        fake_airtest.wda.BaseClient.assert_called_once_with("http+usbmux://00008150-X:8100")
+        fake_airtest.connect_device.assert_called_once_with("iOS:///http://127.0.0.1:8100")
+
+    def test_ios_remote_wda_down_skips_usbmux_probe(self, fake_airtest, monkeypatch):
+        """A remote --wda-url is not a local USB device: no usbmux fallback,
+        just the fail-fast error."""
+        from qirabot.cli import main
+
+        bot = MagicMock(name="bot")
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
+        fake_airtest.wda.Client.return_value.is_ready.return_value = False
+
+        result = _invoke(["ios", "do it", "--wda-url", "http://10.0.0.5:8100"])
+
+        assert result.exit_code == 1
+        assert "WDA is not running" in result.output
+        fake_airtest.wda.list_devices.assert_not_called()
+        fake_airtest.connect_device.assert_not_called()
+
     def test_connect_failure_reports_fail_with_hint(self, fake_airtest, monkeypatch):
         from qirabot.cli import main
 
@@ -219,11 +279,151 @@ class TestEngineFlagValidation:
         assert result.exit_code != 0
         assert "--engine appium" in result.output
 
+    def test_ios_appium_rejects_mjpeg_url(self, fake_appium, stub_bot):
+        result = _invoke(["ios", "do it", "--engine", "appium", "--record", "--mjpeg-url", "http://x:9100"])
+
+        assert result.exit_code != 0
+        assert "--mjpeg-url" in result.output
+
+    def test_ios_mjpeg_url_requires_record(self, fake_airtest, stub_bot):
+        result = _invoke(["ios", "do it", "--mjpeg-url", "http://x:9100"])
+
+        assert result.exit_code != 0
+        assert "--record" in result.output
+
     def test_ios_appium_rejects_wda_url(self, fake_appium, stub_bot):
         result = _invoke(["ios", "do it", "--engine", "appium", "--wda-url", "http://x:8100"])
 
         assert result.exit_code != 0
         assert "--engine airtest" in result.output
+
+
+class TestDeviceRecording:
+    """--record on android/ios: recorder-source selection per engine (WDA MJPEG
+    with its fail-fast check, adb screenrecord, Appium recording API) and the
+    flag threading into _make_bot."""
+
+    def _capture(self, monkeypatch):
+        from qirabot.cli import main
+
+        captured = {"make_bot": {}, "checked_url": None}
+
+        def fake_make_bot(ctx, **kwargs):
+            captured["make_bot"].update(kwargs)
+            return MagicMock(name="bot")
+
+        def fake_check(url):
+            captured["checked_url"] = url
+
+        monkeypatch.setattr(main, "_make_bot", fake_make_bot)
+        monkeypatch.setattr(main, "_run_local", lambda *a, **k: None)
+        monkeypatch.setattr(main, "_check_mjpeg_ready", fake_check)
+        return captured
+
+    def test_record_derives_mjpeg_url_from_wda_url(self, fake_airtest, monkeypatch):
+        captured = self._capture(monkeypatch)
+
+        result = _invoke(["ios", "do it", "--record"])
+
+        assert result.exit_code == 0, result.output
+        assert captured["checked_url"] == "http://127.0.0.1:9100"
+        assert captured["make_bot"]["record"] is True
+        assert captured["make_bot"]["record_mjpeg_url"] == "http://127.0.0.1:9100"
+
+    def test_record_follows_wda_host(self, fake_airtest, monkeypatch):
+        captured = self._capture(monkeypatch)
+
+        result = _invoke(["ios", "do it", "--record", "--wda-url", "http://10.0.0.5:8100"])
+
+        assert result.exit_code == 0, result.output
+        assert captured["checked_url"] == "http://10.0.0.5:9100"
+
+    def test_explicit_mjpeg_url_wins(self, fake_airtest, monkeypatch):
+        captured = self._capture(monkeypatch)
+
+        result = _invoke(["ios", "do it", "--record", "--mjpeg-url", "http://10.0.0.5:9200"])
+
+        assert result.exit_code == 0, result.output
+        assert captured["checked_url"] == "http://10.0.0.5:9200"
+        assert captured["make_bot"]["record_mjpeg_url"] == "http://10.0.0.5:9200"
+
+    def test_no_record_skips_check_and_recording(self, fake_airtest, monkeypatch):
+        captured = self._capture(monkeypatch)
+
+        result = _invoke(["ios", "do it"])
+
+        assert result.exit_code == 0, result.output
+        assert captured["checked_url"] is None
+        assert captured["make_bot"]["record"] is False
+        assert captured["make_bot"]["record_mjpeg_url"] == ""
+
+    def test_android_record_uses_adb_screenrecord(self, fake_airtest, monkeypatch):
+        captured = self._capture(monkeypatch)
+
+        result = _invoke(["android", "do it", "--record"])
+
+        assert result.exit_code == 0, result.output
+        assert captured["make_bot"]["record"] is True
+        assert captured["make_bot"]["record_device"] is True
+        # No MJPEG involved on android — that's the iOS/WDA path.
+        assert captured["checked_url"] is None
+
+    def test_android_appium_record_threads_device_recording(self, fake_appium, monkeypatch):
+        captured = self._capture(monkeypatch)
+
+        result = _invoke(["android", "do it", "--engine", "appium", "--record"])
+
+        assert result.exit_code == 0, result.output
+        assert captured["make_bot"]["record"] is True
+        assert captured["make_bot"]["record_device"] is True
+
+    def test_ios_appium_record_threads_device_recording(self, fake_appium, monkeypatch):
+        captured = self._capture(monkeypatch)
+
+        result = _invoke(["ios", "do it", "--engine", "appium", "--record"])
+
+        assert result.exit_code == 0, result.output
+        assert captured["make_bot"]["record"] is True
+        assert captured["make_bot"]["record_device"] is True
+
+    def test_appium_recording_stopped_before_driver_quit(self, fake_appium, monkeypatch):
+        # The Appium video lives in the session: bot.stop_recording() must run
+        # before driver.quit() or the recording is lost.
+        from qirabot.cli import main
+
+        order = []
+        bot = MagicMock(name="bot")
+        bot.stop_recording.side_effect = lambda: order.append("stop_recording")
+        driver = fake_appium.return_value
+        driver.quit.side_effect = lambda: order.append("quit")
+
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
+        monkeypatch.setattr(main, "_run_local", lambda *a, **k: None)
+
+        result = _invoke(["android", "do it", "--engine", "appium", "--record"])
+
+        assert result.exit_code == 0, result.output
+        assert order == ["stop_recording", "quit"]
+
+    def test_unreachable_stream_fails_before_task_creation(self, fake_airtest, monkeypatch):
+        # The probe failing must exit with the iproxy hint and never build the
+        # bot (no server task, no 300-step run that quietly recorded nothing).
+        import qirabot.recording as recording_mod
+        from qirabot.cli import main
+
+        made = []
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: made.append(1) or MagicMock())
+        monkeypatch.setattr(main, "_run_local", lambda *a, **k: None)
+        monkeypatch.setattr(
+            recording_mod, "check_mjpeg_stream",
+            lambda url, timeout=5.0: f"cannot read MJPEG stream at {url} (refused)",
+        )
+
+        result = _invoke(["ios", "do it", "--record"])
+
+        assert result.exit_code != 0
+        assert "iproxy 9100 9100" in result.output
+        assert made == []
 
 
 class TestRunLocalAbort:
@@ -410,6 +610,14 @@ class TestMakeBotErrors:
 
 
 class TestHelpers:
+    def test_wda_mjpeg_url_defaults(self):
+        from qirabot.cli.main import _wda_mjpeg_url
+
+        assert _wda_mjpeg_url("http://127.0.0.1:8100") == "http://127.0.0.1:9100"
+        assert _wda_mjpeg_url("http://10.0.0.5:8100") == "http://10.0.0.5:9100"
+        # Scheme-less values (users paste host:port) still resolve the host.
+        assert _wda_mjpeg_url("10.0.0.5:8100") == "http://10.0.0.5:9100"
+
     def test_default_task_name_derives_and_truncates(self):
         from qirabot.cli.main import _default_task_name
 

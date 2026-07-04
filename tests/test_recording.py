@@ -1,5 +1,7 @@
 """Tests for the ffmpeg screen recorder and its client integration."""
 
+import base64
+import os
 from pathlib import Path
 
 import qirabot.client as client_mod
@@ -7,10 +9,15 @@ from qirabot import recording
 from qirabot import report as report_mod
 from qirabot.client import Qirabot
 from qirabot.recording import (
+    AdbScreenRecorder,
+    AppiumScreenRecorder,
+    MjpegStreamRecorder,
     ScreenRecorder,
     _build_input_args,
     _detect_audio_device,
     _detect_screen_index,
+    check_mjpeg_stream,
+    device_recorder,
 )
 
 # Minimal step log entry so write_html / report() has something to render.
@@ -364,6 +371,371 @@ class TestScreenRecorder:
 
 
 # --------------------------------------------------------------------------- #
+# MjpegStreamRecorder (WDA device-screen stream)
+# --------------------------------------------------------------------------- #
+class TestMjpegStreamRecorder:
+    def test_start_builds_stream_command(self, monkeypatch, tmp_path):
+        captured = {}
+
+        class _FakePopen:
+            def __init__(self, cmd, **kw):
+                captured["cmd"] = cmd
+                self.stdin = _FakeStdin()
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(recording, "_find_ffmpeg", lambda: "ffmpeg")
+        monkeypatch.setattr(recording.subprocess, "Popen", _FakePopen)
+
+        out = str(tmp_path / "recording.mp4")
+        rec = MjpegStreamRecorder(out, "http://127.0.0.1:9100")
+        assert rec.start() is True
+        assert rec.active is True
+
+        cmd = captured["cmd"]
+        assert cmd[0] == "ffmpeg" and cmd[1] == "-y"
+        assert cmd[cmd.index("-f") + 1] == "mjpeg"
+        assert cmd[cmd.index("-i") + 1] == "http://127.0.0.1:9100"
+        # The stream has no timestamps: wallclock keeps playback real-time,
+        # and it must be an *input* option (before -i).
+        assert cmd.index("-use_wallclock_as_timestamps") < cmd.index("-i")
+        # Odd device dimensions are scaled to even ones for yuv420p.
+        assert "scale=trunc(iw/2)*2:trunc(ih/2)*2" in cmd
+        for token in ("libx264", "ultrafast", "yuv420p"):
+            assert token in cmd
+        assert cmd[-1] == out
+        # No host-screen grabbers leak into the stream command.
+        for grabber in ("avfoundation", "gdigrab", "x11grab", "dshow"):
+            assert grabber not in cmd
+
+    def test_start_degrades_without_ffmpeg(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(recording.shutil, "which", lambda _: None)
+        rec = MjpegStreamRecorder(str(tmp_path / "recording.mp4"), "http://h:9100")
+        assert rec.start() is False
+        assert rec.active is False
+
+    def test_stop_sends_q_and_returns_path(self, tmp_path):
+        # Inherited stop lifecycle works unchanged for the stream recorder.
+        out = tmp_path / "recording.mp4"
+        out.write_bytes(b"fake-mp4-bytes")
+        rec = MjpegStreamRecorder(str(out), "http://h:9100")
+        proc = _FakeProc()
+        rec._proc = proc
+        assert rec.stop() == str(out)
+        assert proc.stdin.data == b"q\n"
+
+
+# --------------------------------------------------------------------------- #
+# check_mjpeg_stream (fail-fast probe)
+# --------------------------------------------------------------------------- #
+class _FakeResponse:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self, n):
+        return self._data[:n]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class TestCheckMjpegStream:
+    def test_ok_when_stream_sends_data(self, monkeypatch):
+        monkeypatch.setattr(
+            recording.urllib.request, "urlopen",
+            lambda url, timeout=None: _FakeResponse(b"\xff\xd8"),
+        )
+        assert check_mjpeg_stream("http://127.0.0.1:9100") is None
+
+    def test_connected_but_silent_is_an_error(self, monkeypatch):
+        # Something answered the port but streams nothing (wrong service).
+        monkeypatch.setattr(
+            recording.urllib.request, "urlopen",
+            lambda url, timeout=None: _FakeResponse(b""),
+        )
+        err = check_mjpeg_stream("http://127.0.0.1:9100")
+        assert err is not None and "no data" in err
+
+    def test_connection_refused_is_an_error(self, monkeypatch):
+        def refuse(url, timeout=None):
+            raise OSError("Connection refused")
+
+        monkeypatch.setattr(recording.urllib.request, "urlopen", refuse)
+        err = check_mjpeg_stream("http://127.0.0.1:9100")
+        assert err is not None
+        assert "http://127.0.0.1:9100" in err and "Connection refused" in err
+
+
+# --------------------------------------------------------------------------- #
+# AppiumScreenRecorder (device screen via the Appium session API)
+# --------------------------------------------------------------------------- #
+class _FakeAppiumDriver:
+    def __init__(self, platform="android", reject_options=False, payload=b"video-bytes"):
+        self.capabilities = {"platformName": platform}
+        self.reject_options = reject_options
+        self.payload = payload
+        self.start_calls = []
+        self.stopped = False
+
+    def start_recording_screen(self, **opts):
+        if self.reject_options and opts:
+            raise ValueError("unsupported options")
+        self.start_calls.append(opts)
+
+    def stop_recording_screen(self):
+        self.stopped = True
+        return base64.b64encode(self.payload).decode()
+
+
+class TestAppiumScreenRecorder:
+    def test_start_raises_time_limit_and_stop_writes_file(self, tmp_path):
+        driver = _FakeAppiumDriver()
+        out = str(tmp_path / "recording.mp4")
+        rec = AppiumScreenRecorder(out, driver)
+
+        assert rec.start() is True
+        assert rec.active is True
+        opts = driver.start_calls[0]
+        # Default 180s timeLimit silently truncates long runs — must be raised.
+        assert opts["timeLimit"] == 1800
+        assert "videoType" not in opts  # android keeps the driver default
+
+        assert rec.stop() == out
+        assert driver.stopped is True
+        with open(out, "rb") as f:
+            assert f.read() == b"video-bytes"
+
+    def test_ios_pins_playable_codec(self, tmp_path):
+        # XCUITest's default codec is mjpeg, which HTML5 <video> can't play.
+        driver = _FakeAppiumDriver(platform="iOS")
+        rec = AppiumScreenRecorder(str(tmp_path / "recording.mp4"), driver)
+        assert rec.start() is True
+        assert driver.start_calls[0]["videoType"] == "libx264"
+
+    def test_old_driver_rejecting_options_gets_bare_start(self, tmp_path):
+        driver = _FakeAppiumDriver(reject_options=True)
+        rec = AppiumScreenRecorder(str(tmp_path / "recording.mp4"), driver)
+        assert rec.start() is True
+        assert driver.start_calls == [{}]  # retried without options
+
+    def test_start_failure_degrades(self, tmp_path):
+        class _Broken:
+            def start_recording_screen(self, **opts):
+                raise RuntimeError("no session")
+
+        rec = AppiumScreenRecorder(str(tmp_path / "recording.mp4"), _Broken())
+        assert rec.start() is False
+        assert rec.active is False
+
+    def test_stop_empty_payload_returns_none(self, tmp_path):
+        driver = _FakeAppiumDriver(payload=b"")
+        rec = AppiumScreenRecorder(str(tmp_path / "recording.mp4"), driver)
+        rec.start()
+        assert rec.stop() is None
+
+    def test_stop_without_start_is_noop(self, tmp_path):
+        rec = AppiumScreenRecorder(str(tmp_path / "recording.mp4"), _FakeAppiumDriver())
+        assert rec.stop() is None
+
+
+# --------------------------------------------------------------------------- #
+# AdbScreenRecorder (adb shell screenrecord, segmented)
+# --------------------------------------------------------------------------- #
+class TestAdbScreenRecorder:
+    def _fake_pull(self, tmp_path, pulled, fail_pull=False):
+        """subprocess.run stub: records commands; 'pull' writes a local file."""
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            if "pull" in cmd and not fail_pull:
+                local = cmd[cmd.index("pull") + 2]
+                with open(local, "wb") as f:
+                    f.write(b"segment-bytes")
+                pulled.append(local)
+            return _FakeCompleted("")
+
+        return calls, fake_run
+
+    def test_record_loop_builds_screenrecord_command(self, monkeypatch, tmp_path):
+        spawned = []
+
+        class _LoopPopen:
+            def __init__(self_inner, cmd, **kw):
+                spawned.append(cmd)
+                self_inner.returncode = 0
+
+            def wait(self_inner):
+                # Simulate stop() arriving mid-segment: screenrecord got
+                # SIGINT, exits 0, and the loop must not respawn.
+                rec._stop.set()
+                return 0
+
+            def poll(self_inner):
+                return 0
+
+        monkeypatch.setattr(recording.subprocess, "Popen", _LoopPopen)
+        rec = AdbScreenRecorder(str(tmp_path / "recording.mp4"), ["adb", "-s", "emu-1"])
+        rec._record_loop()
+
+        assert len(spawned) == 1
+        cmd = spawned[0]
+        assert cmd[:3] == ["adb", "-s", "emu-1"]
+        assert "shell" in cmd and "screenrecord" in cmd
+        assert cmd[cmd.index("--time-limit") + 1] == "180"
+        assert cmd[-1].startswith("/sdcard/qira_rec_") and cmd[-1].endswith(".mp4")
+
+    def test_record_loop_bails_on_instant_failure(self, monkeypatch, tmp_path):
+        # screenrecord dying immediately (no binary/permission) must not be
+        # respawned in a tight loop until stop().
+        spawned = []
+
+        class _DeadPopen:
+            def __init__(self_inner, cmd, **kw):
+                spawned.append(cmd)
+                self_inner.returncode = 1
+
+            def wait(self_inner):
+                return 1
+
+            def poll(self_inner):
+                return 1
+
+        monkeypatch.setattr(recording.subprocess, "Popen", _DeadPopen)
+        rec = AdbScreenRecorder(str(tmp_path / "recording.mp4"), ["adb"])
+        rec._record_loop()
+        assert len(spawned) == 1
+
+    def test_stop_signals_pulls_and_renames_single_segment(self, monkeypatch, tmp_path):
+        out = str(tmp_path / "recording.mp4")
+        pulled = []
+        calls, fake_run = self._fake_pull(tmp_path, pulled)
+        monkeypatch.setattr(recording.subprocess, "run", fake_run)
+
+        rec = AdbScreenRecorder(out, ["adb", "-s", "emu-1"])
+        rec._started = True
+        rec._remote = ["/sdcard/qira_rec_1_000.mp4"]
+
+        assert rec.stop() == out
+        # SIGINT went to the device so screenrecord finalizes the moov atom.
+        assert any("pkill" in c and "-2" in c for c in calls)
+        # Remote segment pulled then removed.
+        assert any("pull" in c for c in calls)
+        assert any("rm" in c for c in calls)
+        assert os.path.getsize(out) > 0
+        assert rec.active is False
+
+    def test_stop_merges_segments_with_ffmpeg(self, monkeypatch, tmp_path):
+        out = str(tmp_path / "recording.mp4")
+        pulled = []
+        calls, fake_run = self._fake_pull(tmp_path, pulled)
+
+        def fake_run_with_concat(cmd, **kw):
+            if cmd[0] == "ffmpeg":
+                calls.append(cmd)
+                with open(cmd[-1], "wb") as f:
+                    f.write(b"merged")
+                return _FakeCompleted("")
+            return fake_run(cmd, **kw)
+
+        monkeypatch.setattr(recording.subprocess, "run", fake_run_with_concat)
+        monkeypatch.setattr(recording, "_find_ffmpeg", lambda: "ffmpeg")
+
+        rec = AdbScreenRecorder(out, ["adb"])
+        rec._started = True
+        rec._remote = ["/sdcard/a.mp4", "/sdcard/b.mp4"]
+
+        assert rec.stop() == out
+        concat = next(c for c in calls if c and c[0] == "ffmpeg")
+        assert "concat" in concat and concat[-1] == out
+        with open(out, "rb") as f:
+            assert f.read() == b"merged"
+        # Parts and the concat list are cleaned up.
+        assert list(tmp_path.iterdir()) == [tmp_path / "recording.mp4"]
+
+    def test_stop_without_ffmpeg_keeps_first_segment(self, monkeypatch, tmp_path):
+        out = str(tmp_path / "recording.mp4")
+        pulled = []
+        calls, fake_run = self._fake_pull(tmp_path, pulled)
+        monkeypatch.setattr(recording.subprocess, "run", fake_run)
+        monkeypatch.setattr(recording, "_find_ffmpeg", lambda: None)
+
+        rec = AdbScreenRecorder(out, ["adb"])
+        rec._started = True
+        rec._remote = ["/sdcard/a.mp4", "/sdcard/b.mp4"]
+
+        assert rec.stop() == out  # first segment becomes the recording
+        assert os.path.exists(out)
+
+    def test_stop_with_nothing_pulled_returns_none(self, monkeypatch, tmp_path):
+        pulled = []
+        calls, fake_run = self._fake_pull(tmp_path, pulled, fail_pull=True)
+        monkeypatch.setattr(recording.subprocess, "run", fake_run)
+
+        rec = AdbScreenRecorder(str(tmp_path / "recording.mp4"), ["adb"])
+        rec._started = True
+        rec._remote = ["/sdcard/a.mp4"]
+        assert rec.stop() is None
+
+    def test_stop_without_start_is_noop(self, tmp_path):
+        rec = AdbScreenRecorder(str(tmp_path / "recording.mp4"), ["adb"])
+        assert rec.stop() is None
+
+
+# --------------------------------------------------------------------------- #
+# device_recorder (target -> recorder selection)
+# --------------------------------------------------------------------------- #
+class TestDeviceRecorder:
+    def test_appium_driver_selected(self, tmp_path):
+        rec = device_recorder(str(tmp_path / "r.mp4"), _FakeAppiumDriver())
+        assert isinstance(rec, AppiumScreenRecorder)
+
+    def test_airtest_android_selected(self, tmp_path):
+        class _Adb:
+            serialno = "emulator-5554"
+            adb_path = "/opt/adb"
+
+        class _AirtestAndroid:
+            adb = _Adb()
+
+        rec = device_recorder(str(tmp_path / "r.mp4"), _AirtestAndroid())
+        assert isinstance(rec, AdbScreenRecorder)
+        assert rec._adb == ["/opt/adb", "-s", "emulator-5554"]
+
+    def test_airtest_android_falls_back_to_which(self, monkeypatch, tmp_path):
+        class _Adb:
+            serialno = "emu-1"
+            adb_path = None
+
+        class _AirtestAndroid:
+            adb = _Adb()
+
+        monkeypatch.setattr(recording.shutil, "which", lambda _: "/usr/bin/adb")
+        rec = device_recorder(str(tmp_path / "r.mp4"), _AirtestAndroid())
+        assert isinstance(rec, AdbScreenRecorder)
+        assert rec._adb[0] == "/usr/bin/adb"
+
+    def test_no_adb_binary_returns_none(self, monkeypatch, tmp_path):
+        class _Adb:
+            serialno = "emu-1"
+            adb_path = None
+
+        class _AirtestAndroid:
+            adb = _Adb()
+
+        monkeypatch.setattr(recording.shutil, "which", lambda _: None)
+        assert device_recorder(str(tmp_path / "r.mp4"), _AirtestAndroid()) is None
+
+    def test_unsupported_target_returns_none(self, tmp_path):
+        assert device_recorder(str(tmp_path / "r.mp4"), object()) is None
+        assert device_recorder(str(tmp_path / "r.mp4"), None) is None
+
+
+# --------------------------------------------------------------------------- #
 # Client integration
 # --------------------------------------------------------------------------- #
 class _FakeRecorder:
@@ -505,6 +877,163 @@ class TestClientRecordingWiring:
         # record_window off -> starts immediately (full screen) with audio on.
         assert len(_FakeRecorder.instances) == 1
         assert _FakeRecorder.instances[0].audio is True
+
+
+class _FakeMjpegRecorder:
+    """Drop-in for MjpegStreamRecorder that records lifecycle without ffmpeg."""
+
+    instances: list["_FakeMjpegRecorder"] = []
+
+    def __init__(self, output, url):
+        self.output = output
+        self.url = url
+        self.started = False
+        self.stopped = False
+        _FakeMjpegRecorder.instances.append(self)
+
+    def start(self):
+        self.started = True
+        return True
+
+    @property
+    def active(self):
+        return self.started and not self.stopped
+
+    def stop(self, timeout=10.0):
+        self.stopped = True
+        return self.output
+
+
+class TestClientMjpegRecordingWiring:
+    def _use_fakes(self, monkeypatch):
+        _FakeRecorder.instances = []
+        _FakeMjpegRecorder.instances = []
+        monkeypatch.setattr(client_mod, "ScreenRecorder", _FakeRecorder)
+        monkeypatch.setattr(client_mod, "MjpegStreamRecorder", _FakeMjpegRecorder)
+
+    def test_mjpeg_url_routes_to_stream_recorder(self, monkeypatch, tmp_path):
+        self._use_fakes(monkeypatch)
+        Qirabot(
+            api_key="k", task_id="t", record=True,
+            record_mjpeg_url="http://127.0.0.1:9100", report_dir=str(tmp_path),
+        )
+        assert _FakeRecorder.instances == []  # host-screen path not taken
+        assert len(_FakeMjpegRecorder.instances) == 1
+        rec = _FakeMjpegRecorder.instances[0]
+        assert rec.started is True
+        assert rec.url == "http://127.0.0.1:9100"
+        assert rec.output.endswith("recording.mp4")
+
+    def test_env_var_sets_mjpeg_url(self, monkeypatch, tmp_path):
+        self._use_fakes(monkeypatch)
+        monkeypatch.setenv("QIRA_RECORD_MJPEG_URL", "http://10.0.0.5:9100")
+        Qirabot(api_key="k", task_id="t", record=True, report_dir=str(tmp_path))
+        assert len(_FakeMjpegRecorder.instances) == 1
+        assert _FakeMjpegRecorder.instances[0].url == "http://10.0.0.5:9100"
+
+    def test_mjpeg_url_without_record_does_not_record(self, monkeypatch, tmp_path):
+        self._use_fakes(monkeypatch)
+        Qirabot(
+            api_key="k", task_id="t",
+            record_mjpeg_url="http://127.0.0.1:9100", report_dir=str(tmp_path),
+        )
+        assert _FakeMjpegRecorder.instances == []
+        assert _FakeRecorder.instances == []
+
+    def test_mjpeg_ignores_record_window_deferral(self, monkeypatch, tmp_path):
+        # record_window defers until an action supplies a window target; the
+        # device stream has no host window, so it must start immediately.
+        self._use_fakes(monkeypatch)
+        Qirabot(
+            api_key="k", task_id="t", record=True, record_window=True,
+            record_mjpeg_url="http://127.0.0.1:9100", report_dir=str(tmp_path),
+        )
+        assert len(_FakeMjpegRecorder.instances) == 1
+        assert _FakeMjpegRecorder.instances[0].started is True
+
+    def test_stop_recording_returns_stream_path(self, monkeypatch, tmp_path):
+        self._use_fakes(monkeypatch)
+        bot = Qirabot(
+            api_key="k", task_id="t", record=True,
+            record_mjpeg_url="http://127.0.0.1:9100", report_dir=str(tmp_path),
+        )
+        rec = _FakeMjpegRecorder.instances[0]
+        assert bot.stop_recording() == rec.output
+        assert rec.stopped is True
+
+
+class TestClientDeviceRecordingWiring:
+    def _setup(self, monkeypatch, factory_result="fake"):
+        """Patch ScreenRecorder (must stay unused) and device_recorder."""
+        _FakeRecorder.instances = []
+        monkeypatch.setattr(client_mod, "ScreenRecorder", _FakeRecorder)
+        made = []
+
+        def fake_device_recorder(output, target):
+            if factory_result is None:
+                return None
+            rec = _FakeRecorder(output)
+            rec.target = target
+            made.append(rec)
+            return rec
+
+        monkeypatch.setattr(client_mod, "device_recorder", fake_device_recorder)
+        return made
+
+    def test_defers_until_target_then_records_device(self, monkeypatch, tmp_path):
+        made = self._setup(monkeypatch)
+        bot = Qirabot(
+            api_key="k", task_id="t", record=True, record_device=True,
+            report_dir=str(tmp_path),
+        )
+        # No target at construction -> deferred (an eager start would grab the
+        # host screen, which is the wrong thing for a device run).
+        assert made == [] and bot._recorder is None
+
+        driver = object()
+        bot._maybe_start_recording(target=driver)
+        assert len(made) == 1
+        assert made[0].started is True
+        assert made[0].target is driver
+        # Later actions must not spawn a second recorder.
+        bot._maybe_start_recording(target=driver)
+        assert len(made) == 1
+
+    def test_env_var_enables_device_recording(self, monkeypatch, tmp_path):
+        made = self._setup(monkeypatch)
+        monkeypatch.setenv("QIRA_RECORD_DEVICE", "1")
+        bot = Qirabot(api_key="k", task_id="t", record=True, report_dir=str(tmp_path))
+        assert bot._recorder is None  # still deferred
+        bot._maybe_start_recording(target=object())
+        assert len(made) == 1
+
+    def test_unsupported_target_skips_instead_of_host_screen(self, monkeypatch, tmp_path):
+        # Falling back to the host screen would record the desktop the SDK
+        # runs on — worse than no recording plus the report notice.
+        self._setup(monkeypatch, factory_result=None)
+        bot = Qirabot(
+            api_key="k", task_id="t", record=True, record_device=True,
+            report_dir=str(tmp_path),
+        )
+        bot._maybe_start_recording(target=object())
+        assert bot._recorder is None
+        assert _FakeRecorder.instances == []  # host ScreenRecorder untouched
+
+    def test_mjpeg_url_wins_over_record_device(self, monkeypatch, tmp_path):
+        # Both set (ios airtest passes mjpeg; device flag could come from env):
+        # the MJPEG stream starts immediately, no deferral.
+        made = self._setup(monkeypatch)
+        fake_mjpeg = []
+        monkeypatch.setattr(
+            client_mod, "MjpegStreamRecorder",
+            lambda output, url: fake_mjpeg.append(url) or _FakeRecorder(output),
+        )
+        Qirabot(
+            api_key="k", task_id="t", record=True, record_device=True,
+            record_mjpeg_url="http://127.0.0.1:9100", report_dir=str(tmp_path),
+        )
+        assert fake_mjpeg == ["http://127.0.0.1:9100"]
+        assert made == []
 
 
 # --------------------------------------------------------------------------- #

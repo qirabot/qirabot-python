@@ -13,6 +13,7 @@ from qirabot import Qirabot
 
 options = XCUITestOptions()
 options.platform_name = "iOS"
+# deviceName alone targets a simulator; a real device needs options.udid too
 options.device_name = os.environ.get("IOS_DEVICE", "iPhone 16")
 options.bundle_id = "com.apple.Preferences"
 

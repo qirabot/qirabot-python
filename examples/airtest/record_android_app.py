@@ -2,11 +2,13 @@
 """Standalone Android RPA with a screen recording embedded in the run report.
 
 This is the full-featured cousin of ``standalone_android_rpa.py``: it drives a
-specific app, streams every step, and records the **device** screen with
-Airtest's native recorder. We use Airtest here rather than the SDK's
-``record=True``, which records the *host* screen (a headless device doesn't
-appear there). Point Airtest's recorder at ``bot.report_dir`` and the HTML
-report embeds the resulting ``recording.mp4``.
+specific app, streams every step, and records the **device** screen.
+``record=True, record_device=True`` resolves the recorder from the device
+itself (``adb screenrecord`` here) instead of capturing the host screen a
+headless device doesn't appear on; ``bot.close()`` pulls the video into
+``bot.report_dir`` and the HTML report embeds the resulting ``recording.mp4``.
+(Airtest's native ``device().start_recording(...)`` aimed at the same path
+still works if you prefer it.)
 
 Install:
     python -m pip install "qirabot[airtest]"
@@ -22,7 +24,7 @@ The ``cli_setup()`` guard lets the same file run both via ``airtest run ...``
 import os
 
 from airtest.cli.parser import cli_setup
-from airtest.core.api import G, auto_setup, device, sleep, start_app, stop_app
+from airtest.core.api import G, auto_setup, sleep, start_app, stop_app
 
 from qirabot import Qirabot, StepResult
 
@@ -53,20 +55,21 @@ def on_step(step: StepResult) -> None:
 
 start_app(APP)
 
-# balanced_pro = stronger model; screenshot_annotate draws a crosshair at each tap.
-bot = Qirabot(model_alias="balanced_pro", screenshot_annotate=True).bind(G)
+# balanced_pro = stronger model; screenshot_annotate draws a crosshair at each
+# tap; record_device records the phone screen via adb screenrecord (recording
+# starts with the first action and stops in bot.close()).
+bot = Qirabot(
+    model_alias="balanced_pro",
+    screenshot_annotate=True,
+    record=True,
+    record_device=True,
+).bind(G)
 
-# Record into the per-run dir so the report embeds it
-# (qira_runs/<date>/<run>/recording.mp4).
-video = os.path.join(bot.report_dir, "recording.mp4")
-device().start_recording(output=video, max_time=1800)
 try:
     result = bot.ai(TASK, max_steps=25, on_step=on_step, language="en")
     print(f" Result: {result.output}")
     sleep(5.0)
 finally:
-    saved = device().stop_recording(output=video)
-    print(f" Recording saved: {saved}")
-    bot.close()  # writes report.html with the video embedded
+    bot.close()  # stops recording, writes report.html with the video embedded
 
 stop_app(APP)

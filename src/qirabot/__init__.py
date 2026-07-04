@@ -23,7 +23,14 @@ from qirabot.exceptions import (
     QirabotTimeoutError,
     RateLimitError,
 )
-from qirabot.recording import ScreenRecorder, record, window_region
+from qirabot.recording import (
+    AdbScreenRecorder,
+    AppiumScreenRecorder,
+    MjpegStreamRecorder,
+    ScreenRecorder,
+    record,
+    window_region,
+)
 
 try:
     __version__ = version("qirabot")
@@ -33,6 +40,8 @@ except PackageNotFoundError:  # not installed (e.g. running from a source tree)
 __all__ = [
     "__version__",
     "ActionError",
+    "AdbScreenRecorder",
+    "AppiumScreenRecorder",
     "AuthenticationError",
     "DeviceAdapter",
     "DeviceInfo",
@@ -40,6 +49,7 @@ __all__ = [
     "ScreenshotConfig",
     "InsufficientBalanceError",
     "MissingDependencyError",
+    "MjpegStreamRecorder",
     "Qirabot",
     "QirabotConnectionError",
     "QirabotError",
