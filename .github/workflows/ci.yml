@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Reusable: the publish workflow runs this same lint+test suite as its
+  # release gate, so the two can't drift apart.
+  workflow_call:
 
 jobs:
   lint:

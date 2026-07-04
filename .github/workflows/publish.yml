@@ -5,13 +5,19 @@ on:
     tags:
       - "v*"
 
-permissions:
-  id-token: write
-
 jobs:
+  # Release gate: the tagged commit must pass the same lint + test matrix as
+  # regular CI before anything is uploaded. PyPI version numbers are burned
+  # once published, so a red suite must stop the release here.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: ci
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      id-token: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
