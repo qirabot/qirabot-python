@@ -1,5 +1,6 @@
 """Tests for Qirabot client, StepResult, and RunResult."""
 
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -730,12 +731,16 @@ class TestPressKey:
         adapter.screenshot.return_value = b""  # bytes → recorded, no disk frame
         bot._adapters[id(target)] = adapter
 
+        before = time.time()
         bot.press_key(target, "Enter")
 
         assert len(bot._log) == 1
         entry = bot._log[0]
         assert entry["action_type"] == "press_key"
         assert entry["params"] == {"key": "Enter"}
+        # Every entry is timestamped so the report can render a time column
+        # and seek the recording to the step.
+        assert before <= entry["ts"] <= time.time()
         bot.close()
 
     def test_local_step_skipped_when_reporting_off(self):

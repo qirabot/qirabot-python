@@ -363,6 +363,9 @@ class Qirabot:
         # start is deferred like record_window's.
         self._record_device = record_device or _env_truthy(os.environ.get("QIRA_RECORD_DEVICE", ""))
         self._recorder: Recorder | None = None
+        # Epoch time the current recording started; anchors the report's
+        # per-step video-seek offsets. 0.0 = no recording started this run.
+        self._record_started_ts = 0.0
         # True while a recording is still owed: claimed (set False) right before a
         # recorder starts, which also guards against re-entrancy through
         # _get_adapter when window-following resolves the target.
@@ -1272,6 +1275,10 @@ class Qirabot:
             )
         started = recorder.start()
         self._recorder = recorder if started else None
+        if started:
+            # A restart overwrites recording.mp4 from scratch, so the anchor
+            # moves with it.
+            self._record_started_ts = time.time()
         return started
 
     def stop_recording(self) -> str | None:
@@ -1439,6 +1446,7 @@ class Qirabot:
         frame = self._save_frame(annotated, action_type or "action") if data else None
         entry: dict[str, Any] = {
             "section": self._current_section,
+            "ts": time.time(),
             "action_type": action_type or "",
             "params": params or {},
             "decision": decision or "",
@@ -1767,6 +1775,7 @@ class Qirabot:
                 task_id=self._task_id or "",
                 outcomes=self._section_outcomes,
                 recording=recording,
+                recording_start=self._record_started_ts if recording else 0.0,
                 record_error=record_error,
                 stats=self._stats,
                 model=self._model_alias,

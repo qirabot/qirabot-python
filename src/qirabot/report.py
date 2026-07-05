@@ -39,8 +39,12 @@ section { background: #fff; border: 1px solid #e3e5e8; border-radius: 10px;
           margin-bottom: 18px; overflow: hidden; }
 section > h2 { font-size: 15px; margin: 0; padding: 12px 16px; background: #fafbfc;
               border-bottom: 1px solid #eceef0; display: flex; gap: 10px; align-items: center; }
-.steps { display: grid; grid-template-columns: 48px 120px 1fr 200px; gap: 0; }
+.steps { display: grid; grid-template-columns: 48px 96px 120px 1fr 200px; gap: 0; }
 .steps > div { padding: 10px 12px; border-bottom: 1px solid #f0f1f3; }
+.when { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+        color: #888; white-space: nowrap; }
+.when a { color: #0b62d6; text-decoration: none; }
+.when a:hover { text-decoration: underline; }
 .head { font-weight: 600; color: #888; font-size: 11px; text-transform: uppercase;
         background: #fcfcfd; }
 .act { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
@@ -97,6 +101,7 @@ video { max-width: 100%; border-radius: 8px; margin-bottom: 18px; }
   .steps > div.warn-row { background: #332a14; }
   .steps > .act.warn-row { color: #e8c877; }
   .stats { color: #9aa0a6; }
+  .when a { color: #a9c7ff; }
   .detail .decision { color: #9aa0a6; }
   .notice { background: #3a2f12; color: #f0d493; }
 }
@@ -180,6 +185,16 @@ def _normalize_status(value: bool | str) -> str:
 def _fmt_tokens(n: int) -> str:
     """Compact token count: 1234 -> ``1.2k``, 980 -> ``980``."""
     return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
+
+
+def _fmt_offset(secs: float) -> str:
+    """Elapsed offset for the time column: ``+0:07`` / ``+1:32`` / ``+1:02:05``."""
+    s = int(secs)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"+{h}:{m:02d}:{sec:02d}"
+    return f"+{m}:{sec:02d}"
 
 
 def _fmt_ms(ms: int) -> str:
@@ -297,11 +312,17 @@ def write_html(
     task_id: str = "",
     outcomes: Mapping[str, bool | str] | None = None,
     recording: str = "",
+    recording_start: float = 0.0,
     record_error: str = "",
     stats: dict[str, int] | None = None,
     model: str = "",
 ) -> Path:
-    """Render ``log`` to a self-contained HTML report at ``path``."""
+    """Render ``log`` to a self-contained HTML report at ``path``.
+
+    ``recording_start`` is the epoch time the embedded recording began; when
+    set (and a recording is present), each step's elapsed offset becomes a
+    link that seeks the video to that moment.
+    """
     outcomes = outcomes or {}
     stats = stats or {}
     out = Path(path)
@@ -361,9 +382,20 @@ def write_html(
     if recording:
         parts.append(
             f"<video controls src='{html.escape(recording)}'></video>"
+            "<script>function seekTo(t){const v=document.querySelector('video');"
+            "if(!v)return false;v.currentTime=t;"
+            "v.scrollIntoView({behavior:'smooth',block:'center'});v.play();"
+            "return false;}</script>"
         )
     elif record_error:
         parts.append(f"<div class='notice'>⚠ {html.escape(record_error)}</div>")
+
+    # Step offsets are measured from the recording start when the video is
+    # seekable, else from the first stamped step (≈ run start). Entries from
+    # runs predating the "ts" field just leave the time cell empty.
+    first_ts = next((e["ts"] for e in log if e.get("ts")), 0.0)
+    seekable = bool(recording) and recording_start > 0
+    offset_base = recording_start if seekable else first_ts
 
     # Sections. Every step with a thumbnail also becomes a lightbox "shot" so the
     # viewer can page across all screenshots regardless of which section they're in.
@@ -376,7 +408,8 @@ def write_html(
         )
         parts.append("<div class='steps'>")
         parts.append(
-            "<div class='head'>#</div><div class='head'>action</div>"
+            "<div class='head'>#</div><div class='head'>time</div>"
+            "<div class='head'>action</div>"
             "<div class='head'>detail</div><div class='head'>screenshot</div>"
         )
         for i, e in enumerate(grouped[sec], 1):
@@ -397,6 +430,19 @@ def write_html(
             row_cls = " fail-row" if failed else (" warn-row" if warned else "")
             mark = " ✗" if failed else (" ⚠" if warned else (" ✓" if e.get("finished") else ""))
             action = (e.get("action_type") or "") + mark
+            ts = e.get("ts") or 0.0
+            clock = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else ""
+            when = clock
+            if ts and ts >= offset_base:
+                offset = ts - offset_base
+                off_txt = _fmt_offset(offset)
+                if seekable:
+                    when += (
+                        f"<br><a href='#' title='Jump the video to this step' "
+                        f"onclick='return seekTo({offset:.1f})'>{off_txt}</a>"
+                    )
+                else:
+                    when += f"<br>{off_txt}"
             shot = ""
             thumb = e.get("thumb") or ""
             full = e.get("screenshot") or ""
@@ -406,7 +452,7 @@ def write_html(
                     "src": full or thumb,
                     "action": action,
                     "detail": detail,
-                    "label": f"{sec} · #{i}",
+                    "label": f"{sec} · #{i}" + (f" · {clock}" if clock else ""),
                 })
                 img = f"<img src='{thumb}' loading='lazy'>"
                 href = html.escape(full or "#")
@@ -414,7 +460,8 @@ def write_html(
             num_div = f"<div class='{row_cls.strip()}'>{i}</div>" if row_cls else f"<div>{i}</div>"
             parts.append(
                 num_div
-                + f"<div class='act{row_cls}'>{html.escape(action)}</div>"
+                + f"<div class='when{row_cls}'>{when}</div>"
+                f"<div class='act{row_cls}'>{html.escape(action)}</div>"
                 f"<div class='detail{row_cls}'>{detail}</div>"
                 f"<div class='shot{row_cls}'>{shot}</div>"
             )

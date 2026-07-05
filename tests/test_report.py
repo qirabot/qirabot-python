@@ -121,3 +121,44 @@ class TestWarnRow:
         html = out.read_text(encoding="utf-8")
         assert "'act fail-row'" in html
         assert "✗" in html
+
+
+class TestStepTimestamps:
+    def test_offsets_relative_to_first_step_without_recording(self, tmp_path):
+        log = [_entry("a", ts=1000.0), _entry("a", ts=1092.0)]
+        out = write_html(log, tmp_path / "report.html")
+        html = out.read_text(encoding="utf-8")
+        assert "+0:00" in html
+        assert "+1:32" in html
+        # No video on the page → offsets are plain text, not seek links.
+        assert "seekTo" not in html
+
+    def test_offsets_seek_video_when_recording_start_known(self, tmp_path):
+        log = [_entry("a", ts=1005.5)]
+        out = write_html(
+            log,
+            tmp_path / "report.html",
+            recording="recording.mp4",
+            recording_start=1000.0,
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "seekTo(5.5)" in html
+        assert "+0:05" in html
+
+    def test_recording_without_start_ts_stays_unlinked(self, tmp_path):
+        # Recording present but its start time unknown (e.g. an external
+        # recording.mp4 dropped into report_dir): offsets fall back to
+        # run-relative plain text; only the video player's own script exists.
+        log = [_entry("a", ts=1000.0), _entry("a", ts=1007.0)]
+        out = write_html(log, tmp_path / "report.html", recording="recording.mp4")
+        html = out.read_text(encoding="utf-8")
+        assert "+0:07" in html
+        assert "onclick='return seekTo" not in html
+
+    def test_entries_without_ts_render_blank_time_cell(self, tmp_path):
+        # Logs from before the ts field (or external write_html callers) must
+        # still render — time cells just stay empty.
+        out = write_html([_entry("a")], tmp_path / "report.html")
+        html = out.read_text(encoding="utf-8")
+        assert ">time<" in html
+        assert "seekTo" not in html
