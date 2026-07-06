@@ -2,7 +2,8 @@
 
 Drive any GUI with natural language — click, type, extract, and verify on web
 browsers, Android, iOS, desktop apps, and games — using the
-[Qirabot Python SDK](https://github.com/qirabot/qirabot-python).
+[Qirabot Python SDK](https://github.com/qirabot/qirabot-python) or the
+`qirabot` CLI it ships with.
 
 This directory is a self-contained Claude Code plugin. It bundles one Agent
 Skill (`skills/qirabot/`) plus its preflight script, API reference, and starter
@@ -31,13 +32,16 @@ plugins/qirabot/
     └── qirabot/
         ├── SKILL.md         # instructions Claude reads to operate the skill
         ├── references/
-        │   └── REFERENCE.md # condensed API reference used at runtime
+        │   ├── REFERENCE.md # condensed SDK API reference used at runtime
+        │   └── CLI.md       # condensed qirabot CLI reference (one-shot runs)
         ├── scripts/
         │   └── preflight.py # environment checker — run before any script
         └── templates/
-            ├── browser.py   # Playwright / web starter
-            ├── android.py   # Airtest / Android starter
-            └── bolt_on.py   # bring-your-own-driver starter
+            ├── browser.py       # Playwright / web starter
+            ├── android.py       # Airtest / Android starter
+            ├── ios_airtest.py   # iOS via WDA directly (no Appium server)
+            ├── ios_appium.py    # iOS via Appium XCUITest
+            └── bolt_on.py       # bring-your-own-driver starter
 ```
 
 ## Releasing

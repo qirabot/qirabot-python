@@ -1,6 +1,6 @@
 ---
 name: qirabot
-description: "Drive any GUI with natural language — click, type, extract, and verify on web browsers, Android, iOS, desktop apps, and games — using the Qirabot Python SDK. Use this when the user wants to automate, test, or scrape a user interface by describing elements in plain language instead of CSS/XPath selectors; when driving a mobile app or a native desktop/game where DOM-based tools don't work; or for visual UI verification, screenshots, and RPA. Triggers include: automate a website or app, UI/end-to-end test, fill a form, scrape a page, tap or click a button, verify what's on screen, drive an Android/iOS app, automate a desktop application."
+description: "Drive any GUI with AI vision on raw screenshots — no DOM, no CSS/XPath selectors — via the Qirabot Python SDK or the qirabot CLI. Hand it a whole goal to complete autonomously, or make single natural-language actions: click, type, extract, and verify on web browsers, Android, iOS, desktop apps, and games. Use this when the user wants to automate, test, or scrape a UI by describing elements in plain language; when driving a mobile app, native desktop app, canvas UI, or game that DOM-based tools like Playwright/Selenium alone can't reach; when adding AI steps to an existing Playwright/Selenium/Appium/Airtest/pyautogui or pytest setup; or for visual UI verification, screenshots, and RPA. Triggers include: automate a website or app, UI/end-to-end test, fill a form, scrape a page, tap or click a button, verify what's on screen, drive an Android/iOS app or desktop application, automate a game, add AI element location to existing tests, run a one-shot automation task from the terminal."
 license: MIT
 metadata:
   author: qirabot
@@ -8,87 +8,89 @@ metadata:
 
 ## Step 0 — Preflight (always run first)
 
-Do NOT write an automation script before the environment checks out. Run:
+Do NOT write an automation script before the environment checks out:
 
 ```bash
 python scripts/preflight.py browser     # or: android | ios | desktop
 ```
 
-It verifies Python version, `QIRA_API_KEY`, that `qirabot` is importable, and
-target-specific bits (e.g. `adb devices`). **If it fails, stop and fix what it
-prints** — don't proceed and debug a half-set-up run.
+**If it fails, stop and fix what it prints** — every failing check comes with
+the exact fix command. (After qirabot is installed, `qirabot doctor` is the
+packaged complement: it also probes that the API key is accepted and the
+server is reachable, and exits 0/1 so CI can gate on it.)
 
-**One interpreter, one source of truth.** Preflight validates *one* Python and,
-on success, prints its absolute path (`interpreter: ...` and a run line). Run
-your script with **that exact path**, never a bare `python` — otherwise the run
-can drift to a different env than the one you just checked (the #1 false-"Ready"
-trap). Whatever already works (an existing venv, the user's global) is fine — the
-point is to *reuse the validated one*, not to force a new venv.
+**One interpreter, one source of truth.** Preflight validates *one* Python and
+prints its absolute path. Run your script with that exact path — and the CLI
+via the binary next to it (`<venv>/bin/qirabot`) — never a bare
+`python`/`qirabot` from PATH, or the run drifts to an env you didn't check
+(the #1 false-"Ready" trap). Reuse whatever validated env exists; don't force
+a new venv.
 
-Bootstrap only when preflight reports something missing. Prefer an isolated venv
-over the user's global Python (and **re-run preflight with that venv's Python**
-so it becomes the validated interpreter):
+Bootstrap only when preflight reports something missing — prefer a venv:
 
 ```bash
-# One backend per project → use the conventional .venv (IDEs auto-detect it):
 python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-python -m pip install "qirabot[browser]"      # → also: playwright install chromium
-#   or  qirabot[appium]  (iOS: + Appium server & WebDriverAgent)  /  qirabot[desktop]
-#   or  qirabot[airtest]  (Android, iOS, window-scoped Windows desktop; Python 3.10-3.12, or 3.13+ with a C toolchain)
-
-# CAVEAT: airtest pins numpy<2, which conflicts with the browser/desktop extras.
-# Only if ONE project genuinely needs airtest AND another backend, give airtest
-# its own separately-named env instead of sharing .venv:
-#   python3.12 -m venv .venv-airtest && source .venv-airtest/bin/activate
-#   python -m pip install "qirabot[airtest]"
-
-# Credentials go in a .env file (the templates call qirabot.load_dotenv() to read
-# it; a real exported env var still wins). Never hard-code the key in the script.
-echo 'QIRA_API_KEY=qk_...' > .env         # from https://app.qirabot.com
-# optional self-host: echo 'QIRA_BASE_URL=https://...' >> .env
+python -m pip install "qirabot[browser]"    # then: playwright install chromium
+#  or qirabot[appium] / qirabot[desktop] / qirabot[airtest] (Python 3.10-3.12)
+echo 'QIRA_API_KEY=qk_...' > .env   # from https://app.qirabot.com — never hard-code it
 ```
 
-## Step 1 — Pick a target and start from a template
+CAVEAT: airtest pins `numpy<2`, which conflicts with the browser/desktop
+extras — if one project genuinely needs airtest AND another backend, give
+airtest its own env (e.g. `.venv-airtest`) instead of sharing `.venv`.
+
+## Step 1 — CLI or SDK? Pick the invocation path
+
+Two front doors. Rule of thumb: *one instruction, a human reads the result →
+CLI; the script must branch or read values → SDK.*
+
+**CLI — the default for one-shot goals.** No script file to write; a live
+per-step trace, Ctrl+C → *cancelled* (exit 130), and non-zero exit on failure
+are built in, so it's a direct CI gate. Full flag matrix, engine rules
+(airtest vs appium), and recording setup: `references/CLI.md`. On this path,
+skip straight to Step 4's result-checking guidance.
+
+```bash
+qirabot browser "Find the cheapest laptop and report its price" -u example.com
+qirabot android "Turn on airplane mode" -d emulator-5554
+qirabot ios "Enable Bluetooth in Settings" --bundle-id com.apple.Preferences
+qirabot desktop "Compute 12*34 in the calculator" --app Calculator
+```
+
+**SDK — when code must consume results or the flow has logic:**
+`extract()`/`verify()` branching, deterministic primitives mixed with `ai()`,
+several `ai()` calls in one session, `wait_for` gates, or a `bind()` of your
+own Selenium/Appium driver. Continue with Step 2.
+
+Utility commands help on both paths: `qirabot doctor` (env check),
+`qirabot task <id>` (server-side status/steps), `qirabot screenshot <id>`,
+`qirabot models` (valid `-m`/`model_alias` values).
+
+## Step 2 — SDK path: pick a target and start from a template
 
 | Target | Template | Extra |
 |---|---|---|
-| Web browser (Qirabot launches Chromium) | `templates/browser.py` | `qirabot[browser]` + `playwright install chromium`. Also supports connecting to an existing Chrome via `cdp_url` (e.g. Browserless/Browserbase). |
-| Android — Airtest (no Appium server, fastest start) | `templates/android.py` | `qirabot[airtest]` (Python 3.10-3.12; 3.13+ needs a C toolchain) |
-| iOS — Airtest (drives WDA directly, no Appium server) | `templates/ios_airtest.py` | `qirabot[airtest]` (Python 3.10-3.12; 3.13+ needs a C toolchain). Real device needs WDA running on :8100 (typically via `iproxy 8100 8100`). The template launches apps via WDA's `app_launch`, not airtest's `start_app` — the latter routes through go-ios and breaks on iOS 17+. |
-| iOS — Appium XCUITest (simulators, auto WDA build/sign) | `templates/ios_appium.py` | `qirabot[appium]` + a running Appium server & WDA. Real device (iOS 17+) needs a built/signed WDA; simplest is to leave WDA running on :8100 and reuse it via `webDriverAgentUrl` (the template does this). |
-| Any Selenium driver, or other Appium targets (you build the driver, then `bind()`) | `templates/bolt_on.py` | `qirabot` + `selenium` / `qirabot[appium]` |
-| Desktop — Windows & macOS (`bind()` your driver) | `templates/bolt_on.py` | `qirabot[desktop]` (whole screen, any OS) · `qirabot[airtest]` (Windows only, one window) |
+| Web browser (launches Chromium; or attach to running Chrome via `cdp_url`) | `templates/browser.py` | `qirabot[browser]` + `playwright install chromium` |
+| Android — Airtest (adb direct, no server, fastest start) | `templates/android.py` | `qirabot[airtest]` |
+| iOS — Airtest (drives WDA directly; real device) | `templates/ios_airtest.py` | `qirabot[airtest]`; WDA running on :8100 (`iproxy 8100 8100`) |
+| iOS — Appium XCUITest (simulators, auto WDA build/sign) | `templates/ios_appium.py` | `qirabot[appium]` + running Appium server |
+| Any Selenium driver / other Appium targets (`bind()` your driver) | `templates/bolt_on.py` | `qirabot` + your framework |
+| Desktop — Windows & macOS | `templates/bolt_on.py` | `qirabot[desktop]` (whole screen, any OS) · `qirabot[airtest]` (Windows, one window) |
 
-Copy the template, fill in the `TODO`s (start URL / app package or bundle id, and
-the task), then run it with **the interpreter preflight echoed** (its absolute
-path), not a bare `python`. iOS has two starters; pick by what the user asked
-for and what's already running:
+Copy the template, fill in the `TODO`s, run it with the preflight-echoed
+interpreter. iOS has two starters: default to `ios_airtest.py` when the user
+says "airtest" or WDA already answers (`curl http://127.0.0.1:8100/status`);
+pick `ios_appium.py` for "appium", simulators, or when the script needs
+Appium's device APIs. The platform gotchas (iOS 17 app launch, WDA reuse) are
+already handled inside the templates; the per-platform action matrix and
+`bind()` details are in `references/REFERENCE.md`.
 
-- **`templates/ios_airtest.py`** — drives WDA over HTTP directly. Pick this
-  when the user says "airtest", when WDA is already up on :8100, or when
-  they want the minimal-deps path (no `appium` server). Real device only.
-- **`templates/ios_appium.py`** — Appium XCUITest. Pick this when the user
-  says "appium", when targeting a simulator, when you need Appium to
-  build/sign WDA for you, or when the script needs Appium's device APIs
-  (e.g. `driver.start_recording_screen`).
-
-When the user doesn't say either, default to `ios_airtest.py` if `curl
-http://127.0.0.1:8100/status` returns ready, else `ios_appium.py`.
-
-`templates/bolt_on.py` shows the generic bind-an-existing-driver pattern with
-Selenium as the runnable example plus pyautogui (whole-screen desktop, any OS)
-and Airtest (window-scoped Windows desktop) variants in comments; see
-`references/REFERENCE.md` for the full per-platform action matrix and `bind()`
-details.
-
-## Step 2 — Hand the task to qirabot (default), drop to primitives only to optimize
-
-**Default: give the whole task to `bot.ai`.**
+## Step 3 — Hand the whole task to `bot.ai` (default)
 
 ```python
 from qirabot import StepResult
 
-def on_step(step: StepResult) -> None:   # live trace -> stdout (see below)
+def on_step(step: StepResult) -> None:   # ALWAYS pass this — the only live view
     label = "done" if step.finished else step.action_type
     print(f"  step {step.step}: {label} {step.params} — {step.decision}")
 
@@ -97,119 +99,79 @@ result = bot.ai(target, "Add the cheapest item to the cart and check out",
 print(result.success, result.output)
 ```
 
-`bot.ai` offloads the perceive → decide → act loop to qirabot, which manages its
-own step history and self-heals when a step misfires.
+`bot.ai` runs the perceive → decide → act loop server-side and self-heals when
+a step misfires. **Keep the task string a concise goal, not a step-by-step
+script** — over-specifying ("click Search, then type X, then…") fights the
+model, locks in a brittle path, and burns steps; write what success looks
+like. **Always pass `on_step`** — without it the run is a black box until it
+returns; the printed `decision` trace is how a stuck or looping run gets
+debugged from stdout.
 
-**Keep the task string a concise goal, not a step-by-step script.** `bot.ai` is
-smart enough to plan its own clicks — over-specifying ("click Search, then type
-X, then click the first result, then…") fights the model, locks in a brittle
-path, and burns extra steps. Write what success looks like, not how to get
-there. Good: `"Add the cheapest in-stock item to the cart and check out"`.
-Bad: a 6-step click-by-click recipe.
+If you `bind()` a stable target first (as the android/ios/bolt_on templates
+do), drop the leading arg: `bot.ai("...")`, `bot.click("...")`. Keep the
+explicit `page = bot.click(page, ...)` form for Playwright so new-tab switches
+stay visible.
 
-The examples here pass the target explicitly (`bot.ai(target, ...)`). **If you
-`bind()` a stable target first** — as the `android.py`, `ios_airtest.py`,
-`ios_appium.py`, and `bolt_on.py` templates do — drop the leading arg:
-`bot.ai("...")`, `bot.click("...")`. (Keep the explicit form for Playwright so
-new-tab follows stay visible — see `references/REFERENCE.md`.)
-
-**Always pass `on_step`.** Until it returns, `bot.ai` is a black box — `result`
-only lands at the end. `on_step` fires after every step and prints the model's
-running `decision` + action to stdout, which is your one live window into the
-run: a stuck, looping, or failed run becomes debuggable straight from the
-console, without opening the HTML report. (`StepResult` also carries `.output`
-and token/duration counts — see `references/REFERENCE.md`.)
-
-**Drop to the per-step primitives only as a deliberate optimization** — when you
-want strict, reproducible determinism, or you're codifying a stable flow to run
-repeatedly (e.g. a CI regression check). They cost less per action and are
-reproducible, but are brittle to UI changes:
+**Drop to per-step primitives only as a deliberate optimization** — strict
+determinism or a stable flow run repeatedly (e.g. CI): cheaper per action,
+reproducible, but brittle to UI changes:
 
 ```python
 bot.click(target, "Login button")
 bot.type_text(target, "Email field", "a@b.com", press_enter=True)
-bot.double_click(target, "the file name to rename")                # double-click
-bot.long_press(target, "the message bubble", duration=2.5)         # mobile: context menu
-bot.key_down(target, "w"); bot.key_up(target, "w")                 # desktop: hold/release a key (pair them)
-text = bot.extract(target, "the displayed account balance")        # read one thing
-bot.wait_for(target, "the dashboard finished loading")             # gate, raises on timeout
+bot.long_press(target, "the message bubble", duration=2.5)   # mobile context menu
+bot.key_down(target, "w"); bot.key_up(target, "w")           # desktop hold (pair them)
+text = bot.extract(target, "the displayed account balance")
+bot.wait_for(target, "the dashboard finished loading")       # gate, raises on timeout
 ```
 
-`extract()` reads values off the screen; `verify()` returns a bool the script
-can branch on. See Step 3 for when to use which after `bot.ai`.
+Full API — constructor options, `bind()`, navigation/scroll/keys, per-platform
+action matrix, errors: `references/REFERENCE.md`.
 
-See `references/REFERENCE.md` for the full API: constructor options, `bind()`,
-navigation/scroll/keys, the per-platform action matrix, and errors.
+## Step 4 — Check the result by who consumes it
 
-## Step 3 — Check the result by who consumes it
+Every run writes `./qira_runs/<date>/<run>/report.html` with per-step
+screenshots (unless `report=False`). Pick the signal by who acts on it:
 
-Every run writes a self-contained HTML report with per-step screenshots to
-`./qira_runs/<date>/<run>/report.html` (unless `report=False`). `bot.ai` leaves
-three signals after it returns — pick by who acts on them:
+- **A human/agent reads the result** → open the report and look at the step
+  screenshots. Do NOT trust `result.success`: it's the acting model grading
+  itself, and can claim victory after clicking the wrong button.
+- **The script must branch** (CI gate, skip-if-logged-in) →
+  `bot.verify(target, "...")` — an independent vision call returning `bool`.
+  The bool must drive something; otherwise it's a billed call whose answer the
+  screenshot already gives for free.
+- **The script needs a value** (price, username, status) →
+  `bot.extract(target, "...")`. Scope the phrase — an ambiguous locate can
+  grab a look-alike element — and cross-check against the screenshot.
 
-- **A human/agent will read the result** → open the report and look at the step
-  screenshots. Do NOT trust `result.success`: it's the same model that just
-  acted, reporting on itself, and can claim victory after clicking the wrong
-  button.
-- **The script must branch on the outcome** (CI gate, `if logged_in skip
-  login`, conditional flow) → `bot.verify(target, "...")`. Independent vision
-  call, returns `bool`, costs one AI call. The bool must drive something —
-  otherwise it's a billed call whose result goes nowhere, and the screenshot
-  already tells the human reviewer the same thing for free.
-- **The script needs to read a value** (price, username, status) →
-  `bot.extract(target, "...")`. Beware ambiguous locates:
-  `extract("the logged-in username")` can grab a rotating search-box hint
-  instead — scope the phrase and cross-check against the screenshot.
+When a run fails, the **stdout step trace is the fastest entry point**: find
+where the model started looping or chose wrong, then jump to that step's
+screenshot in the report. (CLI runs print the same trace automatically; the
+exit code stands in for `result.success`.)
 
-When a run fails (`result.success=False`, or the screenshot looks wrong), the
-**stdout `on_step` trace is the fastest entry point** — find the step where the
-model started looping or chose a wrong action, then jump to that step's
-screenshot in the report.
-
-**Embed a screen video in the report.** The report auto-discovers a file named
-`recording.mp4` in `bot.report_dir` and embeds it as a `<video>` at the top
-(next to the step screenshots) — just put one there before `bot.close()`:
-
-- **Desktop / browser** → let the SDK record the host screen for you:
-  `Qirabot(record=True)` (or env `QIRA_RECORD=1`) runs ffmpeg into
-  `recording.mp4`, no extra code. On **Windows** you can additionally record
-  only the window under test and capture its sound:
-  `Qirabot(record=True, record_window=True, record_audio=True)` — `record_window`
-  follows the airtest window automatically (else full screen) and crops the
-  desktop to it, so **GPU/game windows record correctly** (keep them visible);
-  `record_audio` needs a loopback device (`virtual-audio-capturer` / "Stereo Mix").
-- **Android / iOS (or any native framework)** → host capture can't see the
-  device, so record the **device** with its own recorder and write it to
-  `bot.report_dir/recording.mp4`. Start before `bot.ai` and **stop before
-  `bot.close()`** (close scans for the file):
-  - Airtest (Android): `device().start_recording(output=os.path.join(bot.report_dir, "recording.mp4"), max_time=1800)`, then `device().stop_recording(output=...)` in a `finally`.
-  - Appium (iOS/Android): `driver.start_recording_screen()`, then write
-    `base64.b64decode(driver.stop_recording_screen())` to that same path.
-
-See `references/REFERENCE.md` (the `record` row) for details.
+To embed a screen video in the report, have `recording.mp4` in
+`bot.report_dir` before `close()`: `Qirabot(record=True)` records the host
+screen (desktop/browser); for Android/iOS record the **device** screen via
+`record_device=True` / `record_mjpeg_url` — see the `record*` rows in
+`references/REFERENCE.md`.
 
 ## Notes
 
-- One script run = one Qirabot session = one task. State (the live
-  page/driver) does not survive across separate `python` invocations, so put a
-  whole task in one script. **To reuse a login across runs**, open with a
-  persistent profile: `bot.open(url, user_data_dir=os.path.expanduser("~/.qira-profiles/<site>"))`
-  (log in once, later runs start authenticated — see `references/REFERENCE.md`).
-  NOTE: pass an **absolute** path — qirabot/Playwright do NOT expand `~`, so a
-  literal `"~/..."` creates a `./~/` dir in the CWD. Use `os.path.expanduser`.
-- **Windows desktop/games: run elevated to drive elevated targets.** If the
-  target app/game runs as Administrator (common for games with anti-cheat), run
-  the script as Administrator too — else Windows UIPI silently drops
-  clicks/keystrokes (cursor moves, nothing happens, no error). Script privilege
-  must be ≥ the target's.
+- One script run = one session = one task; the live page/driver does not
+  survive across `python` invocations, so put a whole task in one script. To
+  reuse a login across runs, open with a persistent profile
+  (`user_data_dir=...`, ABSOLUTE path — `~` is not expanded; see
+  REFERENCE.md "Persistent login").
+- **Windows desktop/games:** if the target app runs as Administrator, run the
+  script elevated too — else Windows UIPI silently drops clicks/keystrokes
+  (cursor moves, nothing happens, no error).
 - **Confirm before irreversible or outward-facing actions** done under the
-  user's identity (posting a comment, purchasing, deleting): gather/read first,
-  report exactly what you're about to do, get the user's go-ahead, then act.
-  Keep the read step and the action step separate.
-- Costs real credits per AI call. Watch for `InsufficientBalanceError`. Pick the
-  cheapest model that fits via `Qirabot(model_alias=...)` — `fast`/`balanced` for
-  simple flows, stepping up only when needed (tiers in REFERENCE). Long
-  human-in-the-loop waits (QR/OTP) poll with billed AI calls — raise the
-  `wait_for` `interval` or poll the live driver instead (see REFERENCE).
-- `bot.close()` (or the `with` form) finalizes the task and writes the report —
-  always close, even on error.
+  user's identity (posting, purchasing, deleting): read first, report exactly
+  what you're about to do, get the user's go-ahead, then act — as separate
+  steps.
+- Costs real credits per AI call; watch for `InsufficientBalanceError`. Pick
+  the cheapest `model_alias` that fits (`fast`/`balanced`, stepping up only
+  when needed). Long human-in-the-loop waits (QR/OTP) poll with billed calls —
+  raise the `wait_for` interval or poll the live driver free (see REFERENCE).
+- Always `bot.close()` (or the `with` form) — it finalizes the task and writes
+  the report, even on error.
