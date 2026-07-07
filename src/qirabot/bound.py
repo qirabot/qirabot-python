@@ -250,6 +250,8 @@ class _BoundQirabot:
         on_step: Callable[["StepResult"], None] | None = None,
         model_alias: str = "",
         language: str = "",
+        custom_tools: list[Callable[..., Any] | dict[str, Any]] | None = None,
+        exclude_tools: list[str] | None = None,
     ) -> "RunResult":
         return self._bot.ai(
             self._target,
@@ -258,6 +260,8 @@ class _BoundQirabot:
             on_step=on_step,
             model_alias=model_alias,
             language=language,
+            custom_tools=custom_tools,
+            exclude_tools=exclude_tools,
         )
 
     def screenshot(self) -> Path | None:

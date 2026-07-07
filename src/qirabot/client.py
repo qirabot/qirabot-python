@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 
 from qirabot._optional import require
+from qirabot._tools import build_tool_defs
 from qirabot._transport import Transport
 from qirabot.recording import MjpegStreamRecorder, Recorder, ScreenRecorder, device_recorder
 from qirabot.adapters import auto
@@ -892,10 +893,23 @@ class Qirabot:
         on_step: Callable[[StepResult], None] | None = None,
         model_alias: str = "",
         language: str = "",
+        custom_tools: list[Callable[..., Any] | dict[str, Any]] | None = None,
+        exclude_tools: list[str] | None = None,
     ) -> RunResult:
         """AI-powered multi-step operation.
 
         Steps run by this call are grouped under ``instruction`` in the report.
+
+        ``custom_tools`` registers your own functions as tools the model can
+        call mid-task (e.g. a GM-command sender in game testing). Pass named
+        functions — tool name, description, and parameters come from the
+        function name, docstring, and signature — or dicts with an explicit
+        schema plus a ``handler`` callable. When the model picks one, the SDK
+        calls it locally and feeds the return value back to the model as the
+        observation; tools run on your machine only, never server-side.
+
+        ``exclude_tools`` removes built-in tools (by name, e.g. ``"scroll"``)
+        from the model's tool list for this call; ``done`` cannot be excluded.
         """
         prev_section = self._current_section
         self._current_section = instruction or "ai"
@@ -907,6 +921,8 @@ class Qirabot:
                 on_step=on_step,
                 model_alias=model_alias,
                 language=language,
+                custom_tools=custom_tools,
+                exclude_tools=exclude_tools,
             )
             self._section_outcomes[self._current_section] = result.status
             return result
@@ -935,11 +951,15 @@ class Qirabot:
         on_step: Callable[[StepResult], None] | None = None,
         model_alias: str = "",
         language: str = "",
+        custom_tools: list[Callable[..., Any] | dict[str, Any]] | None = None,
+        exclude_tools: list[str] | None = None,
     ) -> RunResult:
         adapter = self._get_adapter(target)
         steps: list[StepResult] = []
         last_action_result = ""
         last_was_save_note = False
+        tool_defs, tool_handlers = build_tool_defs(custom_tools) if custom_tools else ([], {})
+        sent_tool_params = bool(tool_defs or exclude_tools)
 
         for step_num in range(1, max_steps + 1):
             # After save_note the device hasn't moved, so reuse the cached
@@ -963,9 +983,14 @@ class Qirabot:
             if last_action_result:
                 request_body["action_result"] = last_action_result
             if step_num == 1:
+                ai_params: dict[str, Any] = {"instruction": instruction, "max_steps": max_steps}
+                if tool_defs:
+                    ai_params["custom_tools"] = tool_defs
+                if exclude_tools:
+                    ai_params["exclude_tools"] = list(exclude_tools)
                 request_body["action"] = {
                     "type": "ai",
-                    "params": {"instruction": instruction, "max_steps": max_steps},
+                    "params": ai_params,
                 }
             alias = model_alias or self._model_alias
             if alias:
@@ -1006,6 +1031,24 @@ class Qirabot:
                         success=False, output=error_msg, steps=steps, status="error"
                     )
                 raise ActionError(error_msg)
+
+            if warning := result.get("warning"):
+                logger.warning("%s", warning)
+            if step_num == 1 and sent_tool_params:
+                # Only successful responses go through NewStepResponse, so the
+                # echo's absence there is meaningful; error bodies never carry it.
+                registration = result.get("tool_registration")
+                if registration:
+                    logger.info(
+                        "custom tools registered: %s; excluded: %s",
+                        registration.get("registered") or [],
+                        registration.get("excluded") or [],
+                    )
+                else:
+                    logger.warning(
+                        "server does not support custom_tools/exclude_tools; "
+                        "tools will not take effect"
+                    )
 
             action_type = result.get("actionType")
             action_params = result.get("params") or {}
@@ -1078,8 +1121,19 @@ class Qirabot:
 
             if action_type and action_type != "done":
                 try:
-                    self._execute_action(adapter, result)
-                    last_action_result = "ok"
+                    if action_type in tool_handlers:
+                        # Custom tool: run the user's handler instead of a
+                        # device action. Params are exactly the model's args
+                        # for the registered schema (the server strips its
+                        # meta fields). The return value is the observation
+                        # fed back to the model on the next request —
+                        # "ok" if result is None, NOT str(result) or "ok":
+                        # str(None) is the truthy string "None".
+                        ret = tool_handlers[action_type](**action_params)
+                        last_action_result = "ok" if ret is None else str(ret)
+                    else:
+                        self._execute_action(adapter, result)
+                        last_action_result = "ok"
                 except Exception as e:
                     last_action_result = f"ERROR: {e}"
                     # The step's screenshot/decision were recorded before this
