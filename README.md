@@ -24,6 +24,14 @@ qirabot doctor                   # optional: verify the environment end-to-end
 Requires Python 3.10+. That's everything the [Quick Start](#quick-start) needs;
 `bot.open()` launches the browser for you.
 
+> **Using [uv](https://docs.astral.sh/uv/)?** The first two lines get shorter.
+> For the CLI, `uv tool install "qirabot[browser]"` installs into its own
+> isolated environment — no virtualenv to manage, and no pre-installed Python
+> required (uv downloads one on demand). For library use (importing `qirabot`
+> in your own tests), `uv venv && uv pip install "qirabot[browser]"` replaces
+> the venv-and-pip lines above and sidesteps the
+> `externally-managed-environment` error below entirely.
+
 > Seeing `error: externally-managed-environment`? You're installing into the
 > system Python (Debian/Ubuntu block that, per PEP 668) — create and activate a
 > virtualenv as above, and prefer `python -m pip` over bare `pip` so the install
@@ -57,7 +65,8 @@ python -m pip install qirabot selenium     # Selenium is not an extra — bring 
 > prebuilt wheels stop at **Python 3.12**. On 3.13+ pip builds numpy from
 > source — that works with a C toolchain installed (verified on 3.14) and fails
 > without one. Easiest path: **`qirabot[airtest]` on Python 3.10–3.12**, ideally
-> in a fresh virtualenv. AirtestIDE (the standalone GUI) also targets 3.10–3.12.
+> in a fresh virtualenv — `uv venv --python 3.12` gets you one without touching
+> the system Python. AirtestIDE (the standalone GUI) also targets 3.10–3.12.
 
 Whichever path you took, `qirabot doctor` reports what is installed, what is
 missing (with the exact command to fix it), and whether your API key reaches
