@@ -292,6 +292,13 @@ class Qirabot:
         # ai() instruction -> RunStatus, for the per-section badge in the
         # report (completed / goal_failed / max_steps / error).
         self._section_outcomes: dict[str, str] = {}
+        # Outcome of the most recent ai() call, driving close()'s auto-complete
+        # status: a run whose last command errored must not be recorded as
+        # "completed" just because close() ran (atexit after a crash included).
+        # goal_failed/max_steps stay "completed" at task level — the command
+        # ran; whether that fails the task is the script's call via fail().
+        self._last_ai_status: str | None = None
+        self._last_ai_error = ""
         # Session-wide totals for the report header. Token/timing data rides in
         # each ai() step result, not in _log, so we accumulate it here as steps
         # run and hand the totals to the report at render time.
@@ -925,11 +932,15 @@ class Qirabot:
                 exclude_tools=exclude_tools,
             )
             self._section_outcomes[self._current_section] = result.status
+            self._last_ai_status = result.status
+            self._last_ai_error = result.output if result.status == "error" else ""
             return result
-        except Exception:
+        except Exception as e:
             # Any exception on the way out — ActionError, timeout, adapter
             # failure — is an "error" ending, distinct from goal_failed.
             self._section_outcomes[self._current_section] = "error"
+            self._last_ai_status = "error"
+            self._last_ai_error = str(e)
             raise
         finally:
             self._current_section = prev_section
@@ -1758,10 +1769,13 @@ class Qirabot:
         """Report a client-side failure so the task is recorded as failed.
 
         Use this when the run is aborted by an error on the client (e.g. your
-        script catches an exception): without it, the default close() would
-        complete the still-running task as "completed". Idempotent and a no-op for
-        externally owned tasks. The server's state machine rejects a later
-        completion once the task is failed, so a subsequent close() cannot override it.
+        script catches an exception) and you want to attach your own error
+        message or fail regardless of the last command's outcome. As a safety
+        net, close() already records the task as failed when the most recent
+        ai() call errored — fail() lets you be explicit and covers errors
+        outside ai(). Idempotent and a no-op for externally owned tasks. The
+        server's state machine rejects a later completion once the task is
+        failed, so a subsequent close() cannot override it.
         """
         if self._terminalized:
             return
@@ -1869,12 +1883,24 @@ class Qirabot:
                 self._write_report()
             except BaseException:
                 logger.debug("report write interrupted", exc_info=True)
-        # Only auto-complete (as success) when no terminal status was reported
-        # yet — an errored run reports failure via fail() first.
+        # Auto-complete when no terminal status was reported yet. Status
+        # follows the last ai() outcome: a run whose final command errored is
+        # recorded failed, not completed — this covers scripts that crash out
+        # of ai() and never reach fail() (close() then runs via atexit).
+        # An explicit fail()/cancel() beforehand always wins (_terminalized).
         if self._task_id is not None and not self._external_task and not self._terminalized:
             self._terminalized = True
             try:
-                self._transport.post(f"/tasks/{self._task_id}/complete")
+                if self._last_ai_status == "error":
+                    self._transport.post(
+                        f"/tasks/{self._task_id}/complete",
+                        json_data={
+                            "status": "failed",
+                            "errorMessage": self._last_ai_error or "run ended after an errored command",
+                        },
+                    )
+                else:
+                    self._transport.post(f"/tasks/{self._task_id}/complete")
             except Exception:
                 logger.debug("failed to complete task %s on close", self._task_id)
         # Let adapters unhook framework listeners (e.g. Playwright's "page"
