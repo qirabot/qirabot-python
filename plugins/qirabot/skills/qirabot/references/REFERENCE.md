@@ -35,7 +35,8 @@ Common constructor options (all keyword):
 ## Default: hand the task to `bot.ai`
 
 ```python
-result = bot.ai(target, instruction, max_steps=20, *, on_step=None, model_alias="", language="")
+result = bot.ai(target, instruction, max_steps=20, *, on_step=None, model_alias="",
+                language="", custom_tools=None, exclude_tools=None)
 # result.success -> bool, result.output -> str (final answer)
 ```
 
@@ -64,6 +65,25 @@ the hot path, so keep it light and wrap any IO in `try`; an exception thrown her
 aborts the run.) A lighter alternative if you only want a trace, not structured
 data: `logging.basicConfig(level=logging.INFO)` — `bot.ai` already logs each step
 at INFO.
+
+**`custom_tools` — register your own functions as tools the model can call
+mid-task.** Any Python function works — anything code can do (internal API
+call, database query, OTP fetch, test-data seeding, human-help pause; a GM
+command in game testing is just one example). Pass named functions: name/description/parameter schema are introspected from
+the function name, **docstring (required)**, and signature (annotations
+`str`/`int`/`float`/`bool`; params without defaults = required; lambdas and
+`*args`/`**kwargs` rejected; max 16 tools). The handler runs **locally** — the
+server never sees your endpoint/credentials — and its return value is fed back
+to the model as the observation (`None` → `"ok"`; a raised exception → `ERROR:
+...` so the model can react). Dict escape hatch for richer schemas:
+`{"name", "description", "parameters", "handler": fn}`.
+
+**`exclude_tools`** removes built-in tools by name (e.g. `"long_press"`) from
+the model's tool list for this call — prune actions the task never needs so the
+model can't wander into them. `done` cannot be excluded. Excluding an action the
+task actually requires (e.g. `"click"` on a browsing task) strands the run.
+Both params work on bound calls too; a server too old to support them logs a
+warning and the run continues without them.
 
 ## Bind (drop the repeated first arg)
 
@@ -126,7 +146,10 @@ and cross-check against a screenshot.
 burns credits while a human acts. Raise the interval (e.g. `interval=8.0`) or
 skip the AI and poll the live driver for free, e.g.
 `bot.current_page(target).wait_for_url("**/success**")` or watch
-`...context.cookies()`.
+`...context.cookies()`. **Inside `bot.ai`**, register a `custom_tools` function
+that blocks on `input()` until the human is done — zero billed calls while
+waiting, and the model resumes with the tool's return value (see `custom_tools`
+above; the instruction must tell the model when to call it).
 
 ## Non-AI actions (no model call)
 

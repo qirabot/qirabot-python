@@ -30,3 +30,4 @@ python examples/automation/01_quickstart.py
 - [03_scrape_data.py](03_scrape_data.py) — loop over URLs, extract a field from each, save JSON (headless)
 - [04_connect_cdp.py](04_connect_cdp.py) — drive a Chrome you already have open via CDP
 - [05_concurrent.py](05_concurrent.py) — run several browsers in parallel with a process pool, cloning a logged-in profile per worker
+- [06_human_in_the_loop.py](06_human_in_the_loop.py) — a `custom_tools` function that pauses `bot.ai()` so a human can solve a CAPTCHA / login wall, then resumes

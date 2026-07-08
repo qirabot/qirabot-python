@@ -112,6 +112,14 @@ do), drop the leading arg: `bot.ai("...")`, `bot.click("...")`. Keep the
 explicit `page = bot.click(page, ...)` form for Playwright so new-tab switches
 stay visible.
 
+When the task needs something the UI can't do, pass
+`custom_tools=[your_function]` — any Python function: call a backend endpoint,
+query a database, fetch an OTP, pause for a human to pass a captcha. The model
+calls it mid-task, it runs locally, and the return value feeds back as the
+observation. `exclude_tools=["..."]`
+prunes built-in actions the task never needs. Rules and details:
+`references/REFERENCE.md`.
+
 **Drop to per-step primitives only as a deliberate optimization** — strict
 determinism or a stable flow run repeatedly (e.g. CI): cheaper per action,
 reproducible, but brittle to UI changes:

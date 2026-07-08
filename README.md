@@ -374,7 +374,8 @@ Notes on this example:
   CI, which calls `cli_setup()` for you) and as a plain `python script.py`.
 - **`bind(G)`** binds the bot to the current device, so `bot.ai(TASK, ...)` takes
   the instruction directly (no `target` argument). Bound calls accept
-  `max_steps`, `on_step`, `model_alias`, and `language`.
+  `max_steps`, `on_step`, `model_alias`, `language`, `custom_tools`, and
+  `exclude_tools`.
 - **`on_step`** fires after every action — use it for live logging or to push
   progress somewhere. `step.finished` marks the terminal step.
 - **Recording** uses `record=True, record_device=True`: the recorder is picked
@@ -489,6 +490,61 @@ print(f"Success: {result.success}")
 print(f"Output: {result.output}")
 bot.close()
 ```
+
+### Custom tools (`custom_tools`) & pruning built-ins (`exclude_tools`)
+
+`custom_tools` registers your own functions as tools the model can call
+mid-task. Any Python function works — if code can do it, the model can invoke
+it: hit an internal API, query a database, fetch an OTP from your mail server,
+seed test data, pause for a human. Pass named functions: the tool name,
+description, and parameter schema are introspected from the function name,
+docstring, and signature.
+When the model picks one, the SDK runs it **locally on your machine** (the
+server never sees your endpoint or credentials) and feeds the return value
+back to the model as the observation for the next step:
+
+```python
+def gm_command(command: str) -> str:
+    """Send a command to the game's GM backend and return its reply.
+    Available commands: add_energy <amount>, add_gold <amount>, finish_quest <quest_id>
+    """
+    resp = requests.post(GM_URL, json={"cmd": command}, headers={"X-GM-Token": GM_TOKEN}, timeout=10)
+    return resp.text
+
+result = bot.ai(
+    device,
+    "Complete every daily quest. If an out-of-energy popup appears, "
+    "use gm_command to add 100 energy and continue",
+    custom_tools=[gm_command],
+    exclude_tools=["long_press"],   # optional: prune built-ins the task never needs
+)
+```
+
+Rules and details:
+
+- **Docstring required** — it becomes the tool description the model reads, so
+  say what the tool does and what inputs it accepts. Parameter types come from
+  annotations (`str`/`int`/`float`/`bool`; anything else falls back to string);
+  parameters without defaults are marked required. Lambdas and `*args`/`**kwargs`
+  are rejected. At most 16 tools per call.
+- **Dict form (escape hatch)** — for schemas introspection can't express (enums,
+  per-parameter descriptions), pass
+  `{"name": ..., "description": ..., "parameters": {...}, "handler": fn}`.
+- **Return value** — whatever the function returns is stringified and shown to
+  the model as the action result (`None` becomes `"ok"`); a raised exception is
+  reported back as `ERROR: ...` so the model can react instead of the run dying.
+- **`exclude_tools`** removes built-in tools by name (e.g. `"scroll"`,
+  `"long_press"`) from the model's tool list for this call — useful to keep the
+  model from wandering into actions the task never needs. `done` cannot be
+  excluded.
+- Both parameters are per-`ai()`-call and also available on a
+  [bound bot](#bind-a-target-optional). If the server is too old to support
+  them, the SDK logs a warning and the run continues without them.
+
+Runnable examples: [examples/game/custom_tool_gm.py](examples/game/custom_tool_gm.py)
+(let the AI call your GM backend mid-task) and
+[examples/automation/06_human_in_the_loop.py](examples/automation/06_human_in_the_loop.py)
+(pause for a human to solve a CAPTCHA / login wall, then continue).
 
 ### Settle delay
 
