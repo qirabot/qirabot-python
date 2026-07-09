@@ -35,6 +35,8 @@ h1 { font-size: 20px; margin: 0 0 4px; }
 .neutral { background: #e6e8eb; color: #444; }
 .notice { background: #fff4d6; color: #7a5200; padding: 10px 14px; border-radius: 8px;
           margin-bottom: 18px; font-size: 13px; }
+.notice.error { background: #fbdcdc; color: #8a1010; }
+section .notice { margin: 10px 14px 4px; }
 section { background: #fff; border: 1px solid #e3e5e8; border-radius: 10px;
           margin-bottom: 18px; overflow: hidden; }
 section > h2 { font-size: 15px; margin: 0; padding: 12px 16px; background: #fafbfc;
@@ -104,6 +106,7 @@ video { max-width: 100%; border-radius: 8px; margin-bottom: 18px; }
   .when a { color: #a9c7ff; }
   .detail .decision { color: #9aa0a6; }
   .notice { background: #3a2f12; color: #f0d493; }
+  .notice.error { background: #3a1d1d; color: #f3a6a6; }
 }
 """
 
@@ -210,10 +213,13 @@ def _fmt_ms(ms: int) -> str:
 def _render_stats(stats: dict[str, int], model: str) -> str:
     """A one-line run summary (steps · tokens · timing · model).
 
-    Returns an empty string when there were no AI steps, so non-AI runs
-    (standalone click/type actions) don't get a meaningless zero line.
+    The headline count is ``total_steps`` — every timeline entry, matching
+    the server's step count — with the AI-decision subset in parentheses.
+    Returns an empty string only when nothing ran at all: a purely local run
+    (0 AI steps) still gets its step count.
     """
-    if not stats.get("ai_steps"):
+    total_steps = stats.get("total_steps", 0)
+    if not total_steps:
         return ""
     inp = stats.get("input_tokens", 0)
     out = stats.get("output_tokens", 0)
@@ -221,7 +227,7 @@ def _render_stats(stats: dict[str, int], model: str) -> str:
     # thinking tokens are already counted within output tokens (Anthropic
     # semantics), so the total is input + output — do not add thinking again.
     total = inp + out
-    bits = [f"{stats['ai_steps']} AI steps"]
+    bits = [f"{total_steps} steps ({stats.get('ai_steps', 0)} AI)"]
     if total:
         bits.append(
             f"{_fmt_tokens(total)} tokens "
@@ -311,6 +317,7 @@ def write_html(
     title: str = "",
     task_id: str = "",
     outcomes: Mapping[str, bool | str] | None = None,
+    section_errors: Mapping[str, str] | None = None,
     recording: str = "",
     recording_start: float = 0.0,
     record_error: str = "",
@@ -319,12 +326,21 @@ def write_html(
 ) -> Path:
     """Render ``log`` to a self-contained HTML report at ``path``.
 
+    ``section_errors`` maps a section to its failure text (max-steps
+    truncation / terminal server error), rendered as a banner above that
+    section's step table — these are section-level outcomes, not steps.
+
     ``recording_start`` is the epoch time the embedded recording began; when
     set (and a recording is present), each step's elapsed offset becomes a
     link that seeks the video to that moment.
     """
     outcomes = outcomes or {}
+    section_errors = section_errors or {}
     stats = stats or {}
+    # Callers predating the total_steps key still get a stats line keyed on
+    # the timeline length.
+    if stats and "total_steps" not in stats:
+        stats = {**stats, "total_steps": len(log)}
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -337,6 +353,13 @@ def write_html(
             grouped[sec] = []
             sections.append(sec)
         grouped[sec].append(entry)
+    # A section that failed before recording any step (e.g. a terminal server
+    # error on its first step) has a banner but no entries — still render it,
+    # or the failure reason would vanish from the report.
+    for sec in section_errors:
+        if sec not in grouped:
+            grouped[sec] = []
+            sections.append(sec)
 
     def section_kind(sec: str) -> tuple[str, str]:
         if sec in outcomes:
@@ -406,6 +429,16 @@ def write_html(
         parts.append(
             f"<h2>{html.escape(sec)} {_badge(label, kind)}</h2>"
         )
+        # Section-level failure banner: amber for a max-steps truncation
+        # (matching its badge), red for a terminal error.
+        sec_err = section_errors.get(sec)
+        if sec_err:
+            status = _normalize_status(outcomes[sec]) if sec in outcomes else ""
+            if status == "max_steps":
+                cls, mark = "notice", "⚠"
+            else:
+                cls, mark = "notice error", "✗"
+            parts.append(f"<div class='{cls}'>{mark} {html.escape(sec_err)}</div>")
         parts.append("<div class='steps'>")
         parts.append(
             "<div class='head'>#</div><div class='head'>time</div>"

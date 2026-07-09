@@ -252,17 +252,31 @@ class TestAiLoopStatus:
         assert bot._section_outcomes["do thing"] == "error"
         bot.close()
 
-    def test_max_steps_terminal_step_recorded_as_warn(self):
-        # The synthetic terminal record for a max-steps ending is marked
-        # warn=True so the report tints it amber, not failure red.
+    def test_max_steps_records_section_error_not_step(self):
+        # A max-steps ending is a section-level banner, NOT a synthetic step
+        # entry — synthetic steps made the report's step count disagree with
+        # the server's. One real step ran, so exactly one step is recorded.
         bot = self._bot_returning({
             "success": True, "finished": False, "actionType": "wait", "params": {},
         })
         recorded = []
         bot._record_step = lambda *a, **k: recorded.append(k) or None
         bot.ai(object(), "do thing", max_steps=1)
-        assert recorded[-1].get("warn") is True
-        assert recorded[-1].get("output") == "max steps reached"
+        assert len(recorded) == 1
+        assert bot._section_errors["do thing"] == "max steps reached (1)"
+        bot.close()
+
+    def test_server_terminal_error_records_section_error_not_step(self):
+        # Same for a server-reported terminal error: no step committed
+        # server-side, so none is recorded locally either.
+        bot = self._bot_returning({
+            "success": False, "finished": True, "error": "session expired",
+        })
+        recorded = []
+        bot._record_step = lambda *a, **k: recorded.append(k) or None
+        bot.ai(object(), "do thing", max_steps=3)
+        assert recorded == []
+        assert bot._section_errors["do thing"] == "session expired"
         bot.close()
 
 

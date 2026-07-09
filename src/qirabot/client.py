@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import weakref
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
@@ -38,6 +39,12 @@ if TYPE_CHECKING:
     from playwright.sync_api import ViewportSize
 
 logger = logging.getLogger("qirabot")
+
+# Local-step sync flush thresholds: entry count matches the server's batch
+# cap; the byte cap keeps a full batch of desktop JPEG screenshots well under
+# whatever body limit a fronting reverse proxy enforces.
+_LOCAL_BUF_MAX_ENTRIES = 50
+_LOCAL_BUF_MAX_BYTES = 8 * 1024 * 1024
 
 
 @contextlib.contextmanager
@@ -243,6 +250,7 @@ class Qirabot:
         record_mjpeg_url: str | None = None,
         record_device: bool = False,
         heartbeat: bool = True,
+        sync_local_steps: bool = True,
     ):
         api_key = api_key or os.environ.get("QIRA_API_KEY", "")
         # Fail fast on a missing key: it's a local config error, so surface an
@@ -306,6 +314,11 @@ class Qirabot:
         # ai() instruction -> RunStatus, for the per-section badge in the
         # report (completed / goal_failed / max_steps / error).
         self._section_outcomes: dict[str, str] = {}
+        # ai() instruction -> failure text, rendered as a banner above the
+        # section's step table (max-steps truncation / server terminal error).
+        # These used to be synthetic step entries in _log, which made the
+        # report's step count disagree with the server's.
+        self._section_errors: dict[str, str] = {}
         # Outcome of the most recent ai() call, driving close()'s auto-complete
         # status: a run whose last command errored must not be recorded as
         # "completed" just because close() ran (atexit after a crash included).
@@ -350,6 +363,17 @@ class Qirabot:
             raise ValueError(f"settle_seconds must be >= 0, got {settle_seconds}")
         self._settle_seconds = settle_seconds
         self._step_seq = 0
+        # Local-step sync: deterministic actions (press_key/scroll/...) are
+        # buffered here and flushed to POST /tasks/{id}/local-steps so the
+        # cloud timeline includes them (see _flush_local_steps for the flush
+        # points that keep step ordering correct). Sync shares the report's
+        # capture pipeline, so report=False disables both.
+        self._sync_local_steps = sync_local_steps
+        self._local_buf: list[dict[str, Any]] = []
+        self._local_buf_bytes = 0
+        # None = not probed yet; False = old server (404) or terminal task —
+        # stop posting for the rest of the session.
+        self._local_sync_supported: bool | None = None
         # Built-in ffmpeg full-screen recording. Opt-in (default off); the
         # QIRA_RECORD env var enables it without a code change. Auto-started here
         # and stopped in close() so the mp4 is finalized before the report scans
@@ -1072,17 +1096,11 @@ class Qirabot:
                 error_msg = result.get("error", "AI request failed")
                 if result.get("finished"):
                     logger.error("failed: %s", error_msg)
-                    # Record the failure so the report shows *why* the task
-                    # ended — otherwise this branch returns silently and the
-                    # error reason never reaches the timeline.
-                    self._record_step(
-                        screenshot_bytes,
-                        result.get("actionType") or "ai",
-                        result.get("params") or {},
-                        output=error_msg,
-                        finished=True,
-                        success=False,
-                    )
+                    # Surface the failure reason as a section banner, NOT a
+                    # synthetic step entry: no step committed server-side, so
+                    # adding one locally would make the report's step count
+                    # disagree with the cloud timeline.
+                    self._section_errors[self._current_section] = error_msg
                     return RunResult(
                         success=False, output=error_msg, steps=steps, status="error"
                     )
@@ -1208,18 +1226,12 @@ class Qirabot:
             last_was_save_note = action_type == "save_note"
 
         # A truncation, not an error: the budget ran out before the model
-        # finished. warning-level, and the recorded step is marked warn so the
-        # report tints it amber instead of failure red.
+        # finished. warning-level, and surfaced as an amber section banner
+        # rather than a synthetic step entry — the server records the same
+        # outcome on the command, not as a step, and the report's step count
+        # must match the cloud timeline.
         logger.warning("stopped: step budget exhausted (%d/%d)", max_steps, max_steps)
-        self._record_step(
-            screenshot_bytes,
-            "ai",
-            {"instruction": instruction, "max_steps": max_steps},
-            output="max steps reached",
-            finished=True,
-            success=False,
-            warn=True,
-        )
+        self._section_errors[self._current_section] = f"max steps reached ({max_steps})"
         # Output string is load-bearing: callers may match "max steps reached".
         return RunResult(
             success=False, output="max steps reached", steps=steps, status="max_steps"
@@ -1601,16 +1613,117 @@ class Qirabot:
             # (a stubbed adapter, a backend returning None) is skipped rather
             # than written to disk.
             if isinstance(data, (bytes, bytearray)):
+                raw = bytes(data)
                 self._record_step(
-                    bytes(data),
+                    raw,
                     action_type,
                     params or {},
                     coords,
                     end_coords=_extract_end_coords(params),
                     coord_scale=adapter.annotation_scale(),
                 )
+                self._buffer_local_step(action_type, params or {}, raw)
         except Exception:
             logger.debug("local step recording failed", exc_info=True)
+
+    def _buffer_local_step(
+        self, action_type: str, params: dict[str, Any], screenshot: bytes
+    ) -> None:
+        """Queue a locally-executed step for cloud sync (no network here unless
+        a threshold is crossed).
+
+        Draws step_seq from the same per-task counter as /act so a replayed
+        batch is idempotent server-side. The execution timestamp rides along as
+        ``ts`` — the server stores it as client_ts, because created_at will be
+        the (batched) flush time, not the execution time.
+        """
+        if not self._sync_local_steps or self._local_sync_supported is False:
+            return
+        if self._task_id is None or self._terminalized:
+            return
+        self._step_seq += 1
+        self._local_buf.append(
+            {
+                "step_seq": self._step_seq,
+                "action_type": action_type,
+                "params": params,
+                "ts": datetime.now(timezone.utc)
+                .isoformat(timespec="milliseconds")
+                .replace("+00:00", "Z"),
+                "screenshot": screenshot,
+            }
+        )
+        self._local_buf_bytes += len(screenshot)
+        if (
+            len(self._local_buf) >= _LOCAL_BUF_MAX_ENTRIES
+            or self._local_buf_bytes >= _LOCAL_BUF_MAX_BYTES
+        ):
+            self._flush_local_steps()
+
+    def _flush_local_steps(self) -> None:
+        """Upload the buffered local steps to the server, best-effort.
+
+        Called synchronously right before every cloud call (so local steps
+        always commit before the AI step that follows them — step_number order
+        then matches real execution order), on buffer thresholds, and from
+        close(). A failed flush drops the batch (the local report still has
+        the full record) and must never affect the action flow. A 404 marks
+        the server as not supporting the endpoint; no further attempts this
+        session.
+        """
+        if not self._local_buf:
+            return
+        buf, self._local_buf, self._local_buf_bytes = self._local_buf, [], 0
+        if self._local_sync_supported is False or self._task_id is None:
+            return
+
+        steps: list[dict[str, Any]] = []
+        files: dict[str, tuple[str, bytes, str]] = {}
+        for i, item in enumerate(buf):
+            entry: dict[str, Any] = {
+                "step_seq": item["step_seq"],
+                "action_type": item["action_type"],
+                "ts": item["ts"],
+            }
+            if item["params"]:
+                entry["params"] = item["params"]
+            steps.append(entry)
+            if item["screenshot"]:
+                files[f"screenshot_{i}"] = (
+                    f"screenshot.{self._screenshot_config.extension}",
+                    item["screenshot"],
+                    self._screenshot_config.mime_type,
+                )
+
+        try:
+            result = self._transport.post_multipart(
+                f"/tasks/{self._task_id}/local-steps",
+                files=files,
+                data={"request": json.dumps({"steps": steps})},
+            )
+        except QirabotError as e:
+            if getattr(e, "status_code", None) == 404:
+                # Old server (or the task vanished): stop probing for the rest
+                # of the session instead of posting a doomed request per batch.
+                if self._local_sync_supported is None:
+                    logger.warning(
+                        "server does not support local step sync; "
+                        "cloud step counts will exclude local actions"
+                    )
+                self._local_sync_supported = False
+            else:
+                logger.debug("local step sync failed: %s", e)
+            return
+        except Exception:
+            logger.debug("local step sync failed", exc_info=True)
+            return
+
+        self._local_sync_supported = True
+        if result.get("control") == "terminated":
+            # The task ended server-side; further batches are pointless. The
+            # terminal handling itself stays with _check_control / close().
+            logger.debug("task is terminal; stopping local step sync")
+            self._local_sync_supported = False
 
     def _save_frame(self, data: bytes, label: str) -> Path | None:
         """Write a full-resolution screenshot to ``report_dir/screenshots/``."""
@@ -1691,6 +1804,10 @@ class Qirabot:
         gives the multi-step loop the same resilience the single-action path
         already gets from _ai_action.
         """
+        # Flush buffered local steps BEFORE the attempt loop (never inside it):
+        # they must commit ahead of this AI step so server step numbers follow
+        # real execution order, and a retried /act must not re-trigger a flush.
+        self._flush_local_steps()
         max_attempts = self._retry + 1
         for attempt in range(max_attempts):
             try:
@@ -1729,6 +1846,11 @@ class Qirabot:
 
         self._step_seq += 1
         step_seq = self._step_seq
+
+        # Flush after allocating this step's seq, before the attempt loop —
+        # local steps commit first (correct ordering) and retries don't
+        # re-flush.
+        self._flush_local_steps()
 
         for attempt in range(max_attempts):
             try:
@@ -1888,10 +2010,14 @@ class Qirabot:
                 title=self._task_name or "",
                 task_id=self._task_id or "",
                 outcomes=self._section_outcomes,
+                section_errors=self._section_errors,
                 recording=recording,
                 recording_start=self._record_started_ts if recording else 0.0,
                 record_error=record_error,
-                stats=self._stats,
+                # total_steps drives the stats line's headline count; with the
+                # synthetic entries gone and local steps synced, len(_log)
+                # matches the server's step count.
+                stats={**self._stats, "total_steps": len(self._log)},
                 model=self._model_alias,
             )
             logger.info("report written: %s", out)
@@ -1934,6 +2060,14 @@ class Qirabot:
                 self._write_report()
             except BaseException:
                 logger.debug("report write interrupted", exc_info=True)
+            # Ship the last batch of local steps while SIGINT is still
+            # suppressed — a Ctrl+C here must not drop the tail of the cloud
+            # timeline. Must run before the /complete below: a terminal task
+            # rejects the batch.
+            try:
+                self._flush_local_steps()
+            except BaseException:
+                logger.debug("local step flush interrupted", exc_info=True)
         # Auto-complete when no terminal status was reported yet. Status
         # follows the last ai() outcome: a run whose final command errored is
         # recorded failed, not completed — this covers scripts that crash out

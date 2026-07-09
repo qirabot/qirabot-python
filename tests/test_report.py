@@ -162,3 +162,72 @@ class TestStepTimestamps:
         html = out.read_text(encoding="utf-8")
         assert ">time<" in html
         assert "seekTo" not in html
+
+
+class TestSectionErrorBanners:
+    def test_max_steps_banner_renders_amber(self, tmp_path):
+        out = write_html(
+            [_entry("a")],
+            tmp_path / "report.html",
+            outcomes={"a": "max_steps"},
+            section_errors={"a": "max steps reached (5)"},
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "max steps reached (5)" in html
+        assert "<div class='notice'>⚠ max steps reached (5)</div>" in html
+
+    def test_error_banner_renders_red(self, tmp_path):
+        out = write_html(
+            [_entry("a")],
+            tmp_path / "report.html",
+            outcomes={"a": "error"},
+            section_errors={"a": "session expired"},
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "<div class='notice error'>✗ session expired</div>" in html
+
+    def test_error_only_section_still_renders(self, tmp_path):
+        # A section that failed before recording any step must still show its
+        # banner (and badge) — otherwise the failure reason vanishes.
+        out = write_html(
+            [_entry("a")],
+            tmp_path / "report.html",
+            outcomes={"a": "completed", "b": "error"},
+            section_errors={"b": "AI request failed"},
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "AI request failed" in html
+        assert "b:" in html  # badge line for the error-only section
+
+
+class TestStatsLine:
+    def test_total_steps_headline_with_ai_subset(self, tmp_path):
+        out = write_html(
+            [_entry("a"), _entry("a"), _entry("a")],
+            tmp_path / "report.html",
+            stats={"total_steps": 3, "ai_steps": 2, "input_tokens": 1000,
+                   "output_tokens": 500, "thinking_tokens": 0,
+                   "step_duration_ms": 1200},
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "3 steps (2 AI)" in html
+
+    def test_pure_local_run_still_renders_stats(self, tmp_path):
+        # 0 AI steps used to suppress the stats line entirely; a purely local
+        # script still deserves its step count.
+        out = write_html(
+            [_entry("setup"), _entry("setup")],
+            tmp_path / "report.html",
+            stats={"total_steps": 2, "ai_steps": 0},
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "2 steps (0 AI)" in html
+
+    def test_legacy_stats_without_total_steps_fall_back_to_log_length(self, tmp_path):
+        out = write_html(
+            [_entry("a")],
+            tmp_path / "report.html",
+            stats={"ai_steps": 1},
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "1 steps (1 AI)" in html
