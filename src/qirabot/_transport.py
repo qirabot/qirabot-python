@@ -71,10 +71,26 @@ class Transport:
         except httpx.RequestError as e:
             raise QirabotConnectionError(f"Network error talking to {self._base_url}: {e}") from None
 
-    def request(self, method: str, path: str, json_data: dict[str, Any] | None = None) -> Any:
-        """Send an HTTP request and return parsed JSON response."""
+    def request(
+        self,
+        method: str,
+        path: str,
+        json_data: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        """Send an HTTP request and return parsed JSON response.
+
+        ``timeout`` overrides the client-wide default for this request only —
+        the heartbeat thread uses a short one so a hung request can't pin the
+        connection for the full 120s default.
+        """
         with self._mapped_errors():
-            response = self._client.request(method, path, json=json_data)
+            response = self._client.request(
+                method,
+                path,
+                json=json_data,
+                timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+            )
         if response.status_code >= 400:
             data = _parse_error_body(response)
             raise_for_error(response.status_code, data)
@@ -85,9 +101,14 @@ class Transport:
         except Exception:
             return {}
 
-    def post(self, path: str, json_data: dict[str, Any] | None = None) -> dict[str, Any]:
+    def post(
+        self,
+        path: str,
+        json_data: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """Send a POST request."""
-        result: dict[str, Any] = self.request("POST", path, json_data)
+        result: dict[str, Any] = self.request("POST", path, json_data, timeout=timeout)
         return result
 
     def post_multipart(

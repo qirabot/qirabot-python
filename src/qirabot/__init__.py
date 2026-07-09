@@ -22,6 +22,7 @@ from qirabot.exceptions import (
     QirabotError,
     QirabotTimeoutError,
     RateLimitError,
+    TaskTerminatedError,
 )
 from qirabot.recording import (
     AdbScreenRecorder,
@@ -59,6 +60,7 @@ __all__ = [
     "RunStatus",
     "ScreenRecorder",
     "StepResult",
+    "TaskTerminatedError",
     "VerifyResult",
     "launch_app",
     "load_dotenv",

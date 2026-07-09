@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 
+from qirabot._heartbeat import Heartbeat
 from qirabot._optional import require
 from qirabot._tools import build_tool_defs
 from qirabot._transport import Transport
@@ -29,6 +30,7 @@ from qirabot.exceptions import (
     AuthenticationError,
     QirabotError,
     QirabotTimeoutError,
+    TaskTerminatedError,
     _is_retryable,
 )
 
@@ -240,6 +242,7 @@ class Qirabot:
         record_audio_offset: float | None = None,
         record_mjpeg_url: str | None = None,
         record_device: bool = False,
+        heartbeat: bool = True,
     ):
         api_key = api_key or os.environ.get("QIRA_API_KEY", "")
         # Fail fast on a missing key: it's a local config error, so surface an
@@ -275,6 +278,17 @@ class Qirabot:
                 create_body["modelAlias"] = model_alias
             result = self._transport.post("/tasks/create", json_data=create_body)
             self._task_id = result["taskId"]
+        # Background liveness signal: without it the server's orphan cleaner
+        # times the task out after ~5 minutes of silence, so a script that
+        # sleeps between bot.ai calls would be reclaimed mid-run. Sent for
+        # externally-owned tasks too — this SDK is the executor, so liveness
+        # is its to prove. QIRA_HEARTBEAT=0 is the troubleshooting kill switch.
+        self._heartbeat: Heartbeat | None = None
+        if heartbeat and os.environ.get("QIRA_HEARTBEAT", "").lower() not in ("0", "false", "no", "off"):
+            self._heartbeat = Heartbeat(
+                self._transport, self._task_id, on_terminated=self._on_server_terminated
+            )
+            self._heartbeat.start()
         # Per-run output directory, bucketed by date to avoid one flat pile:
         #   <root>/<YYYY-MM-DD>/<HHMMSS>-<task_id[:8]>/
         # report_dir / QIRA_REPORT_DIR set only the root; the date/run subdirs
@@ -380,6 +394,36 @@ class Qirabot:
         self._record_pending = self._record and self._report
         atexit.register(self.close)
         self._maybe_start_recording()
+
+    def _on_server_terminated(self, status: str) -> None:
+        """Heartbeat-thread callback: the server reports the task is terminal.
+
+        One-way boolean flip (safe under the GIL, no lock needed): close()
+        must not report /complete for a task the server already terminated —
+        the state machine would reject it, and the local report would lie.
+        The error itself surfaces on the script's next bot call via the /act
+        control response; this callback never interrupts the main thread.
+        """
+        self._terminalized = True
+
+    def _check_control(self, result: dict[str, Any]) -> None:
+        """Raise on a /act control response before any success handling.
+
+        ``control="terminated"`` means the task is already terminal server-side
+        (console kill, orphan cleaner, max-duration cap): no step ran, nothing
+        was charged, and retrying is pointless. Unknown control values (e.g. a
+        future "paused" from a newer server) fall through to the normal
+        failure path so this SDK doesn't misreport a recoverable state as
+        terminated — the server's error message travels either way.
+        """
+        if result.get("control") != "terminated":
+            return
+        self._terminalized = True
+        status = str(result.get("status", ""))
+        raise TaskTerminatedError(
+            result.get("error") or f"task already {status}",
+            task_status=status,
+        )
 
     @property
     def report_dir(self) -> str:
@@ -1022,6 +1066,7 @@ class Qirabot:
                 files=files,
                 data={"request": json.dumps(request_body)},
             )
+            self._check_control(result)
 
             if not result.get("success"):
                 error_msg = result.get("error", "AI request failed")
@@ -1738,6 +1783,7 @@ class Qirabot:
             files={"screenshot": (f"screenshot.{self._screenshot_config.extension}", screenshot_bytes, self._screenshot_config.mime_type)},
             data={"request": json.dumps(request_body)},
         )
+        self._check_control(result)
 
         if not result.get("success"):
             raise ActionError(result.get("error", "AI request failed"))
@@ -1859,6 +1905,11 @@ class Qirabot:
         if self._closed:
             return
         self._closed = True
+        # Stop the heartbeat first so no beat is in flight when the transport
+        # closes below; the thread is a daemon, so a stuck request can only
+        # cost the 2s join grace, never hang shutdown.
+        if self._heartbeat is not None:
+            self._heartbeat.stop()
         # The report is the primary artifact of an aborted run, so guarantee it
         # even if the user mashes Ctrl+C during shutdown: SIGINT is suppressed
         # for this whole block (recording finalize + report write). A plain

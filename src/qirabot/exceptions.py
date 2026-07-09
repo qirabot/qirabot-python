@@ -58,6 +58,27 @@ class QirabotConnectionError(QirabotError):
     """
 
 
+class TaskTerminatedError(QirabotError):
+    """The task was terminated server-side (console, orphan cleaner, or the
+    max-duration cap) while the script was still running.
+
+    Raised when ``/act`` answers with a ``control="terminated"`` response
+    instead of executing the step. Not a script bug: the task's server record
+    is already in a terminal state, so further steps would neither run nor be
+    recorded. ``task_status`` carries that terminal state.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        task_status: str = "",
+        code: str | None = None,
+        status_code: int | None = None,
+    ):
+        super().__init__(message, code=code, status_code=status_code)
+        self.task_status = task_status
+
+
 class MissingDependencyError(QirabotError, ImportError):
     """An optional backend dependency (e.g. playwright, pyautogui) is not installed.
 
@@ -81,7 +102,9 @@ _STATUS_CODE_MAP: dict[int, type[QirabotError]] = {
 }
 
 
-_NON_RETRYABLE = (AuthenticationError, InsufficientBalanceError)
+# TaskTerminatedError is a control-plane verdict, not a transient failure —
+# every retry would hit the same gate.
+_NON_RETRYABLE = (AuthenticationError, InsufficientBalanceError, TaskTerminatedError)
 
 
 def _is_retryable(error: QirabotError) -> bool:
