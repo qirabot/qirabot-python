@@ -270,8 +270,10 @@ class _BoundQirabot:
     def go_back(self) -> Any:
         return self._rebind(self._bot.go_back(self._target))
 
-    def press_key(self, key: str) -> Any:
-        return self._rebind(self._bot.press_key(self._target, key))
+    def press_key(self, key: str, duration_seconds: float = 0) -> Any:
+        return self._rebind(
+            self._bot.press_key(self._target, key, duration_seconds)
+        )
 
     def key_down(self, key: str) -> Any:
         return self._rebind(self._bot.key_down(self._target, key))

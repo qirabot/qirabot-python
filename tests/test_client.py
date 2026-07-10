@@ -735,6 +735,40 @@ class TestPressKey:
         adapter.execute.assert_called_once_with("press_key", {"key": "Enter"})
         bot.close()
 
+    def test_duration_included_only_when_positive(self):
+        # The wire params (and hence the recorded local step) must carry
+        # duration_seconds only for an actual hold, so a plain tap keeps the
+        # exact legacy shape old SDK/report consumers expect.
+        bot = Qirabot(api_key="k", task_id="t")
+        target = object()
+        adapter = MagicMock()
+        adapter.current_target = target
+        bot._adapters[id(target)] = adapter
+
+        bot.press_key(target, "w", duration_seconds=2)
+        adapter.execute.assert_called_once_with(
+            "press_key", {"key": "w", "duration_seconds": 2}
+        )
+
+        adapter.execute.reset_mock()
+        bot.press_key(target, "w")
+        adapter.execute.assert_called_once_with("press_key", {"key": "w"})
+        bot.close()
+
+    def test_bound_press_key_passes_duration(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        target = object()
+        adapter = MagicMock()
+        adapter.current_target = target
+        bot._adapters[id(target)] = adapter
+
+        bot.bind(target).press_key("w", duration_seconds=1.5)
+
+        adapter.execute.assert_called_once_with(
+            "press_key", {"key": "w", "duration_seconds": 1.5}
+        )
+        bot.close()
+
     def test_records_local_step_into_report_log(self, tmp_path):
         # press_key bypasses /act, so the server never sees it; it must
         # self-record into the local report or it stays invisible there.

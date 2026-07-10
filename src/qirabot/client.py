@@ -1502,7 +1502,7 @@ class Qirabot:
             {"direction": direction, "amount": distance}, (float(x), float(y)),
         )
 
-    def press_key(self, target: Any, key: str) -> Any:
+    def press_key(self, target: Any, key: str, duration_seconds: float = 0) -> Any:
         """Press a key or key combo. No AI, no billing.
 
         ``key`` is a single key (``"Enter"``, ``"Escape"``, ``"ArrowDown"``) or a
@@ -1512,13 +1512,21 @@ class Qirabot:
         (``"Back"``/``"Home"``/``"Enter"``); ctrl-style combos are desktop/browser
         only.
 
+        ``duration_seconds`` > 0 holds the key(s) for that long before releasing
+        (blocking call), for game-style movement where an instant tap is too
+        short. Desktop backends only (pyautogui, Airtest on Windows); other
+        backends degrade to an instant tap. Clamped to 10 seconds.
+
         Returns the current target (same kind you passed in). On Playwright a
         combo that opens/closes a tab (``ctrl+t``/``ctrl+w``) switches the active
         page, so reassign it (``page = bot.press_key(page, "ctrl+t")``).
         """
         adapter = self._get_adapter(target)
-        adapter.execute("press_key", {"key": key})
-        self._record_local_step(adapter, "press_key", {"key": key})
+        params: dict[str, Any] = {"key": key}
+        if duration_seconds > 0:
+            params["duration_seconds"] = duration_seconds
+        adapter.execute("press_key", params)
+        self._record_local_step(adapter, "press_key", params)
         return self._result(adapter)
 
     def _record_step(

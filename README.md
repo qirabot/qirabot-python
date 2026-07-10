@@ -593,6 +593,7 @@ bot.scroll(page, "down", 3)         # scroll at viewport center
 bot.scroll(page, "up", distance=5, x=640, y=400)  # scroll at a point
 bot.press_key(page, "Enter")        # a single key
 bot.press_key(page, "ctrl+c")       # a combo (join with "+")
+bot.press_key(target, "w", duration_seconds=2)  # hold for 2s (desktop only)
 page = bot.press_key(page, "ctrl+t")  # ctrl+t/ctrl+w switch the active tab — reassign
 ```
 
@@ -605,6 +606,7 @@ it to its own vocabulary.
 | Arrows / paging | `ArrowUp/Down/Left/Right` `PageUp` `PageDown` `Home` `End` | |
 | Combos (desktop/browser) | `ctrl+c` `ctrl+a` `alt+tab` `ctrl+shift+t` | modifiers `ctrl` `alt` `shift` `cmd` (= meta/win); join with `+` |
 | Mobile (Android/iOS) | `Back` `Home` `Menu` `Enter` | single keys only, no combos |
+| Hold (desktop) | `duration_seconds=2` (float, 0.1–10) | holds the key(s) that long before releasing — quantified in-game movement (`w`, `shift+w`), etc. Desktop backends only (pyautogui, Airtest Windows); web/mobile ignore it and tap |
 
 So `bot.press_key(t, "Enter")` becomes an adb keycode on Android and a
 DirectInput scancode on Airtest Windows automatically; `ctrl+t`/`ctrl+w` switch
@@ -657,7 +659,7 @@ shows how each underlying action maps per platform.
 - ᵇ Mobile has no right-click: Appium taps; Airtest right-clicks on Windows only, taps elsewhere.
 - ᶜ Touch targets have no hover: Appium and Airtest Android/iOS treat `hover` as a no-op; Airtest moves the cursor (no click) on Windows.
 - ᵈ Airtest has no element model; `clear_text` is best-effort on Android (caret-to-end + repeated delete).
-- ᵉ Airtest maps common key names per platform automatically — Android/iOS to adb keycodes, Windows to DirectInput scancodes (real hardware-level keys, so games that read raw scancodes receive them, incl. `ctrl`/`alt`/`win` combos), falling back to pywinauto `SendKeys` only for keys scancodes can't express (e.g. shifted symbols like `!`, F13+).
+- ᵉ Airtest maps common key names per platform automatically — Android/iOS to adb keycodes, Windows to DirectInput scancodes (real hardware-level keys, so games that read raw scancodes receive them, incl. `ctrl`/`alt`/`win` combos), falling back to pywinauto `SendKeys` only for keys scancodes can't express (e.g. shifted symbols like `!`, F13+). `duration_seconds` (hold) takes effect on pyautogui + Airtest Windows only; elsewhere it degrades to an instant tap.
 - ᶠ `long_press` is a touch-only gesture (Appium/Airtest mobile); the server only offers it on Android/iOS. Browser/desktop adapters raise `NotImplementedError`.
 - ᵍ `mouse_down`/`mouse_up`/`key_down`/`key_up` are desktop-only split press/release primitives (pyautogui, plus Airtest on Windows) for holding an input across other actions — hold a key to keep moving in a game, press-and-hold the mouse to drag, etc. Pair each press with its release; as a safety net any input still held is auto-released at the end of an `ai()` run and on `close()`. `mouse_up`'s locate is optional (omit to release at the current cursor; `bot.mouse_up(target)` is then deterministic — no AI, no billing — like `key_down`/`key_up`). Browser/mobile adapters raise `NotImplementedError`.
 

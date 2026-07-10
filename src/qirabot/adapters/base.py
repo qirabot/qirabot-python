@@ -141,6 +141,39 @@ class DeviceAdapter(ABC):
     def press_key(self, key: str) -> None:
         ...
 
+    def _press_key_held(self, key: str, duration: float) -> None:
+        """Hold ``key`` (or a ``+`` combo) for ``duration`` seconds, then release.
+
+        Backends without the split key primitives (web/touch) degrade to an
+        instant tap. That fallback relies on an invariant: ``key_down`` must
+        raise ``NotImplementedError`` BEFORE any side effect, so it can never
+        fire with keys half-pressed. Keep that invariant when implementing
+        ``key_down`` in new adapters.
+        """
+        import time
+
+        mods, base = split_combo(key)
+        pressed: list[str] = []
+        try:
+            for k in mods + [base]:
+                self.key_down(k)  # registers in _held_keys on desktop adapters
+                pressed.append(k)
+            time.sleep(duration)
+        except NotImplementedError:
+            self.press_key(key)  # web/touch: degrade to an instant tap
+            return
+        finally:
+            release_failed = False
+            for k in reversed(pressed):
+                try:
+                    self.key_up(k)
+                except Exception:
+                    release_failed = True
+            if release_failed:
+                # Direct SDK calls have no ai()-end sweep, so sweep here
+                # rather than leave a key stuck until the next run.
+                self.release_all_inputs()
+
     @abstractmethod
     def scroll(self, x: float, y: float, direction: str, distance: int) -> None:
         ...
@@ -284,7 +317,19 @@ class DeviceAdapter(ABC):
         elif action_type == "clear_text":
             self.clear_text(x, y)
         elif action_type == "press_key":
-            self.press_key(str(params.get("key", "")))
+            key = str(params.get("key", ""))
+            # duration_seconds > 0 turns the tap into a blocking hold (games
+            # need W/A/S/D held for a fixed time). Dirty values (non-numeric
+            # strings from the model) degrade to the instant tap, matching the
+            # no-error posture of the whole duration path.
+            try:
+                duration = float(params.get("duration_seconds") or 0)
+            except (TypeError, ValueError):
+                duration = 0.0
+            if duration > 0:
+                self._press_key_held(key, min(duration, 10.0))
+            else:
+                self.press_key(key)
         elif action_type in ("scroll", "scroll_at"):
             # The server sends scroll distance as `amount` in pixels (e.g. 500);
             # direct/legacy callers may pass `distance` in scroll units

@@ -160,6 +160,7 @@ bot.go_back(target)                     # Playwright: smart (closes a historyles
 page = bot.close_tab(page)              # Playwright only
 bot.scroll(target, "down", 3)          # or distance=, x=, y=
 page = bot.press_key(target, "Enter")  # "ctrl+c", "ctrl+t" (reassign on tab switch)
+bot.press_key(target, "w", duration_seconds=2)  # desktop: hold 2s then release (0.1-10s, blocking)
 bot.key_down(target, "w"); bot.key_up(target, "w")               # desktop: hold/release a key
 bot.mouse_down(target, locate); bot.mouse_up(target, locate="")  # desktop: press-hold / release (mouse_down AI-located; locate=""=at cursor)
 path = bot.screenshot(target)          # saved frame -> path (None if report=False)
@@ -222,7 +223,7 @@ actions vary:
 - `long_press`: Appium/Airtest mobile only.
 - `press_key` on iOS: key names are mapped to characters (`enter`/`return`→`\n`,
   `tab`→`\t`); arrows/esc/home have no iOS soft-keyboard equivalent.
-- `mouse_down`/`mouse_up`/`key_down`/`key_up`: desktop only (pyautogui + Airtest Windows); pair them — held input auto-released after `ai()`/`close()`.
+- `mouse_down`/`mouse_up`/`key_down`/`key_up`: desktop only (pyautogui + Airtest Windows); pair them — held input auto-released after `ai()`/`close()`. For a fixed-length hold prefer `press_key(target, key, duration_seconds=...)` (single blocking call, auto-release); keep `key_down`/`key_up` for holds that must span other actions.
 - `right_click`/`hover`: full on browser/desktop; mobile taps / no-ops.
 
 Unsupported actions raise `NotImplementedError`.

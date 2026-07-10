@@ -223,6 +223,86 @@ class TestExecuteDispatch:
             a.execute("nonexistent", {})
 
 
+class TestPressKeyHeld:
+    """press_key with duration_seconds: hold via key_down/key_up, degrade to a
+    tap where the split primitives are missing, never leave a key stuck."""
+
+    @pytest.fixture
+    def sleeps(self, monkeypatch):
+        recorded: list[float] = []
+        monkeypatch.setattr("time.sleep", lambda s: recorded.append(s))
+        return recorded
+
+    def test_hold_single_key(self, sleeps):
+        a = FakeAdapter()
+        a.execute("press_key", {"key": "w", "duration_seconds": 2})
+        assert a.calls == [("key_down", ("w",)), ("key_up", ("w",))]
+        assert sleeps == [2.0]
+
+    def test_hold_combo_wraps_modifiers(self, sleeps):
+        a = FakeAdapter()
+        a.execute("press_key", {"key": "shift+w", "duration_seconds": 1.5})
+        assert a.calls == [
+            ("key_down", ("shift",)),
+            ("key_down", ("w",)),
+            ("key_up", ("w",)),
+            ("key_up", ("shift",)),
+        ]
+        assert sleeps == [1.5]
+
+    def test_duration_clamped_to_ten_seconds(self, sleeps):
+        a = FakeAdapter()
+        a.execute("press_key", {"key": "w", "duration_seconds": 30})
+        assert sleeps == [10.0]
+
+    @pytest.mark.parametrize("duration", [0, None, "", "abc", -1])
+    def test_zero_missing_or_dirty_duration_taps(self, sleeps, duration):
+        a = FakeAdapter()
+        params = {"key": "Enter"}
+        if duration is not None:
+            params["duration_seconds"] = duration
+        a.execute("press_key", params)
+        assert a.calls == [("press_key", ("Enter",))]
+        assert sleeps == []
+
+    def test_degrades_to_tap_without_key_down(self, sleeps):
+        class NoHoldAdapter(FakeAdapter):
+            def key_down(self, key):
+                raise NotImplementedError
+
+        a = NoHoldAdapter()
+        a.execute("press_key", {"key": "shift+w", "duration_seconds": 2})
+        assert a.calls == [("press_key", ("shift+w",))]
+        assert sleeps == []
+
+    def test_exception_during_hold_releases_pressed_keys(self, monkeypatch):
+        def boom(_):
+            raise RuntimeError("interrupted")
+
+        monkeypatch.setattr("time.sleep", boom)
+        a = FakeAdapter()
+        with pytest.raises(RuntimeError, match="interrupted"):
+            a.execute("press_key", {"key": "shift+w", "duration_seconds": 2})
+        assert a.calls == [
+            ("key_down", ("shift",)),
+            ("key_down", ("w",)),
+            ("key_up", ("w",)),
+            ("key_up", ("shift",)),
+        ]
+
+    def test_failed_release_sweeps_all_inputs(self, sleeps):
+        class StuckKeyAdapter(FakeAdapter):
+            def key_up(self, key):
+                raise RuntimeError("stuck")
+
+            def release_all_inputs(self):
+                self.calls.append(("release_all_inputs", ()))
+
+        a = StuckKeyAdapter()
+        a.execute("press_key", {"key": "w", "duration_seconds": 1})
+        assert a.calls == [("key_down", ("w",)), ("release_all_inputs", ())]
+
+
 class TestSettleOverride:
     """settle_seconds resolution: instance override beats the class default,
     and a screen-changing action sleeps that effective value."""
