@@ -797,6 +797,11 @@ class TestAirtestPressKey:
     to pywinauto SendKeys. Android/iOS use adb keycode names. Verifies the
     routing per platform, not pywinauto/adb themselves."""
 
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self, monkeypatch):
+        # The scancode path paces keys with real sleeps; skip them in tests.
+        monkeypatch.setattr("time.sleep", lambda s: None)
+
     def _adapter(self, platform: str):
         from qirabot.adapters.airtest_adapter import AirtestAdapter
 
@@ -948,6 +953,11 @@ class TestAirtestTypeText:
     """Windows types ASCII via DirectInput scancodes so games receive the text;
     non-ASCII (or any unmappable char) falls the whole string back to
     device.text() (SendKeys). Other platforms always use device.text()."""
+
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self, monkeypatch):
+        # type_text paces keys and settles focus with real sleeps; skip in tests.
+        monkeypatch.setattr("time.sleep", lambda s: None)
 
     def _adapter(self, platform: str):
         from qirabot.adapters.airtest_adapter import AirtestAdapter

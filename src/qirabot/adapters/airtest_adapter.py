@@ -321,6 +321,18 @@ class AirtestAdapter(DeviceAdapter):
         "'": "'", "`": "`", ",": ",", ".": ".", "/": "/", " ": "SPACE",
     }
 
+    # Pacing for the DirectInput scancode paths. SendInput itself has zero
+    # delay, so an unpaced press→release is down for well under a millisecond —
+    # apps that poll keyboard state per frame (games at 60fps sample every
+    # ~16.7ms) skip the key entirely. ≥20ms of hold guarantees at least one
+    # frame samples the key as down; the inter-key gap keeps distinct
+    # keystrokes in distinct frames.
+    _WIN_KEY_HOLD = 0.025
+    _WIN_KEY_GAP = 0.025
+    # Delay between the focusing tap and the first keystroke, so focus
+    # animations/IME activation finish before characters start arriving.
+    _FOCUS_SETTLE = 0.3
+
     def _char_scancode(self, ch: str) -> tuple[bool, str] | None:
         """ASCII char -> (needs_shift, scancode name), or None if not typeable."""
         if "a" <= ch <= "z":
@@ -337,6 +349,7 @@ class AirtestAdapter(DeviceAdapter):
 
     def type_text(self, x: float, y: float, text: str) -> None:
         self._device.touch((int(x), int(y)))
+        time.sleep(self._FOCUS_SETTLE)
         # Windows: type ASCII via DirectInput scancodes so games (which read raw
         # scancodes and ignore the virtual keys SendKeys sends) receive the text.
         # Any non-ASCII / unmappable char makes the WHOLE string fall back to
@@ -355,9 +368,11 @@ class AirtestAdapter(DeviceAdapter):
                     if needs_shift:
                         dev.key_press("LSHIFT")
                     dev.key_press(code)
+                    time.sleep(self._WIN_KEY_HOLD)
                     dev.key_release(code)
                     if needs_shift:
                         dev.key_release("LSHIFT")
+                    time.sleep(self._WIN_KEY_GAP)
                 return
         # enter=False: Android/iOS text() auto-appends Enter by default; the
         # base execute() controls Enter via press_enter instead. (Windows
@@ -374,8 +389,14 @@ class AirtestAdapter(DeviceAdapter):
                 dev.keyevent("KEYCODE_MOVE_END")
             except Exception:
                 pass
-            for _ in range(64):
-                dev.keyevent("KEYCODE_DEL")
+            # `input keyevent` accepts multiple keycodes per invocation, so one
+            # adb round-trip clears the field instead of 64 (each keyevent()
+            # call is a full adb shell round-trip, ~2-5s total).
+            try:
+                dev.adb.shell("input keyevent " + " ".join(["KEYCODE_DEL"] * 64))
+            except Exception:
+                for _ in range(64):
+                    dev.keyevent("KEYCODE_DEL")
         else:
             super().clear_text(x, y)
 
@@ -431,10 +452,15 @@ class AirtestAdapter(DeviceAdapter):
         if self._platform == "windows":
             if self._scancode_supported(mods + [base]):
                 # Hold mods around the base, release in reverse; key_down/key_up
-                # let release_all_inputs sweep up a stuck key.
+                # let release_all_inputs sweep up a stuck key. Pace with
+                # _WIN_KEY_HOLD so frame-polling apps sample the mods as held
+                # before the base lands, and the base as down at all.
                 for m in mods:
                     self.key_down(m)
+                if mods:
+                    time.sleep(self._WIN_KEY_HOLD)
                 self.key_down(base)
+                time.sleep(self._WIN_KEY_HOLD)
                 self.key_up(base)
                 for m in reversed(mods):
                     self.key_up(m)
