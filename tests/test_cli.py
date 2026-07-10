@@ -257,9 +257,131 @@ class TestAirtestEngine:
         assert "--engine appium" in str(result.exception)
 
 
+class TestDesktopAirtestEngine:
+    """desktop --engine airtest: Windows-only guard, URI construction from
+    --window-title/--hwnd, best-effort foreground, and setup-failure reporting."""
+
+    @pytest.fixture
+    def win_platform(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+
+    def test_defaults_to_whole_desktop(self, fake_airtest, stub_bot, win_platform):
+        result = _invoke(["desktop", "do it", "--engine", "airtest"])
+
+        assert result.exit_code == 0
+        fake_airtest.connect_device.assert_called_once_with("Windows:///")
+        fake_airtest.connect_device.return_value.to_foreground.assert_called_once()
+
+    def test_window_title_builds_quoted_title_re(self, fake_airtest, stub_bot, win_platform):
+        result = _invoke(
+            ["desktop", "do it", "--engine", "airtest", "--window-title", "原神 1.0"]
+        )
+
+        assert result.exit_code == 0
+        from urllib.parse import quote
+
+        fake_airtest.connect_device.assert_called_once_with(
+            f"Windows:///?title_re={quote('原神 1.0')}"
+        )
+
+    def test_hwnd_binds_by_handle(self, fake_airtest, stub_bot, win_platform):
+        result = _invoke(["desktop", "do it", "--engine", "airtest", "--hwnd", "1234"])
+
+        assert result.exit_code == 0
+        fake_airtest.connect_device.assert_called_once_with("Windows:///1234")
+
+    def test_window_title_and_hwnd_are_mutually_exclusive(self, win_platform):
+        result = _invoke(
+            ["desktop", "do it", "--engine", "airtest", "--window-title", "x", "--hwnd", "1"]
+        )
+
+        assert result.exit_code != 0
+        assert "mutually exclusive" in result.output
+
+    def test_rejected_on_non_windows(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        result = _invoke(["desktop", "do it", "--engine", "airtest"])
+
+        assert result.exit_code != 0
+        assert "Windows" in result.output
+        assert "pyautogui" in result.output
+
+    def test_foreground_failure_is_ignored(self, fake_airtest, stub_bot, win_platform):
+        device = fake_airtest.connect_device.return_value
+        device.to_foreground.side_effect = RuntimeError("no window")
+
+        result = _invoke(["desktop", "do it", "--engine", "airtest"])
+
+        assert result.exit_code == 0
+
+    def test_connect_failure_reports_fail_with_hint(self, fake_airtest, monkeypatch, win_platform):
+        from qirabot.cli import main
+
+        bot = MagicMock(name="bot")
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
+        fake_airtest.connect_device.side_effect = RuntimeError("window not found")
+
+        result = _invoke(
+            ["desktop", "do it", "--engine", "airtest", "--window-title", "nope"]
+        )
+
+        assert result.exit_code == 1
+        assert "--app-wait" in result.output
+        bot.fail.assert_called_once()
+        bot.close.assert_called_once()
+
+    def test_missing_airtest_hint_points_at_pyautogui(self, monkeypatch, win_platform):
+        # Same mechanics as the android missing-airtest test: CliRunner bypasses
+        # main()'s one-line rendering, so assert on the exception itself.
+        from qirabot.cli import main
+        from qirabot.exceptions import MissingDependencyError
+
+        def missing(module, extra=None):
+            raise MissingDependencyError(
+                'Install it with:  python -m pip install "qirabot[airtest]"'
+            )
+
+        monkeypatch.setattr(main, "require", missing)
+
+        result = _invoke(["desktop", "do it", "--engine", "airtest"])
+
+        assert result.exit_code == 1
+        assert 'qirabot[airtest]' in str(result.exception)
+        assert "drop --engine airtest" in str(result.exception)
+
+    def test_app_launched_before_connect(self, fake_airtest, stub_bot, win_platform, monkeypatch):
+        calls: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            "qirabot.launch_app", lambda app, wait=2.0: calls.append(("launch", app))
+        )
+        fake_airtest.connect_device.side_effect = (
+            lambda uri: calls.append(("connect", uri)) or MagicMock(name="device")
+        )
+
+        result = _invoke(
+            ["desktop", "do it", "--engine", "airtest", "--app", "C:/game.exe"]
+        )
+
+        assert result.exit_code == 0
+        assert [c[0] for c in calls] == ["launch", "connect"]
+
+
 class TestEngineFlagValidation:
     """Engine-specific URL/device flags are rejected under the other engine
     (only when explicitly passed — defaults never trip the guard)."""
+
+    def test_desktop_default_engine_rejects_window_title(self):
+        result = _invoke(["desktop", "do it", "--window-title", "x"])
+
+        assert result.exit_code != 0
+        assert "--engine airtest" in result.output
+
+    def test_desktop_default_engine_rejects_hwnd(self):
+        result = _invoke(["desktop", "do it", "--hwnd", "1234"])
+
+        assert result.exit_code != 0
+        assert "--engine airtest" in result.output
 
     def test_android_airtest_rejects_appium_url(self, fake_airtest, stub_bot):
         result = _invoke(["android", "do it", "--appium-url", "http://x:4723"])

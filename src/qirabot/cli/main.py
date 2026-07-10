@@ -468,7 +468,7 @@ def doctor(ctx: click.Context) -> None:
             'python -m pip install "qirabot[desktop]"',
         ),
         (
-            "android/ios direct (Airtest)",
+            "android/ios/windows-desktop direct (Airtest)",
             _has_module("airtest"),
             'python -m pip install "qirabot[airtest]"  (Python 3.10–3.12 recommended)',
         ),
@@ -933,16 +933,103 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
     )
 
 
+def _launch_desktop_app(app: str, app_wait: float) -> None:
+    """--app side effect shared by both desktop engines; exits 1 on failure."""
+    from qirabot import launch_app
+
+    try:
+        launch_app(app, wait=app_wait)
+    except RuntimeError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
 @cli.command()
 @click.argument("instruction")
 @_task_options
+@click.option("--engine", default="pyautogui", type=click.Choice(["pyautogui", "airtest"]), help="Automation backend: pyautogui drives the whole screen (cross-platform); airtest (Windows only) sends DirectInput scancodes that games can read, and can bind to one window")
+@click.option("--window-title", default="", help="airtest engine: bind to the window whose title matches this regex (screenshots/coords become window-relative, recording follows the window)")
+@click.option("--hwnd", default=0, type=int, help="airtest engine: bind to a specific window handle")
 # Desktop — app launch
 @click.option("--app", default="", help="Launch/activate an app before the task. macOS: app name (\"WeChat\") or bundle id; Windows: exe path, registered name, or UWP AppUserModelID; Linux: executable.")
 @click.option("--app-wait", default=2.0, type=float, help="Seconds to wait after --app launch for the window to appear")
 @_debug_options()
 @click.pass_context
-def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, app: str, app_wait: float, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
-    """Run an AI task on the desktop screen via pyautogui."""
+def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, window_title: str, hwnd: int, app: str, app_wait: float, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
+    """Run an AI task on the desktop screen (pyautogui; --engine airtest for Windows games).
+
+    \b
+    Default engine — pyautogui, drives the whole screen (macOS/Windows/Linux):
+      qirabot desktop "Create a note titled Groceries" --app Notes
+    \b
+    Airtest engine (Windows only) — DirectInput scancode input that games can
+    read (pyautogui's virtual key codes often can't reach them); optionally
+    bind to one window so screenshots and clicks are window-relative:
+      qirabot desktop "..." --engine airtest
+      qirabot desktop "..." --engine airtest --window-title "Genshin"
+      qirabot desktop "..." --engine airtest --app "C:/game.exe" --app-wait 15 --window-title "..."
+    """
+    if engine == "airtest":
+        if window_title and hwnd:
+            raise click.UsageError("--window-title and --hwnd are mutually exclusive")
+        if sys.platform != "win32":
+            raise click.UsageError(
+                "--engine airtest drives the Windows desktop only; on other "
+                "platforms use the default pyautogui engine"
+            )
+        # Not _require_airtest(): its escape hatch points at --engine appium,
+        # which doesn't exist here — the desktop fallback is pyautogui.
+        try:
+            require("airtest.core.api", "airtest")
+        except MissingDependencyError as e:
+            raise MissingDependencyError(
+                f"{e} Or drop --engine airtest to use the default pyautogui engine."
+            ) from e
+        from airtest.core.api import connect_device
+
+        # Validate the key before the --app side effect (same contract as the
+        # pyautogui path below).
+        _require_api_key(ctx)
+        if app:
+            _launch_desktop_app(app, app_wait)
+
+        if hwnd:
+            uri = f"Windows:///{hwnd}"
+        elif window_title:
+            from urllib.parse import quote
+
+            uri = f"Windows:///?title_re={quote(window_title)}"
+        else:
+            uri = "Windows:///"
+
+        def connect() -> Any:
+            try:
+                target = connect_device(uri)
+            except Exception as e:
+                raise RuntimeError(
+                    f"could not connect to {uri} ({e}); check the window exists "
+                    "(--window-title is a regex matched against visible window "
+                    "titles), or increase --app-wait if the app is still starting"
+                ) from e
+            # Games only receive input in the foreground. Best-effort: the
+            # whole-desktop device has no single window to raise.
+            try:
+                target.to_foreground()
+            except Exception:
+                pass
+            return target
+
+        _run_airtest(
+            ctx, instruction, name, model, language, max_steps, connect,
+            report, report_dir, annotate, record=record,
+        )
+        return
+
+    if _flag_given(ctx, "window_title"):
+        raise click.UsageError("--window-title only applies to --engine airtest")
+    if _flag_given(ctx, "hwnd"):
+        raise click.UsageError("--hwnd only applies to --engine airtest")
+
     pyautogui = require("pyautogui", "desktop")
 
     # Validate the key before the --app side effect: without this, a missing
@@ -950,13 +1037,7 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
     _require_api_key(ctx)
 
     if app:
-        from qirabot import launch_app
-
-        try:
-            launch_app(app, wait=app_wait)
-        except RuntimeError as e:
-            click.echo(f"Error: {e}", err=True)
-            sys.exit(1)
+        _launch_desktop_app(app, app_wait)
 
     bot = _make_bot(
         ctx, model=model, language=language, report=report, report_dir=report_dir,

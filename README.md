@@ -125,7 +125,7 @@ The `qirabot` command runs a task end-to-end without writing Python. It ships in
 the core package (installed with `python -m pip install qirabot`), but each backend still
 needs its extra — `qirabot[browser]` for `browser`, `[airtest]` for `android`/`ios`
 (their default direct engine; `[appium]` when using `--engine appium`), `[desktop]`
-for `desktop`.
+for `desktop` (`[airtest]` instead when using `desktop --engine airtest`).
 
 ```bash
 # Browser (needs qirabot[browser] + `playwright install chromium`)
@@ -146,6 +146,11 @@ qirabot ios "..." --engine appium --device "iPhone 15"   # simulators only — s
 # Desktop via pyautogui (needs qirabot[desktop])
 qirabot desktop "Create a new note titled Groceries" --app Notes
 
+# Desktop via Airtest (Windows only, needs qirabot[airtest]) — DirectInput
+# scancode input that games can read; bind a window by title regex or HWND
+qirabot desktop "Open the inventory and list all items" --engine airtest --window-title "Genshin"
+qirabot desktop "..." --engine airtest --hwnd 132456
+
 # Environment check — what's installed, what's missing, is the server reachable
 qirabot doctor
 
@@ -162,7 +167,7 @@ qirabot models                    # list model aliases
 | `browser INSTRUCTION` | Run an AI task in a local browser (Playwright) |
 | `android INSTRUCTION` | Run an AI task on an Android device (adb direct; `--engine appium` for Appium) |
 | `ios INSTRUCTION` | Run an AI task on an iOS device (WDA direct; `--engine appium` for Appium) |
-| `desktop INSTRUCTION` | Run an AI task on the desktop screen (pyautogui) |
+| `desktop INSTRUCTION` | Run an AI task on the desktop screen (pyautogui; `--engine airtest` for Windows games, with `--window-title`/`--hwnd` window binding) |
 | `doctor` | Check Python, API key/server, and per-backend dependencies; exits non-zero when nothing can run |
 | `task TASK_ID` | Print a task's status, commands, and steps |
 | `screenshot TASK_ID` | Download a task screenshot |
@@ -191,6 +196,8 @@ take `--record`, saving `recording.mp4` into the run dir and embedding it in the
 report — but what gets recorded differs:
 
 - `browser` / `desktop` — the **host** screen via ffmpeg (needs ffmpeg on PATH).
+  With `desktop --engine airtest` and a window bound (`--window-title`/`--hwnd`),
+  the recording follows that window instead of capturing the full screen.
 - `android` — the **device** screen: `adb screenrecord` on the default engine
   (ffmpeg only needed to merge runs longer than 3 minutes), or Appium's
   recording API with `--engine appium`.
