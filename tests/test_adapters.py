@@ -36,8 +36,14 @@ class FakeAdapter(DeviceAdapter):
     def type_text(self, x, y, text):
         self.calls.append(("type_text", (x, y, text)))
 
+    def type_focused(self, text):
+        self.calls.append(("type_focused", (text,)))
+
     def clear_text(self, x, y):
         self.calls.append(("clear_text", (x, y)))
+
+    def clear_focused(self):
+        self.calls.append(("clear_focused", ()))
 
     def press_key(self, key):
         self.calls.append(("press_key", (key,)))
@@ -159,10 +165,32 @@ class TestExecuteDispatch:
             ("press_key", ("Enter",)),
         ]
 
+    def test_type_text_without_coords_types_into_focused(self):
+        a = FakeAdapter()
+        a.execute("type_text", {"text": "hello"})
+        # no x/y on the wire -> direct path: no locating click, no type_text.
+        assert a.calls == [("type_focused", ("hello",))]
+
+    def test_type_text_without_coords_with_flags(self):
+        a = FakeAdapter()
+        a.execute("type_text", {
+            "text": "hello", "clear_before_typing": True, "press_enter": True,
+        })
+        assert a.calls == [
+            ("clear_focused", ()),
+            ("type_focused", ("hello",)),
+            ("press_key", ("Enter",)),
+        ]
+
     def test_clear_text(self):
         a = FakeAdapter()
         a.execute("clear_text", {"x": 10, "y": 20})
         assert a.calls == [("clear_text", (10.0, 20.0))]
+
+    def test_clear_text_without_coords_clears_focused(self):
+        a = FakeAdapter()
+        a.execute("clear_text", {})
+        assert a.calls == [("clear_focused", ())]
 
     def test_press_key(self):
         a = FakeAdapter()
@@ -981,6 +1009,23 @@ class TestAirtestTypeText:
             call.key_press("SPACE"), call.key_release("SPACE"),
             call.key_press("1"), call.key_release("1"),
         ]
+
+    def test_windows_type_focused_skips_touch(self):
+        # Direct path: same scancode typing, but no caret-placement touch.
+        a, dev = self._adapter("windows")
+        a.type_focused("ab")
+        dev.touch.assert_not_called()
+        dev.text.assert_not_called()
+        assert self._key_calls(dev) == [
+            call.key_press("A"), call.key_release("A"),
+            call.key_press("B"), call.key_release("B"),
+        ]
+
+    def test_android_type_focused_skips_touch(self):
+        a, dev = self._adapter("android")
+        a.type_focused("hi")
+        dev.touch.assert_not_called()
+        dev.text.assert_called_once_with("hi", enter=False)
 
     def test_windows_shifted_chars_hold_shift(self):
         a, dev = self._adapter("windows")

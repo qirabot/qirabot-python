@@ -104,6 +104,9 @@ class PlaywrightAdapter(DeviceAdapter):
 
     def type_text(self, x: float, y: float, text: str) -> None:
         self._page.mouse.click(x, y)
+        self.type_focused(text)
+
+    def type_focused(self, text: str) -> None:
         self._page.keyboard.type(text)
 
     def clear_text(self, x: float, y: float) -> None:

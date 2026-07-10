@@ -75,13 +75,19 @@ class SeleniumAdapter(DeviceAdapter):
 
     def type_text(self, x: float, y: float, text: str) -> None:
         self.click(x, y)
+        self.type_focused(text)
+
+    def type_focused(self, text: str) -> None:
         from selenium.webdriver.common.action_chains import ActionChains
         ActionChains(self._driver).send_keys(text).perform()
 
     def clear_text(self, x: float, y: float) -> None:
+        self.click(x, y)
+        self.clear_focused()
+
+    def clear_focused(self) -> None:
         from selenium.webdriver.common.keys import Keys
         from selenium.webdriver.common.action_chains import ActionChains
-        self.click(x, y)
         ActionChains(self._driver).key_down(Keys.CONTROL).send_keys("a").key_up(Keys.CONTROL).send_keys(Keys.BACKSPACE).perform()
 
     def press_key(self, key: str) -> None:

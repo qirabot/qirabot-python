@@ -132,8 +132,16 @@ class DeviceAdapter(ABC):
     def type_text(self, x: float, y: float, text: str) -> None:
         ...
 
+    def type_focused(self, text: str) -> None:
+        """Type into whatever currently has keyboard focus (no locating click)."""
+        raise NotImplementedError(f"{type(self).__name__} does not support type_focused")
+
     def clear_text(self, x: float, y: float) -> None:
         self.click(x, y)
+        self.clear_focused()
+
+    def clear_focused(self) -> None:
+        """Clear the currently focused field (no locating click)."""
         self.press_key("ctrl+a")
         self.press_key("Backspace")
 
@@ -348,13 +356,21 @@ class DeviceAdapter(ABC):
         elif action_type == "hover":
             self.hover(x, y)
         elif action_type == "type_text":
+            # x/y are optional: with resolved coords, click-to-focus then type
+            # (AI-located path); without, type into whatever already has focus
+            # (direct path — no locating click, same convention as mouse_up).
+            has_xy = params.get("x") is not None and params.get("y") is not None
             if params.get("clear_before_typing"):
-                self.clear_text(x, y)
-            self.type_text(x, y, str(params.get("text", "")))
+                self.clear_text(x, y) if has_xy else self.clear_focused()
+            text = str(params.get("text", ""))
+            self.type_text(x, y, text) if has_xy else self.type_focused(text)
             if params.get("press_enter"):
                 self.press_key("Enter")
         elif action_type == "clear_text":
-            self.clear_text(x, y)
+            if params.get("x") is not None and params.get("y") is not None:
+                self.clear_text(x, y)
+            else:
+                self.clear_focused()
         elif action_type == "press_key":
             key = str(params.get("key", ""))
             # duration_seconds > 0 turns the tap into a blocking hold (games

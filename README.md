@@ -606,7 +606,16 @@ bot.press_key(page, "Enter")        # a single key
 bot.press_key(page, "ctrl+c")       # a combo (join with "+")
 bot.press_key(target, "w", duration_seconds=2)  # hold for 2s (desktop only)
 page = bot.press_key(page, "ctrl+t")  # ctrl+t/ctrl+w switch the active tab — reassign
+bot.type_text(page, "", "hello", press_enter=True)  # empty locate: type into the
+                                    # focused element directly (no AI, no billing)
 ```
+
+**Direct typing.** `type_text` with an **empty `locate`** skips AI location and
+types into whatever currently has keyboard focus — for when focus is already
+where you want it (a game chat box opened with Enter, a field reached via Tab).
+Making sure focus is right is your responsibility; `press_enter` /
+`clear_before_typing` still work, `timeout`/`wait` are ignored. Same optional-
+locate convention as `mouse_up`.
 
 **`press_key` — what you can pass.** One name works on every backend; each maps
 it to its own vocabulary.
@@ -669,7 +678,9 @@ Platform support (all actions):
 
 AI-located actions (`click`, `type_text`, `double_click`) and the AI operations
 (`extract`, `verify`, `wait_for`, `ai`) work on **every** framework — the matrix
-shows how each underlying action maps per platform.
+shows how each underlying action maps per platform. `type_text`'s locate is
+optional (pass `""` to type into the currently focused element — deterministic,
+no AI, no billing — like `mouse_up`'s optional locate).
 
 - ᵃ Appium/Airtest emulate `double_click` as two quick taps.
 - ᵇ Mobile has no right-click: Appium taps; Airtest right-clicks on Windows only, taps elsewhere.

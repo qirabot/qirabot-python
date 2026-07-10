@@ -680,6 +680,14 @@ class Qirabot:
     ) -> Any:
         """AI-powered type: locate input field and type text.
 
+        With an empty ``locate`` the text is typed into whatever currently has
+        keyboard focus, deterministically (no AI, no billing) — like
+        :meth:`press_key`. Use it when focus is already where you want it (a
+        game chat box opened with Enter, a field reached via Tab, …); making
+        sure focus is there is the caller's responsibility. ``press_enter`` and
+        ``clear_before_typing`` still apply; ``timeout``/``wait``/``retry`` are
+        ignored (there is no element to wait for).
+
         When ``timeout > 0``, auto-waits until the field looks present before
         typing (see :meth:`click` for the ``timeout``/``interval``/``wait``
         semantics). With the default ``timeout=0`` it types immediately.
@@ -687,9 +695,20 @@ class Qirabot:
         Returns the current target (same kind you passed in); reassign it
         (``page = bot.type_text(page, ...)``) to follow any tab switch.
         """
-        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
         adapter = self._get_adapter(target)
-        params: dict[str, Any] = {"locate": locate, "text": text}
+        params: dict[str, Any]
+        if not locate:
+            # Direct typing into the focused element — no AI, no billing.
+            params = {"text": text}
+            if press_enter:
+                params["press_enter"] = True
+            if clear_before_typing:
+                params["clear_before_typing"] = True
+            adapter.execute("type_text", params)  # no x/y -> focused path
+            self._record_local_step(adapter, "type_text", params)
+            return self._result(adapter)
+        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        params = {"locate": locate, "text": text}
         if press_enter:
             params["press_enter"] = True
         if clear_before_typing:

@@ -350,6 +350,9 @@ class AirtestAdapter(DeviceAdapter):
     def type_text(self, x: float, y: float, text: str) -> None:
         self._device.touch((int(x), int(y)))
         time.sleep(self._FOCUS_SETTLE)
+        self.type_focused(text)
+
+    def type_focused(self, text: str) -> None:
         # Windows: type ASCII via DirectInput scancodes so games (which read raw
         # scancodes and ignore the virtual keys SendKeys sends) receive the text.
         # Any non-ASCII / unmappable char makes the WHOLE string fall back to
@@ -380,25 +383,31 @@ class AirtestAdapter(DeviceAdapter):
         self._device.text(text, enter=False)
 
     def clear_text(self, x: float, y: float) -> None:
-        # Airtest has no element model, so there's no reliable clear primitive.
-        # Best effort on Android: move caret to end, then delete repeatedly.
         if self._platform == "android":
             self._device.touch((int(x), int(y)))
-            dev = self._device
-            try:
-                dev.keyevent("KEYCODE_MOVE_END")
-            except Exception:
-                pass
-            # `input keyevent` accepts multiple keycodes per invocation, so one
-            # adb round-trip clears the field instead of 64 (each keyevent()
-            # call is a full adb shell round-trip, ~2-5s total).
-            try:
-                dev.adb.shell("input keyevent " + " ".join(["KEYCODE_DEL"] * 64))
-            except Exception:
-                for _ in range(64):
-                    dev.keyevent("KEYCODE_DEL")
+            self.clear_focused()
         else:
             super().clear_text(x, y)
+
+    def clear_focused(self) -> None:
+        # Airtest has no element model, so there's no reliable clear primitive.
+        # Best effort on Android: move caret to end, then delete repeatedly.
+        if self._platform != "android":
+            super().clear_focused()
+            return
+        dev = self._device
+        try:
+            dev.keyevent("KEYCODE_MOVE_END")
+        except Exception:
+            pass
+        # `input keyevent` accepts multiple keycodes per invocation, so one
+        # adb round-trip clears the field instead of 64 (each keyevent()
+        # call is a full adb shell round-trip, ~2-5s total).
+        try:
+            dev.adb.shell("input keyevent " + " ".join(["KEYCODE_DEL"] * 64))
+        except Exception:
+            for _ in range(64):
+                dev.keyevent("KEYCODE_DEL")
 
     # Windows keyevent() forwards to pywinauto keyboard.SendKeys() (verified in
     # airtest/core/win/win.py), whose syntax is: ^ = ctrl, % = alt, + = shift,

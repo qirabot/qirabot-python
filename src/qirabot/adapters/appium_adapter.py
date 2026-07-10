@@ -113,10 +113,16 @@ class AppiumAdapter(DeviceAdapter):
 
     def type_text(self, x: float, y: float, text: str) -> None:
         self._tap(x, y)
+        self.type_focused(text)
+
+    def type_focused(self, text: str) -> None:
         self._focused_element().send_keys(text)
 
     def clear_text(self, x: float, y: float) -> None:
         self._tap(x, y)
+        self.clear_focused()
+
+    def clear_focused(self) -> None:
         el = self._focused_element()
         if el:
             el.clear()

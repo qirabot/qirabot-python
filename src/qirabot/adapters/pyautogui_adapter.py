@@ -116,6 +116,9 @@ class PyAutoGuiAdapter(DeviceAdapter):
     def type_text(self, x: float, y: float, text: str) -> None:
         lx, ly = self._to_logical(x, y)
         self._pag.click(lx, ly)
+        self.type_focused(text)
+
+    def type_focused(self, text: str) -> None:
         # typewrite is ASCII-only; paste anything else (Chinese, emoji, …).
         if text.isascii():
             self._pag.typewrite(text, interval=0.02)
@@ -125,6 +128,9 @@ class PyAutoGuiAdapter(DeviceAdapter):
     def clear_text(self, x: float, y: float) -> None:
         lx, ly = self._to_logical(x, y)
         self._pag.click(lx, ly)
+        self.clear_focused()
+
+    def clear_focused(self) -> None:
         self._pag.hotkey(self._primary_modifier(), "a")
         self._pag.press("backspace")
 

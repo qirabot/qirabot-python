@@ -88,6 +88,41 @@ def _make_bot(tmp_path, **kwargs) -> tuple[Qirabot, _FakeTransport]:
     return bot, transport
 
 
+class TestDirectTypeText:
+    """type_text with an empty locate types into the focused element locally:
+    no /act call, one buffered local step (same convention as press_key)."""
+
+    def test_empty_locate_is_local_and_recorded(self, tmp_path):
+        bot, transport = _make_bot(tmp_path)
+
+        class _Recording(_FakeAdapter):
+            def __init__(self):
+                super().__init__()
+                self.executed: list[tuple[str, dict]] = []
+
+            def execute(self, action_type, params):
+                self.executed.append((action_type, params))
+
+            @property
+            def current_target(self):
+                return "target"
+
+        adapter = _Recording()
+        bot._get_adapter = lambda target: adapter
+
+        result = bot.type_text("target", "", "hello", press_enter=True)
+
+        assert result == "target"
+        assert adapter.executed == [
+            ("type_text", {"text": "hello", "press_enter": True})
+        ]
+        assert transport.act_calls() == []
+        assert len(bot._local_buf) == 1
+        assert bot._local_buf[0]["action_type"] == "type_text"
+        assert bot._local_buf[0]["params"] == {"text": "hello", "press_enter": True}
+        bot._closed = True
+
+
 class TestBufferAndFlush:
     def test_local_action_buffers_without_network(self, tmp_path):
         bot, transport = _make_bot(tmp_path)
