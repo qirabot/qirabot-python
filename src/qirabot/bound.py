@@ -46,6 +46,7 @@ class _BoundQirabot:
         self,
         locate: str,
         *,
+        modifier: str = "",
         timeout: float = 0.0,
         interval: float = 2.0,
         wait: str = "",
@@ -57,6 +58,7 @@ class _BoundQirabot:
             self._bot.click(
                 self._target,
                 locate,
+                modifier=modifier,
                 timeout=timeout,
                 interval=interval,
                 wait=wait,

@@ -805,6 +805,46 @@ class TestPressKey:
         bot.close()
 
 
+class TestClickModifier:
+    """click's optional modifier must ride the wire params only when set, so a
+    plain click keeps the exact legacy shape old servers/report consumers
+    expect."""
+
+    def _bot_with_mock_ai(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        bot._ai_action = MagicMock(return_value={"success": True})
+        target = object()
+        adapter = MagicMock()
+        adapter.current_target = target
+        bot._adapters[id(target)] = adapter
+        return bot, target
+
+    def test_modifier_included_only_when_set(self):
+        bot, target = self._bot_with_mock_ai()
+
+        bot.click(target, "enemy unit", modifier="alt")
+        action = bot._ai_action.call_args.kwargs["action"]
+        assert action == {
+            "type": "click",
+            "params": {"locate": "enemy unit", "modifier": "alt"},
+        }
+
+        bot._ai_action.reset_mock()
+        bot.click(target, "Login button")
+        action = bot._ai_action.call_args.kwargs["action"]
+        assert action == {"type": "click", "params": {"locate": "Login button"}}
+        bot.close()
+
+    def test_bound_click_passes_modifier(self):
+        bot, target = self._bot_with_mock_ai()
+
+        bot.bind(target).click("file row", modifier="ctrl+shift")
+
+        action = bot._ai_action.call_args.kwargs["action"]
+        assert action["params"] == {"locate": "file row", "modifier": "ctrl+shift"}
+        bot.close()
+
+
 class TestAdapterCacheSync:
     """A tab switch makes current_target a *new* page object. The cache must
     re-register it against the same adapter so passing it back doesn't spawn a

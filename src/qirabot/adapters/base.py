@@ -174,6 +174,41 @@ class DeviceAdapter(ABC):
                 # rather than leave a key stuck until the next run.
                 self.release_all_inputs()
 
+    def _click_with_modifiers(self, x: float, y: float, modifier: str) -> None:
+        """Hold modifier key(s) (``+``-joined) around a click, then release.
+
+        Backends without the split key primitives (web/touch) degrade to a
+        plain click. Same invariant as ``_press_key_held``: ``key_down`` must
+        raise ``NotImplementedError`` BEFORE any side effect.
+        """
+        import time
+
+        keys = [p.strip() for p in modifier.split("+") if p.strip()]
+        pressed: list[str] = []
+        try:
+            for k in keys:
+                self.key_down(k)  # registers in _held_keys on desktop adapters
+                pressed.append(k)
+            # Frame-polling apps (games at 60fps) need the modifier sampled as
+            # held BEFORE the click lands and THROUGH the button release.
+            time.sleep(0.05)
+            self.click(x, y)
+            time.sleep(0.05)
+        except NotImplementedError:
+            self.click(x, y)  # web/touch: degrade to a plain click
+            return
+        finally:
+            release_failed = False
+            for k in reversed(pressed):
+                try:
+                    self.key_up(k)
+                except Exception:
+                    release_failed = True
+            if release_failed:
+                # Direct SDK calls have no ai()-end sweep, so sweep here
+                # rather than leave a modifier stuck until the next run.
+                self.release_all_inputs()
+
     @abstractmethod
     def scroll(self, x: float, y: float, direction: str, distance: int) -> None:
         ...
@@ -285,7 +320,11 @@ class DeviceAdapter(ABC):
         y = float(params.get("y", 0))
 
         if action_type == "click":
-            self.click(x, y)
+            modifier = str(params.get("modifier") or "").strip()
+            if modifier:
+                self._click_with_modifiers(x, y, modifier)
+            else:
+                self.click(x, y)
         elif action_type == "double_click":
             self.double_click(x, y)
         elif action_type == "right_click":

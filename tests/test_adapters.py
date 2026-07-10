@@ -303,6 +303,92 @@ class TestPressKeyHeld:
         assert a.calls == [("key_down", ("w",)), ("release_all_inputs", ())]
 
 
+class TestClickWithModifiers:
+    """click with modifier: hold modifier key(s) around the click via
+    key_down/key_up, degrade to a plain click where the split primitives are
+    missing, never leave a modifier stuck."""
+
+    @pytest.fixture
+    def sleeps(self, monkeypatch):
+        recorded: list[float] = []
+        monkeypatch.setattr("time.sleep", lambda s: recorded.append(s))
+        return recorded
+
+    def test_single_modifier_wraps_click(self, sleeps):
+        a = FakeAdapter()
+        a.execute("click", {"x": 10, "y": 20, "modifier": "alt"})
+        assert a.calls == [
+            ("key_down", ("alt",)),
+            ("click", (10.0, 20.0)),
+            ("key_up", ("alt",)),
+        ]
+        # Guard sleeps before and after the click so frame-polling apps
+        # sample the modifier as held through the whole button press.
+        assert sleeps == [0.05, 0.05]
+
+    def test_combo_modifiers_release_in_reverse(self, sleeps):
+        a = FakeAdapter()
+        a.execute("click", {"x": 10, "y": 20, "modifier": "ctrl+shift"})
+        assert a.calls == [
+            ("key_down", ("ctrl",)),
+            ("key_down", ("shift",)),
+            ("click", (10.0, 20.0)),
+            ("key_up", ("shift",)),
+            ("key_up", ("ctrl",)),
+        ]
+
+    @pytest.mark.parametrize("modifier", [None, "", "  "])
+    def test_missing_or_blank_modifier_plain_click(self, sleeps, modifier):
+        a = FakeAdapter()
+        params = {"x": 10, "y": 20}
+        if modifier is not None:
+            params["modifier"] = modifier
+        a.execute("click", params)
+        assert a.calls == [("click", (10.0, 20.0))]
+        assert sleeps == []
+
+    def test_degrades_to_plain_click_without_key_down(self, sleeps):
+        class NoHoldAdapter(FakeAdapter):
+            def key_down(self, key):
+                raise NotImplementedError
+
+        a = NoHoldAdapter()
+        a.execute("click", {"x": 10, "y": 20, "modifier": "alt"})
+        assert a.calls == [("click", (10.0, 20.0))]
+        assert sleeps == []
+
+    def test_click_failure_releases_pressed_modifiers(self, sleeps):
+        class BoomClickAdapter(FakeAdapter):
+            def click(self, x, y):
+                raise RuntimeError("click failed")
+
+        a = BoomClickAdapter()
+        with pytest.raises(RuntimeError, match="click failed"):
+            a.execute("click", {"x": 10, "y": 20, "modifier": "ctrl+shift"})
+        assert a.calls == [
+            ("key_down", ("ctrl",)),
+            ("key_down", ("shift",)),
+            ("key_up", ("shift",)),
+            ("key_up", ("ctrl",)),
+        ]
+
+    def test_failed_release_sweeps_all_inputs(self, sleeps):
+        class StuckKeyAdapter(FakeAdapter):
+            def key_up(self, key):
+                raise RuntimeError("stuck")
+
+            def release_all_inputs(self):
+                self.calls.append(("release_all_inputs", ()))
+
+        a = StuckKeyAdapter()
+        a.execute("click", {"x": 10, "y": 20, "modifier": "alt"})
+        assert a.calls == [
+            ("key_down", ("alt",)),
+            ("click", (10.0, 20.0)),
+            ("release_all_inputs", ()),
+        ]
+
+
 class TestSettleOverride:
     """settle_seconds resolution: instance override beats the class default,
     and a screen-changing action sleeps that effective value."""
@@ -1271,7 +1357,7 @@ class TestBind:
         bot.click.return_value = "T"
         self._bound(bot).click("Login", retry=2)
         bot.click.assert_called_once_with(
-            "T", "Login", timeout=0.0, interval=2.0, wait="", retry=2, model_alias="", language=""
+            "T", "Login", modifier="", timeout=0.0, interval=2.0, wait="", retry=2, model_alias="", language=""
         )
 
     def test_type_text_injects_target(self):

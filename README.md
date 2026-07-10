@@ -443,6 +443,10 @@ bot.click(page, "Login button")
 # `wait` overrides the auto-derived assertion. (Also on type_text/double_click.)
 bot.click(page, "Login button", timeout=15.0, interval=2.0)
 
+# Modifier-click: hold modifier key(s) around the click (desktop only)
+bot.click(target, "enemy unit", modifier="alt")     # alt+click (games)
+bot.click(target, "file row", modifier="ctrl+shift")  # join several with "+"
+
 # Type text into an input field
 bot.type_text(page, "Email input", "user@example.com")
 
@@ -611,6 +615,11 @@ it to its own vocabulary.
 So `bot.press_key(t, "Enter")` becomes an adb keycode on Android and a
 DirectInput scancode on Airtest Windows automatically; `ctrl+t`/`ctrl+w` switch
 the active tab on Playwright (reassign the returned page).
+
+**Modifier-click (desktop).** `bot.click(..., modifier="alt")` holds modifier
+key(s) (`alt` / `ctrl` / `shift` / `win`, join with `+`) around the click —
+atomic alt+click for games, ctrl+click multi-select, etc. Desktop backends only
+(pyautogui, Airtest Windows); web/mobile ignore it and click plainly.
 
 **Smart `go_back` (Playwright):** if the current page has back history it goes
 back in place; if it doesn't — e.g. a click opened a link in a **new tab**,

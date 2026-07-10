@@ -103,13 +103,17 @@ the explicit form** `page = bot.click(page, ...)` so new-tab follows stay visibl
 ## AI-located actions (one model call each)
 
 ```python
-bot.click(target, locate, *, timeout=0.0, interval=2.0, wait="", model_alias="", language="")
+bot.click(target, locate, *, modifier="", timeout=0.0, interval=2.0, wait="", model_alias="", language="")
 bot.type_text(target, locate, text, *, press_enter=False, clear_before_typing=False, timeout=0.0, ...)
 bot.double_click(target, locate, ...)
 bot.long_press(target, locate, *, duration=2.0, timeout=0.0, ...)  # Appium/Airtest mobile only
 ```
 
 - `locate` is a natural-language description ("the blue Submit button").
+- `modifier` (desktop only: pyautogui / Airtest Windows) holds modifier key(s)
+  around the click — `"alt"`, `"ctrl+shift"`, etc. (`alt|ctrl|shift|win`, join
+  with `+`). Atomic alt+click for games, ctrl+click multi-select. Other
+  backends degrade to a plain click.
 - `timeout>0` auto-waits (polls a visual assertion) until present, else raises
   `QirabotTimeoutError`. `wait="..."` overrides the derived assertion.
 - Return the current target; if a click opened a **new tab**, that tab is
@@ -223,7 +227,7 @@ actions vary:
 - `long_press`: Appium/Airtest mobile only.
 - `press_key` on iOS: key names are mapped to characters (`enter`/`return`→`\n`,
   `tab`→`\t`); arrows/esc/home have no iOS soft-keyboard equivalent.
-- `mouse_down`/`mouse_up`/`key_down`/`key_up`: desktop only (pyautogui + Airtest Windows); pair them — held input auto-released after `ai()`/`close()`. For a fixed-length hold prefer `press_key(target, key, duration_seconds=...)` (single blocking call, auto-release); keep `key_down`/`key_up` for holds that must span other actions.
+- `mouse_down`/`mouse_up`/`key_down`/`key_up`: desktop only (pyautogui + Airtest Windows); pair them — held input auto-released after `ai()`/`close()`. For a fixed-length hold prefer `press_key(target, key, duration_seconds=...)` (single blocking call, auto-release); keep `key_down`/`key_up` for holds that must span other actions. For a modifier+click prefer `click(target, locate, modifier="alt")` (atomic, millisecond-scale hold) over a `key_down`/`click`/`key_up` sequence — the sequence holds the modifier for seconds across decision steps, which flips UI state in many games.
 - `right_click`/`hover`: full on browser/desktop; mobile taps / no-ops.
 
 Unsupported actions raise `NotImplementedError`.

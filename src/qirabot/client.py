@@ -623,6 +623,7 @@ class Qirabot:
         target: Any,
         locate: str,
         *,
+        modifier: str = "",
         timeout: float = 0.0,
         interval: float = 2.0,
         wait: str = "",
@@ -631,6 +632,11 @@ class Qirabot:
         language: str = "",
     ) -> Any:
         """AI-powered click: locate element by description and click it.
+
+        ``modifier`` holds modifier key(s) around the click (``"alt"``,
+        ``"ctrl"``, ``"shift"``, ``"win"``; join several with ``+``, e.g.
+        ``"ctrl+shift"``) — desktop backends only (pyautogui / Airtest
+        Windows); other backends degrade to a plain click.
 
         When ``timeout > 0``, auto-waits until the element looks present before
         clicking (polling a visual assertion every ``interval`` seconds), and
@@ -645,9 +651,12 @@ class Qirabot:
         """
         self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
         adapter = self._get_adapter(target)
+        params: dict[str, Any] = {"locate": locate}
+        if modifier:
+            params["modifier"] = modifier
         self._ai_action(
             target,
-            action={"type": "click", "params": {"locate": locate}},
+            action={"type": "click", "params": params},
             model_alias=model_alias,
             language=language,
             retry=retry,
