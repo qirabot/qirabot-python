@@ -13,7 +13,7 @@ from click.core import ParameterSource
 from qirabot._dotenv import load_dotenv
 from qirabot._optional import require
 from qirabot._transport import Transport
-from qirabot.exceptions import MissingDependencyError, QirabotError
+from qirabot.exceptions import QirabotError
 
 
 def _require_api_key(ctx: click.Context) -> str:
@@ -930,45 +930,40 @@ def _launch_desktop_app(app: str, app_wait: float) -> None:
 @cli.command()
 @click.argument("instruction")
 @_task_options
-@click.option("--engine", default="pyautogui", type=click.Choice(["pyautogui", "airtest"]), help="Automation backend: pyautogui drives the whole screen (cross-platform); airtest (Windows only) sends DirectInput scancodes that games can read, and can bind to one window")
-@click.option("--window-title", default="", help="airtest engine: bind to the window whose title matches this regex (screenshots/coords become window-relative, recording follows the window)")
-@click.option("--hwnd", default=0, type=int, help="airtest engine: bind to a specific window handle")
+@click.option("--window-title", default="", help="Bind to the window whose title matches this regex — selects the built-in Windows window backend (screenshots/coords become window-relative, input is game-readable scancodes, recording follows the window). Windows only.")
+@click.option("--hwnd", default=0, type=int, help="Bind to a specific window handle — selects the built-in Windows window backend. Windows only.")
 # Desktop — app launch
 @click.option("--app", default="", help="Launch/activate an app before the task. macOS: app name (\"WeChat\") or bundle id; Windows: exe path, registered name, or UWP AppUserModelID; Linux: executable.")
 @click.option("--app-wait", default=2.0, type=float, help="Seconds to wait after --app launch for the window to appear")
 @_debug_options()
 @click.pass_context
-def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, window_title: str, hwnd: int, app: str, app_wait: float, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
-    """Run an AI task on the desktop screen (pyautogui; --engine airtest for Windows games).
+def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, window_title: str, hwnd: int, app: str, app_wait: float, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
+    """Run an AI task on the desktop (pyautogui; --window-title/--hwnd for one Windows window).
 
     \b
-    Default engine — pyautogui, drives the whole screen (macOS/Windows/Linux):
+    Default — pyautogui, drives the whole screen (macOS/Windows/Linux):
       qirabot desktop "Create a note titled Groceries" --app Notes
     \b
-    Airtest engine (Windows only) — DirectInput scancode input that games can
-    read (pyautogui's virtual key codes often can't reach them); optionally
-    bind to one window so screenshots and clicks are window-relative:
-      qirabot desktop "..." --engine airtest
-      qirabot desktop "..." --engine airtest --window-title "Genshin"
-      qirabot desktop "..." --engine airtest --app "C:/game.exe" --app-wait 15 --window-title "..."
+    Windows window backend (built in, zero extra installs) — passing
+    --window-title or --hwnd binds to one window: screenshots and clicks are
+    window-relative, and keys go out as DirectInput scancodes that games can
+    read (virtual-key input often can't reach them):
+      qirabot desktop "..." --window-title "Genshin"
+      qirabot desktop "..." --app "C:/game.exe" --app-wait 15 --window-title "..."
     """
-    if engine == "airtest":
+    if window_title or hwnd:
         if window_title and hwnd:
             raise click.UsageError("--window-title and --hwnd are mutually exclusive")
         if sys.platform != "win32":
+            # macOS's CGEvent has no concept of delivering input to a
+            # background window, so a real window-bound backend cannot exist
+            # there — fail with the workable alternative, don't degrade.
             raise click.UsageError(
-                "--engine airtest drives the Windows desktop only; on other "
-                "platforms use the default pyautogui engine"
+                "--window-title/--hwnd need the Windows window backend, which "
+                "only exists on Windows; on macOS/Linux use the default "
+                "full-screen mode and bring the target window to the front"
             )
-        # Not _require_airtest(): its escape hatch points at --engine appium,
-        # which doesn't exist here — the desktop fallback is pyautogui.
-        try:
-            require("airtest.core.api", "airtest")
-        except MissingDependencyError as e:
-            raise MissingDependencyError(
-                f"{e} Or drop --engine airtest to use the default pyautogui engine."
-            ) from e
-        from airtest.core.api import connect_device
+        from qirabot.windows import Window
 
         # Validate the key before the --app side effect (same contract as the
         # pyautogui path below).
@@ -976,42 +971,17 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
         if app:
             _launch_desktop_app(app, app_wait)
 
-        if hwnd:
-            uri = f"Windows:///{hwnd}"
-        elif window_title:
-            from urllib.parse import quote
-
-            uri = f"Windows:///?title_re={quote(window_title)}"
-        else:
-            uri = "Windows:///"
+        window = Window(hwnd=hwnd or None, title_re=window_title or None)
 
         def connect() -> Any:
-            try:
-                target = connect_device(uri)
-            except Exception as e:
-                raise RuntimeError(
-                    f"could not connect to {uri} ({e}); check the window exists "
-                    "(--window-title is a regex matched against visible window "
-                    "titles), or increase --app-wait if the app is still starting"
-                ) from e
-            # Games only receive input in the foreground. Best-effort: the
-            # whole-desktop device has no single window to raise.
-            try:
-                target.to_foreground()
-            except Exception:
-                pass
-            return target
+            window.hwnd  # noqa: B018 — resolve now for actionable errors
+            return window
 
         _run_direct(
             ctx, instruction, name, model, language, max_steps, connect,
             report, report_dir, annotate, record=record,
         )
         return
-
-    if _flag_given(ctx, "window_title"):
-        raise click.UsageError("--window-title only applies to --engine airtest")
-    if _flag_given(ctx, "hwnd"):
-        raise click.UsageError("--hwnd only applies to --engine airtest")
 
     pyautogui = require("pyautogui", "desktop")
 

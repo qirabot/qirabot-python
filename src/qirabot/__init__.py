@@ -7,6 +7,7 @@ from qirabot._dotenv import load_dotenv
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
 from qirabot.adb import AdbDevice
 from qirabot.wda import WdaClient
+from qirabot.windows import Window
 from qirabot.client import (
     ExtractResult,
     Qirabot,
@@ -66,6 +67,7 @@ __all__ = [
     "TaskTerminatedError",
     "VerifyResult",
     "WdaClient",
+    "Window",
     "launch_app",
     "load_dotenv",
     "record",

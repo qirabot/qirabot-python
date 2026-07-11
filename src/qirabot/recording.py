@@ -90,9 +90,6 @@ def _find_ffmpeg() -> str | None:
     return shutil.which("ffmpeg")
 
 
-# Win32 DPI-awareness context handles for SetThreadDpiAwarenessContext. We only
-# need PER_MONITOR_AWARE_V2 (-4); the value is a sentinel HANDLE, not a real one.
-_DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 # DwmGetWindowAttribute index for the rectangle the window *visually* occupies
 # (excludes the invisible resize border that GetWindowRect includes on Win10/11).
 _DWMWA_EXTENDED_FRAME_BOUNDS = 9
@@ -107,9 +104,9 @@ def window_region(hwnd: int) -> tuple[int, int, int, int] | None:
     * The result comes from ``DWMWA_EXTENDED_FRAME_BOUNDS`` rather than
       ``GetWindowRect`` so it excludes the ~7px invisible resize border (which
       would otherwise show as empty margins / an offset in the recording).
-    * The query runs under a temporary per-monitor DPI-awareness *thread*
-      context so the rect is in physical pixels regardless of the host process's
-      DPI awareness — and without permanently changing it. ``gdigrab`` works in
+    * The query runs under :func:`qirabot.windows.dpi_awareness` (a temporary
+      per-monitor DPI thread context) so the rect is in physical pixels
+      regardless of the host process's DPI awareness. ``gdigrab`` works in
       physical pixels, so the two line up.
 
     Windows-only; returns ``None`` on any other platform or on failure. Width and
@@ -120,40 +117,29 @@ def window_region(hwnd: int) -> tuple[int, int, int, int] | None:
     import ctypes
     from ctypes import wintypes
 
-    prev_ctx = None
-    user32 = ctypes.windll.user32
+    from qirabot.windows import dpi_awareness
+
     try:
-        # Save/restore the thread context so we don't leak awareness changes.
-        try:
-            prev_ctx = user32.SetThreadDpiAwarenessContext(
-                _DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+        with dpi_awareness():
+            user32 = ctypes.windll.user32
+            rect = wintypes.RECT()
+            hr = ctypes.windll.dwmapi.DwmGetWindowAttribute(
+                wintypes.HWND(hwnd),
+                ctypes.c_uint(_DWMWA_EXTENDED_FRAME_BOUNDS),
+                ctypes.byref(rect),
+                ctypes.sizeof(rect),
             )
-        except Exception:
-            prev_ctx = None  # pre-1607: GetWindowRect path below is best-effort
-        rect = wintypes.RECT()
-        hr = ctypes.windll.dwmapi.DwmGetWindowAttribute(
-            wintypes.HWND(hwnd),
-            ctypes.c_uint(_DWMWA_EXTENDED_FRAME_BOUNDS),
-            ctypes.byref(rect),
-            ctypes.sizeof(rect),
-        )
-        if hr != 0:  # not S_OK (e.g. DWM disabled) — fall back to GetWindowRect
-            if not user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
+            if hr != 0:  # not S_OK (e.g. DWM disabled) — GetWindowRect fallback
+                if not user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
+                    return None
+            x, y = rect.left, rect.top
+            w, h = rect.right - rect.left, rect.bottom - rect.top
+            if w <= 0 or h <= 0:
                 return None
-        x, y = rect.left, rect.top
-        w, h = rect.right - rect.left, rect.bottom - rect.top
-        if w <= 0 or h <= 0:
-            return None
-        return x, y, w - (w % 2), h - (h % 2)
+            return x, y, w - (w % 2), h - (h % 2)
     except Exception:
         logger.debug("window_region(%r) failed", hwnd, exc_info=True)
         return None
-    finally:
-        if prev_ctx:
-            try:
-                user32.SetThreadDpiAwarenessContext(prev_ctx)
-            except Exception:
-                pass
 
 
 def _detect_audio_device(ffmpeg: str) -> str | None:
