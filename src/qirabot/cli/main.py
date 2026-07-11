@@ -494,6 +494,12 @@ def doctor(ctx: click.Context) -> None:
     ]
 
     console.print("\n[bold]Backends[/bold] — you only need the one you plan to drive:")
+    # Informational (not a gate): the direct iOS backend is built into the core
+    # package; its only requirement — WebDriverAgent running on the device —
+    # can't be probed from here.
+    console.print(
+        f"  {ok} ios direct (WDA — built in; needs WebDriverAgent running on the device)"
+    )
     for label, ready, hint in backends:
         if ready:
             console.print(f"  {ok} {escape(label)}")
@@ -602,17 +608,6 @@ def _flag_given(ctx: click.Context, param: str) -> bool:
     engine-specific flags can be rejected under the other engine without
     tripping on their own default values."""
     return ctx.get_parameter_source(param) == ParameterSource.COMMANDLINE
-
-
-def _require_airtest() -> None:
-    """require() with the CLI escape hatch appended: airtest is the default
-    engine, so a missing install must also point at --engine appium."""
-    try:
-        require("airtest.core.api", "airtest")
-    except MissingDependencyError as e:
-        raise MissingDependencyError(
-            f"{e} Or pass --engine appium to go through an Appium server instead."
-        ) from e
 
 
 def _run_appium(
@@ -798,40 +793,16 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
     )
 
 
-def _check_wda_ready(wda_url: str) -> None:
-    """Fail fast when WebDriverAgent isn't reachable, before airtest connects.
-
-    airtest's iOS backend treats a localhost --wda-url as a local USB device
-    and, when WDA isn't up, auto-launches the xctest runner via go-ios/
-    tidevice — on iOS 17+ that dead-ends only after tidevice downloads
-    developer disk images. Probing first turns that into an immediate,
-    actionable error. Local devices are also probed over usbmux, because
-    airtest talks to them that way and works without iproxy.
-    """
-    from urllib.parse import urlsplit
-
-    # facebook-wda, an airtest dependency; require() also keeps its Python
-    # 3.12 SyntaxWarnings out of the CLI output.
-    wda = require("wda", "airtest")
-
-    wda.DEBUG = False  # type: ignore[attr-defined]  # require() returns ModuleType
-    url = wda_url if wda_url.startswith("http") else f"http://{wda_url}"
-    if wda.Client(url).is_ready():
+def _check_wda_ready(client: Any, wda_url: str) -> None:
+    """Fail fast, with the full fix, when WebDriverAgent isn't answering."""
+    if client.is_ready():
         return
-    if urlsplit(url).hostname in ("localhost", "127.0.0.1"):
-        try:
-            usb = [d for d in wda.list_devices() if d.connection_type == "USB"]
-        except Exception:
-            usb = []
-        if len(usb) == 1 and wda.BaseClient(
-            f"http+usbmux://{usb[0].serial}:8100"
-        ).is_ready():
-            return
     raise RuntimeError(
-        f"WDA is not running (nothing answered at {wda_url} or over USB); start "
-        "WebDriverAgent first (Xcode: run the WebDriverAgentRunner test scheme on "
-        "the device, or `tidevice3 runwda` / pymobiledevice3), then retry — or "
-        "use --engine appium to have Appium build and launch WDA"
+        f"WDA is not running (nothing answered at {wda_url}); start "
+        "WebDriverAgent first (USB real device: `iproxy 8100 8100` alongside "
+        "it; Xcode: run the WebDriverAgentRunner test scheme on the device, "
+        "or `tidevice3 runwda` / pymobiledevice3), then retry — or pass "
+        "--appium-url to have Appium build and launch WDA"
     )
 
 
@@ -870,42 +841,42 @@ def _check_mjpeg_ready(mjpeg_url: str) -> None:
 @cli.command()
 @click.argument("instruction")
 @_task_options
-@click.option("--engine", default="airtest", type=click.Choice(["airtest", "appium"]), help="Automation backend: airtest drives WebDriverAgent directly at --wda-url (no Appium server); appium goes through an Appium server (simulators, auto WDA build)")
 @click.option("--wda-url", default="http://127.0.0.1:8100", help="WebDriverAgent URL — this is how the default engine picks the device (USB real device: run `iproxy 8100 8100` and keep the default; another device = its WDA address)")
-@click.option("--device", "-d", default="", help="Simulator device type for the appium engine (a name from `xcrun simctl list devicetypes`, e.g. \"iPhone 15\") — simulators only, not a real device's name. Real devices: use the default engine, which selects the device via --wda-url.")
-@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL (appium engine)")
+@click.option("--device", "-d", default="", help="Simulator device type (a name from `xcrun simctl list devicetypes`, e.g. \"iPhone 15\") — passing this flag switches the run to the Appium engine (simulators only). Real devices: keep the default engine, which selects the device via --wda-url.")
+@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL — passing this flag switches the run to the Appium engine", show_default="direct WDA, no server")
 # iOS — app launch
 @click.option("--bundle-id", default="", help="App bundle id to launch (e.g. com.tencent.xin)")
 # iOS — device-screen recording: the default engine transcodes WDA's MJPEG
-# stream with ffmpeg; the appium engine uses Appium's recording API. Either
+# stream with ffmpeg; the Appium engine uses Appium's recording API. Either
 # way this captures the phone screen, unlike the desktop --record.
-@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (default engine: WDA's MJPEG stream, requires ffmpeg, USB real device also needs `iproxy 9100 9100`; appium engine: Appium's recording API)")
-@click.option("--mjpeg-url", default="", help="WDA MJPEG stream URL for --record (default: --wda-url's host on port 9100; airtest engine only)")
+@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (default engine: WDA's MJPEG stream, requires ffmpeg, USB real device also needs `iproxy 9100 9100`; Appium engine: Appium's recording API)")
+@click.option("--mjpeg-url", default="", help="WDA MJPEG stream URL for --record (default: --wda-url's host on port 9100; direct engine only)")
 @_debug_options(record=False)
 @click.pass_context
-def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, report: bool, report_dir: str, annotate: bool) -> None:
-    """Run an AI task on an iOS device (direct via WDA; --engine appium for Appium).
+def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, report: bool, report_dir: str, annotate: bool) -> None:
+    """Run an AI task on an iOS device (direct via WDA; --appium-url/--device for Appium).
 
     \b
-    Default engine — talks to WebDriverAgent directly, no Appium server. WDA
-    must be running on the device (USB real device: `iproxy 8100 8100` first):
+    Default — talks to WebDriverAgent directly (built in, zero extra installs).
+    WDA must be running on the device (USB real device: `iproxy 8100 8100`):
       qirabot ios "..." --bundle-id com.tencent.xin          # WDA on 127.0.0.1:8100
       qirabot ios "..." --wda-url http://192.168.1.20:8100   # another device's WDA
     \b
-    Appium engine — needs a running server (npm i -g appium && appium driver
-    install xcuitest && appium); use for simulators or to auto build/sign WDA:
-      qirabot ios "..." --engine appium -d "iPhone 15" --bundle-id com.apple.Preferences
+    Appium — passing --appium-url or --device (simulator) selects the Appium
+    engine; needs a running server (npm i -g appium && appium driver install
+    xcuitest && appium), and can auto build/sign WDA for you:
+      qirabot ios "..." -d "iPhone 15" --bundle-id com.apple.Preferences
     \b
     Recording — --record saves the device screen. Default engine: WDA's MJPEG
     stream (port 9100; USB real device: also `iproxy 9100 9100`). Appium
     engine: Appium's own recording API, no extra setup:
       qirabot ios "..." --record
     """
-    if engine == "appium":
+    if _flag_given(ctx, "appium_url") or _flag_given(ctx, "device"):
         if _flag_given(ctx, "wda_url"):
-            raise click.UsageError("--wda-url only applies to --engine airtest")
+            raise click.UsageError("--wda-url only applies to the direct engine (drop --appium-url/--device)")
         if _flag_given(ctx, "mjpeg_url"):
-            raise click.UsageError("--mjpeg-url only applies to --engine airtest (the appium engine records via Appium's own API)")
+            raise click.UsageError("--mjpeg-url only applies to the direct engine (the Appium engine records via Appium's own API)")
         require("appium.webdriver", "appium")
         from appium.options.ios import XCUITestOptions
 
@@ -921,37 +892,22 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
         )
         return
 
-    if _flag_given(ctx, "appium_url"):
-        raise click.UsageError("--appium-url only applies to --engine appium")
-    if _flag_given(ctx, "device"):
-        raise click.UsageError("--device only applies to --engine appium; the airtest engine connects via --wda-url")
     if _flag_given(ctx, "mjpeg_url") and not record:
         raise click.UsageError("--mjpeg-url only applies with --record")
     record_mjpeg_url = ""
     if record:
         record_mjpeg_url = mjpeg_url or _wda_mjpeg_url(wda_url)
         _check_mjpeg_ready(record_mjpeg_url)
-    _require_airtest()
-    from airtest.core.api import connect_device
+
+    from qirabot.wda import WdaClient
+
+    client = WdaClient(wda_url)
 
     def connect() -> Any:
-        # Refuse to hand a dead WDA to airtest: its connect would try to
-        # auto-launch the runner (go-ios, then tidevice + disk-image
-        # downloads) and still fail on iOS 17+.
-        _check_wda_ready(wda_url)
-        try:
-            target = connect_device(f"iOS:///{wda_url}")
-        except Exception as e:
-            raise RuntimeError(
-                f"could not reach WDA at {wda_url} ({e}); start WDA (real device: "
-                "`iproxy 8100 8100`), or use --engine appium"
-            ) from e
+        _check_wda_ready(client, wda_url)
         if bundle_id:
-            # Launch via WDA's app_launch, NOT airtest's start_app: start_app
-            # routes through the bundled go-ios CLI, which fails on iOS 17+
-            # without a RemoteXPC tunnel daemon.
-            target.driver.app_launch(bundle_id)
-        return target
+            client.app_launch(bundle_id)
+        return client
 
     _run_direct(
         ctx, instruction, name, model, language, max_steps, connect,

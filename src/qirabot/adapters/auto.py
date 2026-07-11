@@ -12,6 +12,7 @@ from qirabot.adapters.base import DeviceAdapter
 from qirabot.adapters.playwright_adapter import PlaywrightAdapter
 from qirabot.adapters.pyautogui_adapter import PyAutoGuiAdapter
 from qirabot.adapters.selenium_adapter import SeleniumAdapter
+from qirabot.adapters.wda_adapter import WdaAdapter
 
 logger = logging.getLogger("qirabot")
 
@@ -20,6 +21,7 @@ _ADAPTER_CLASSES: list[type[DeviceAdapter]] = [
     AppiumAdapter,
     SeleniumAdapter,
     AdbAdapter,
+    WdaAdapter,
     AirtestAdapter,
     PyAutoGuiAdapter,
 ]
