@@ -339,13 +339,18 @@ def models(ctx: click.Context) -> None:
 
 
 def _has_module(module: str) -> bool:
-    """Probe an optional dependency without require()'s raise (doctor only)."""
+    """Probe an optional dependency without require()'s raise (doctor only).
+
+    Catches every exception, not just ImportError: pyautogui raises KeyError
+    at import time on a display-less Linux box (no $DISPLAY), and a probe
+    must report "not usable here", never crash doctor.
+    """
     import importlib
 
     try:
         importlib.import_module(module)
         return True
-    except ImportError:
+    except Exception:
         return False
 
 
