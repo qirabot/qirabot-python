@@ -16,11 +16,20 @@ from qirabot._transport import Transport
 from qirabot.exceptions import QirabotError
 
 
+# Whether QIRA_API_KEY entered os.environ via ./.env (set by main() around
+# load_dotenv), so `login --status` can name the real source layer.
+_KEY_FROM_DOTENV = False
+
+
 def _require_api_key(ctx: click.Context) -> str:
     """Single place for the missing-key error so every command says the same thing."""
     api_key: str = ctx.obj["api_key"]
     if not api_key:
-        click.echo("Error: API key is required. Set QIRA_API_KEY or pass --api-key.", err=True)
+        click.echo(
+            "Error: API key is required. Run `qirabot login` to save one "
+            "(or set QIRA_API_KEY / pass --api-key).",
+            err=True,
+        )
         sys.exit(1)
     return api_key
 
@@ -231,7 +240,23 @@ def cli(ctx: click.Context, api_key: str, base_url: str, timeout: float, verify_
     subcommand, e.g. `qirabot --base-url ... browser "..."`.
     """
     ctx.ensure_object(dict)
+    # Key resolution order: --api-key flag > QIRA_API_KEY env var > ./.env
+    # (loaded into the environment by main()) > the `qirabot login` config
+    # file. The source tag feeds `qirabot login --status`.
+    source = ""
+    if api_key:
+        if ctx.get_parameter_source("api_key") == ParameterSource.COMMANDLINE:
+            source = "flag"
+        else:
+            source = ".env" if _KEY_FROM_DOTENV else "env"
+    else:
+        from qirabot.cli.config import load_api_key
+
+        stored = load_api_key()
+        if stored:
+            api_key, source = stored, "config"
     ctx.obj["api_key"] = api_key
+    ctx.obj["api_key_source"] = source
     ctx.obj["base_url"] = base_url
     ctx.obj["timeout"] = timeout
     ctx.obj["verify_ssl"] = verify_ssl
@@ -338,6 +363,81 @@ def models(ctx: click.Context) -> None:
     Console().print(table)
 
 
+@cli.command()
+@click.option("--status", is_flag=True, help="Show the configured key (masked) and which layer it comes from")
+@click.pass_context
+def login(ctx: click.Context, status: bool) -> None:
+    """Save your API key once — every later command picks it up automatically.
+
+    Prompts for the key (input hidden), verifies it against the server, and
+    only then writes it to the user config file (chmod 600). Environment
+    variables and ./.env keep working and always take precedence; `login` just
+    removes the need to export anything per shell.
+    """
+    from qirabot.cli import config as user_config
+
+    if status:
+        key: str = ctx.obj["api_key"]
+        if not key:
+            click.echo(
+                "No API key configured. Run `qirabot login`, or set QIRA_API_KEY."
+            )
+            sys.exit(1)
+        origin = {
+            "flag": "--api-key flag",
+            "env": "QIRA_API_KEY environment variable",
+            ".env": "./.env file",
+            "config": f"login config ({user_config.config_path()})",
+        }.get(ctx.obj["api_key_source"], "unknown")
+        click.echo(f"API key: {user_config.mask_key(key)}  (from: {origin})")
+        return
+
+    key = click.prompt(
+        "API key (qk_..., from https://app.qirabot.com)", hide_input=True
+    ).strip()
+    if not key:
+        raise click.ClickException("empty API key; nothing saved")
+    # Verify BEFORE writing — a typo'd key must not silently poison every
+    # later command. Short timeout: this is a diagnostic-grade request.
+    try:
+        with_transport = Transport(
+            base_url=ctx.obj["base_url"],
+            api_key=key,
+            timeout=min(ctx.obj["timeout"], 10.0),
+            verify_ssl=ctx.obj["verify_ssl"],
+        )
+        with_transport.request("GET", "/model-aliases")
+    except Exception as e:
+        click.echo(
+            f"Error: {ctx.obj['base_url']} rejected this key or is unreachable "
+            f"({e}); nothing saved.",
+            err=True,
+        )
+        sys.exit(1)
+    path = user_config.save_api_key(key)
+    click.echo(f"Key verified and saved to {path}.")
+    click.echo('You\'re set — try: qirabot browser "Search for SpaceX on Wikipedia"')
+
+
+@cli.command("install-browser")
+def install_browser() -> None:
+    """Download the Chromium that browser automation drives (one-time).
+
+    Exists because isolated installs (`uv tool install`, the install script)
+    don't put Playwright's own `playwright` command on PATH — this wraps the
+    same Chromium download so the second setup step is identical everywhere.
+    """
+    require("playwright", "browser")
+    import subprocess
+
+    rc = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"]
+    ).returncode
+    if rc != 0:
+        raise click.ClickException(f"Chromium download failed (exit {rc})")
+    click.echo('Chromium installed — you\'re ready: qirabot browser "..."')
+
+
 def _has_module(module: str) -> bool:
     """Probe an optional dependency without require()'s raise (doctor only).
 
@@ -433,7 +533,8 @@ def doctor(ctx: click.Context) -> None:
 
     if not ctx.obj["api_key"]:
         console.print(
-            f"{bad} API key not set — export QIRA_API_KEY=qk_... (or put it in ./.env)"
+            f"{bad} API key not set — run `qirabot login` "
+            "(or export QIRA_API_KEY=qk_... / put it in ./.env)"
         )
         problems += 1
     else:
@@ -1011,8 +1112,12 @@ def main() -> None:
     # The SDK never reads .env implicitly; the CLI is the "calling script" in
     # that contract, so it opts in here — before click parses options, so the
     # envvar fallbacks (QIRA_API_KEY etc.) see the values. Best-effort, and
-    # exported variables always win over .env entries.
+    # exported variables always win over .env entries. Remember whether the
+    # key came from .env so `login --status` can say so.
+    global _KEY_FROM_DOTENV
+    had_env_key = "QIRA_API_KEY" in os.environ
     load_dotenv()
+    _KEY_FROM_DOTENV = not had_env_key and "QIRA_API_KEY" in os.environ
     # Catch SDK errors that escape command bodies and print them as one line,
     # no traceback: MissingDependencyError (install hint, may surface deep
     # inside a command via lazy imports) and transport errors from the
