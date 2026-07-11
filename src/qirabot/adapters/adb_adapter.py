@@ -1,0 +1,316 @@
+"""Direct-adb Android adapter (no framework, no device agent for input).
+
+Drives an :class:`~qirabot.adb.AdbDevice` with plain ``adb shell input`` /
+``screencap`` calls. Screenshot/tap/swipe/keyevent are the whole surface the
+AI loop needs — the CV runs server-side, so none of a framework's local image
+matching is wanted here.
+
+Text input: ASCII goes through ``input text``; anything else (Chinese, emoji,
+``%``, control chars) is delivered via the ADBKeyboard IME's ``ADB_INPUT_B64``
+broadcast, auto-installing the bundled APK on first use (GPL-2.0, vendored
+with license + provenance in ``qirabot/assets/``).
+"""
+
+from __future__ import annotations
+
+import base64
+import io
+import time
+from typing import Any
+
+from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig, split_combo
+from qirabot.adb import AdbDevice
+from qirabot.exceptions import QirabotError
+
+# The ADBKeyboard IME (github.com/senzhk/ADBKeyBoard) receives text as a
+# base64 broadcast, sidestepping `input text`'s ASCII-only, shell-quoting
+# minefield for real-world text.
+_ADB_IME_ID = "com.android.adbkeyboard/.AdbIME"
+_ADB_IME_APK = "ADBKeyboard.apk"
+
+# `input text` chokes on long strings on some OEM shells; chunk conservatively.
+_TEXT_CHUNK = 300
+
+
+def _ascii_typeable(text: str) -> bool:
+    """True when ``input text`` can carry ``text`` verbatim.
+
+    ``%`` is excluded because `input text` expands %s (and OEMs vary on other
+    %-sequences); control chars (\\n, \\t) never survive the input pipeline.
+    """
+    return (
+        text.isascii()
+        and "%" not in text
+        and all(ch == " " or ch.isprintable() for ch in text)
+    )
+
+
+def _shell_single_quote(arg: str) -> str:
+    """Quote for the DEVICE-side sh (adb shell joins args into one command line)."""
+    return "'" + arg.replace("'", "'\\''") + "'"
+
+
+class AdbAdapter(DeviceAdapter):
+    """Adapter for :class:`qirabot.adb.AdbDevice` targets."""
+
+    # adb keyevent names for the keys the server may emit. `input keyevent`
+    # accepts both bare names (ENTER) and KEYCODE_-prefixed ones; unknown keys
+    # pass through uppercased.
+    _KEY_MAP = {
+        "enter": "ENTER",
+        "return": "ENTER",
+        "backspace": "KEYCODE_DEL",
+        "delete": "KEYCODE_DEL",
+        "back": "BACK",
+        "home": "HOME",
+        "menu": "MENU",
+        "tab": "TAB",
+        "space": "SPACE",
+    }
+
+    # Actions that don't change the screen (or handle their own timing), so the
+    # next screenshot needs no settle delay after them.
+    _NO_SETTLE = frozenset({"wait", "done", "save_note"})
+
+    # `input` events return before the UI reacts; same fixed floor the other
+    # device adapters use (see DeviceAdapter.settle_seconds).
+    _SETTLE_SECONDS = 1.0
+
+    # Delay between the focusing tap and the first keystroke, so focus
+    # animations / IME activation finish before characters start arriving.
+    _FOCUS_SETTLE = 0.3
+
+    def __init__(self, target: Any) -> None:
+        self._device: AdbDevice = target
+        self._last_size: tuple[int, int] | None = None
+        # IME bookkeeping: the user's keyboard is restored on close().
+        self._saved_ime: str | None = None
+        self._ime_ready = False
+
+    @classmethod
+    def accepts(cls, target: Any) -> bool:
+        return isinstance(target, AdbDevice)
+
+    @property
+    def current_target(self) -> Any:
+        return self._device
+
+    # ---- screen -------------------------------------------------------------
+
+    def screenshot(self, config: ScreenshotConfig | None = None) -> bytes:
+        cfg = config or ScreenshotConfig()
+        # screencap can transiently return nothing (device busy, screen off
+        # transition); retry a couple of times before failing the step.
+        png = b""
+        for attempt in range(3):
+            png = self._device.screencap()
+            if png:
+                break
+            time.sleep(0.15)
+        if not png:
+            raise QirabotError(
+                "adb screencap returned no data after 3 attempts",
+                code="adb.screencap_empty",
+            )
+        from PIL import Image
+
+        # Lazy header probe (no pixel decode) for the size cache; screencap
+        # always returns an upright frame, so no rotation fixups are needed.
+        img: Image.Image = Image.open(io.BytesIO(png))
+        self._last_size = (img.width, img.height)
+        if cfg.format == "png":
+            return png
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=cfg.quality)
+        return buf.getvalue()
+
+    def device_info(self) -> DeviceInfo:
+        # Prefer the last screenshot's dimensions so the reported size matches
+        # the image the model sees (wm size doesn't track rotation).
+        if self._last_size is not None:
+            width, height = self._last_size
+        else:
+            width, height = self._device.wm_size()
+        return DeviceInfo(platform="android", width=width, height=height)
+
+    # ---- pointer ------------------------------------------------------------
+
+    def click(self, x: float, y: float) -> None:
+        self._device.shell(f"input tap {int(x)} {int(y)}")
+
+    def double_click(self, x: float, y: float) -> None:
+        # One shell round-trip: two `input tap` invocations back to back keep
+        # the inter-tap gap inside double-tap detection (~300ms); two separate
+        # adb round-trips would not.
+        ix, iy = int(x), int(y)
+        self._device.shell(f"input tap {ix} {iy} && input tap {ix} {iy}")
+
+    def long_press(self, x: float, y: float, duration: float = 2.0) -> None:
+        # A zero-distance swipe with a duration is the adb long-press idiom.
+        ix, iy = int(x), int(y)
+        ms = max(1, int(duration * 1000))
+        self._device.shell(f"input swipe {ix} {iy} {ix} {iy} {ms}")
+
+    def drag(self, from_x: float, from_y: float, to_x: float, to_y: float) -> None:
+        self._device.shell(
+            f"input swipe {int(from_x)} {int(from_y)} {int(to_x)} {int(to_y)} 500"
+        )
+
+    # ---- scrolling (geometry mirrors the retired airtest adapter) ------------
+
+    def scroll(self, x: float, y: float, direction: str, distance: int) -> None:
+        # DeviceAdapter contract / direct callers keep the legacy ×100 unit; a
+        # zero anchor falls back to screen center.
+        info = self.device_info()
+        cx = x or info.width / 2.0
+        cy = y or info.height / 2.0
+        self._swipe(cx, cy, direction, distance * 100, info)
+
+    def _scroll_action(self, action_type: str, params: dict[str, Any]) -> None:
+        # The server sends scroll as {direction, amount} with no x/y; honor the
+        # real pixel ``amount`` and anchor sensibly (center, or the element for
+        # scroll_at) instead of swiping from (0,0).
+        info = self.device_info()
+        raw = params.get("amount")
+        pixels = int(raw) if raw is not None and raw != "" else 0
+        if (
+            action_type == "scroll_at"
+            and params.get("x") is not None
+            and params.get("y") is not None
+        ):
+            cx, cy = float(params["x"]), float(params["y"])
+        else:
+            cx, cy = info.width / 2.0, info.height / 2.0
+        self._swipe(cx, cy, str(params.get("direction", "down")), pixels, info)
+
+    def _swipe(
+        self, cx: float, cy: float, direction: str, pixels: int, info: DeviceInfo
+    ) -> None:
+        w, h = info.width, info.height
+        span = h if direction in ("up", "down") else w
+        if pixels <= 0:
+            pixels = int(span * 0.6)
+        pixels = min(pixels, int(span * 0.7))  # keep the whole gesture on-screen
+
+        if direction == "down":
+            ex, ey = cx, cy - pixels
+        elif direction == "up":
+            ex, ey = cx, cy + pixels
+        elif direction == "right":
+            ex, ey = cx - pixels, cy
+        elif direction == "left":
+            ex, ey = cx + pixels, cy
+        else:
+            return
+
+        def clamp(v: float, lo: float, hi: float) -> float:
+            return max(lo, min(hi, v))
+
+        self.drag(cx, cy, clamp(ex, w * 0.05, w * 0.95), clamp(ey, h * 0.05, h * 0.95))
+
+    def _dispatch(self, action_type: str, params: dict[str, Any]) -> None:
+        if action_type in ("scroll", "scroll_at"):
+            self._scroll_action(action_type, params or {})
+        else:
+            super()._dispatch(action_type, params)
+
+    # ---- keys ---------------------------------------------------------------
+
+    def press_key(self, key: str) -> None:
+        # Android has no held-modifier concept over `input keyevent`; combos
+        # degrade to the base key (same behavior as the retired adapter).
+        _mods, base = split_combo(key)
+        name = self._KEY_MAP.get(base.lower(), base.upper())
+        self._device.shell(f"input keyevent {name}")
+
+    def go_back(self) -> None:
+        self._device.shell("input keyevent BACK")
+
+    def clear_focused(self) -> None:
+        # No element model over raw adb: best effort is caret-to-end plus a
+        # burst of deletes. One shell round-trip (`input keyevent` accepts many
+        # keycodes per invocation) instead of 64 (~2-5s of adb round-trips).
+        try:
+            self._device.shell("input keyevent KEYCODE_MOVE_END")
+        except QirabotError:
+            pass
+        self._device.shell("input keyevent " + " ".join(["KEYCODE_DEL"] * 64))
+
+    # ---- text ---------------------------------------------------------------
+
+    def type_text(self, x: float, y: float, text: str) -> None:
+        self.click(x, y)
+        time.sleep(self._FOCUS_SETTLE)
+        self.type_focused(text)
+
+    def type_focused(self, text: str) -> None:
+        if not text:
+            return
+        if _ascii_typeable(text):
+            self._input_text(text)
+        else:
+            self._ime_text(text)
+
+    def _input_text(self, text: str) -> None:
+        for start in range(0, len(text), _TEXT_CHUNK):
+            chunk = text[start : start + _TEXT_CHUNK]
+            # `input text` renders %s as a space; single-quote the whole arg so
+            # the device shell passes metacharacters ("&;<>$`\"") through.
+            arg = _shell_single_quote(chunk.replace(" ", "%s"))
+            self._device.shell(f"input text {arg}")
+
+    def _ime_text(self, text: str) -> None:
+        self._ensure_adb_ime()
+        payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        self._device.shell(f"am broadcast -a ADB_INPUT_B64 --es msg {payload}")
+
+    def _ensure_adb_ime(self) -> None:
+        """Make ADBKeyboard the active IME (installing the bundled APK if needed)."""
+        if self._ime_ready:
+            return
+        dev = self._device
+        if _ADB_IME_ID not in dev.shell("ime list -s -a"):
+            self._install_adb_ime()
+        # Save the user's keyboard so close() can restore it.
+        current = dev.shell("settings get secure default_input_method").strip()
+        if current and current != "null" and current != _ADB_IME_ID:
+            self._saved_ime = current
+        dev.shell(f"ime enable {_ADB_IME_ID}")
+        dev.shell(f"ime set {_ADB_IME_ID}")
+        time.sleep(0.3)  # let the IME switch land before the first broadcast
+        self._ime_ready = True
+
+    def _install_adb_ime(self) -> None:
+        from importlib import resources
+
+        apk = resources.files("qirabot.assets").joinpath(_ADB_IME_APK)
+        if not apk.is_file():
+            raise QirabotError(
+                "typing non-ASCII text needs the ADBKeyboard IME, and this "
+                "build ships without the APK. Install it manually "
+                "(https://github.com/senzhk/ADBKeyBoard) or use the Appium "
+                "engine (--appium-url).",
+                code="adb.ime_missing",
+            )
+        try:
+            with resources.as_file(apk) as path:
+                self._device.install(str(path))
+        except QirabotError as e:
+            raise QirabotError(
+                f"could not install the ADBKeyboard IME ({e.message}). If app "
+                "installs are blocked on this device (MDM policy), preinstall "
+                "it manually or use the Appium engine (--appium-url).",
+                code="adb.ime_install_failed",
+            ) from e
+
+    def close(self) -> None:
+        # Best-effort: give the user their keyboard back.
+        if self._saved_ime:
+            try:
+                self._device.shell(f"ime set {self._saved_ime}")
+            except Exception:
+                pass
+            self._saved_ime = None
+        self._ime_ready = False

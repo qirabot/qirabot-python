@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from qirabot.adapters.adb_adapter import AdbAdapter
 from qirabot.adapters.airtest_adapter import AirtestAdapter
 from qirabot.adapters.appium_adapter import AppiumAdapter
 from qirabot.adapters.base import DeviceAdapter
@@ -18,6 +19,7 @@ _ADAPTER_CLASSES: list[type[DeviceAdapter]] = [
     PlaywrightAdapter,
     AppiumAdapter,
     SeleniumAdapter,
+    AdbAdapter,
     AirtestAdapter,
     PyAutoGuiAdapter,
 ]

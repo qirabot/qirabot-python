@@ -13,6 +13,7 @@ htmlcov/
 screenshots/
 user_data/
 qira_runs/
+plans/
 
 # local reference material (e.g. vendored third-party source for lookup)
 reference/

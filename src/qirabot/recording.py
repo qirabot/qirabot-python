@@ -784,6 +784,14 @@ def device_recorder(output: str, target: Any) -> Recorder | None:
     """
     if hasattr(target, "start_recording_screen"):
         return AppiumScreenRecorder(output, target)
+    # qirabot's own AdbDevice exposes the ready-made base command (duck-typed
+    # so this stays import-light).
+    try:
+        adb_cmd = getattr(target, "adb_command", None)
+    except Exception:
+        adb_cmd = None  # serial resolution failed; recording is best-effort
+    if adb_cmd:
+        return AdbScreenRecorder(output, list(adb_cmd))
     adb_obj = getattr(target, "adb", None)
     serial = getattr(adb_obj, "serialno", None) or getattr(target, "serialno", None)
     if adb_obj is not None and serial:

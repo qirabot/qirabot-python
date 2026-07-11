@@ -694,6 +694,27 @@ class TestDeviceRecorder:
         rec = device_recorder(str(tmp_path / "r.mp4"), _FakeAppiumDriver())
         assert isinstance(rec, AppiumScreenRecorder)
 
+    def test_adbdevice_selected(self, tmp_path):
+        from qirabot.adb import AdbDevice
+
+        dev = AdbDevice(serial="emulator-5554")
+        dev._adb_path = "/opt/adb"
+        dev._serial_checked = True
+        rec = device_recorder(str(tmp_path / "r.mp4"), dev)
+        assert isinstance(rec, AdbScreenRecorder)
+        assert rec._adb == ["/opt/adb", "-s", "emulator-5554"]
+
+    def test_adbdevice_resolution_failure_returns_none(self, tmp_path):
+        from qirabot.adb import AdbDevice
+        from qirabot.exceptions import QirabotError
+
+        class _Unresolvable(AdbDevice):
+            @property
+            def adb_command(self) -> list[str]:
+                raise QirabotError("no adb", code="adb.not_found")
+
+        assert device_recorder(str(tmp_path / "r.mp4"), _Unresolvable()) is None
+
     def test_airtest_android_selected(self, tmp_path):
         class _Adb:
             serialno = "emulator-5554"

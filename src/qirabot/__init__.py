@@ -5,6 +5,7 @@ from importlib.metadata import PackageNotFoundError, version
 from qirabot._applaunch import launch_app
 from qirabot._dotenv import load_dotenv
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
+from qirabot.adb import AdbDevice
 from qirabot.client import (
     ExtractResult,
     Qirabot,
@@ -41,6 +42,7 @@ except PackageNotFoundError:  # not installed (e.g. running from a source tree)
 __all__ = [
     "__version__",
     "ActionError",
+    "AdbDevice",
     "AdbScreenRecorder",
     "AppiumScreenRecorder",
     "AuthenticationError",
