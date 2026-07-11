@@ -47,10 +47,10 @@ def require(module: str, extra: str | None = None) -> ModuleType:
         MissingDependencyError: if the module is not installed.
     """
     try:
-        # airtest and facebook-wda still contain pre-3.12 escape sequences
+        # Some third-party backends have shipped pre-3.12 escape sequences
         # ('\d' in docstrings etc.); on Python >=3.12 their first bytecode
-        # compile emits SyntaxWarnings that read like qirabot errors. They are
-        # third-party code we can't fix, so silence them for the import only.
+        # compile emits SyntaxWarnings that read like qirabot errors. Not our
+        # code to fix, so silence them for the import only.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SyntaxWarning)
             return importlib.import_module(module)

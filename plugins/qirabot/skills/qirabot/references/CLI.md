@@ -60,57 +60,61 @@ server-side, not failed). Live per-step trace prints to stdout while running
 
 ### `qirabot android "<instruction>"`
 
-Two engines; default `airtest` drives the device straight over adb, no server:
+Default drives the device straight over adb — built in, zero Python
+dependencies, no server. Passing `--appium-url` switches to the Appium engine:
 
 ```bash
 qirabot android "Open settings"                    # the only adb device
 qirabot android "..." -d emulator-5554             # pick one of several
 qirabot android "..." --app-package com.android.settings --app-activity .Settings
-qirabot android "..." --engine appium -d emulator-5554   # via Appium server
+qirabot android "..." --appium-url http://localhost:4723 -d emulator-5554   # via Appium
 ```
 
 | Option | Notes |
 |---|---|
-| `--engine` | `airtest` (default, adb direct) \| `appium` (needs a running server) |
 | `-d/--device` | adb serial; optional with exactly one device. Appium engine: passed as `deviceName`. |
 | `--app-package` / `--app-activity` | app to launch first |
-| `--appium-url` | `http://localhost:4723` — **appium engine only** (usage error otherwise) |
+| `--appium-url` | passing this flag selects the Appium engine (needs a running server) |
 
-`--record` = **device** screen on both engines (airtest: adb screenrecord;
-appium: Appium's recording API).
+`--record` = **device** screen on both engines (direct: adb screenrecord;
+Appium: Appium's recording API).
 
 ### `qirabot ios "<instruction>"`
 
-Default engine `airtest` talks to WebDriverAgent directly — WDA must already be
-running (USB real device: `iproxy 8100 8100` first). Appium engine for
+Default talks to WebDriverAgent directly (built in, zero extra installs) — WDA
+must already be running (USB real device: `iproxy 8100 8100` first). Passing
+`--appium-url` or `-d/--device` (simulator) switches to the Appium engine, for
 simulators or auto WDA build/sign:
 
 ```bash
 qirabot ios "..." --bundle-id com.tencent.xin           # WDA on 127.0.0.1:8100
 qirabot ios "..." --wda-url http://192.168.1.20:8100    # another device's WDA
-qirabot ios "..." --engine appium -d "iPhone 15" --bundle-id com.apple.Preferences
+qirabot ios "..." -d "iPhone 15" --bundle-id com.apple.Preferences   # simulator via Appium
 ```
 
 | Option | Notes |
 |---|---|
-| `--engine` | `airtest` (default, direct WDA) \| `appium` |
-| `--wda-url` | `http://127.0.0.1:8100` — how the default engine picks the device. **airtest engine only.** |
+| `--wda-url` | `http://127.0.0.1:8100` — how the direct engine picks the device. **Direct engine only.** |
 | `--bundle-id` | app to launch (via WDA `app_launch`, iOS 17+-safe) |
-| `-d/--device` | **appium engine only**: a simulator device type from `xcrun simctl list devicetypes` — not a real device's name |
-| `--appium-url` | `http://localhost:4723` — **appium engine only** |
-| `--mjpeg-url` | WDA MJPEG stream for `--record` (default: `--wda-url` host on port 9100). **airtest engine + `--record` only.** |
+| `-d/--device` | a simulator device type from `xcrun simctl list devicetypes` — passing it selects the Appium engine |
+| `--appium-url` | passing this flag selects the Appium engine |
+| `--mjpeg-url` | WDA MJPEG stream for `--record` (default: `--wda-url` host on port 9100). **Direct engine + `--record` only.** |
 
-`--record` = **device** screen. Airtest engine transcodes WDA's MJPEG stream
+`--record` = **device** screen. The direct engine transcodes WDA's MJPEG stream
 (needs ffmpeg; USB real device also needs `iproxy 9100 9100` — probed up front,
-fails fast with the fix). Appium engine uses Appium's recording API, no extra
-setup. Engine-mismatched flags are hard usage errors, not ignored.
+fails fast with the fix). The Appium engine uses Appium's recording API, no
+extra setup. Engine-mismatched flags are hard usage errors, not ignored.
 
 ### `qirabot desktop "<instruction>"`
 
-Whole primary screen via pyautogui (any OS).
+Whole primary screen via pyautogui (any OS); `--window-title`/`--hwnd` binds to
+one Windows window instead (built in — game-readable scancode input,
+window-relative screenshots).
 
 | Option | Notes |
 |---|---|
+| `--window-title` | regex over visible window titles — selects the Windows window backend. **Windows only.** |
+| `--hwnd` | explicit window handle — selects the Windows window backend. **Windows only.** |
 | `--app` | launch/activate an app first. macOS: app name or bundle id; Windows: exe path / registered name / UWP AppUserModelID; Linux: executable |
 | `--app-wait` | `2.0` — seconds to wait for the window after `--app` |
 
@@ -131,6 +135,6 @@ Whole primary screen via pyautogui (any OS).
 - **Several `ai()` calls / mixed primitives** in one session: the CLI is one
   instruction per invocation, and device state does not survive across runs.
 - **Custom targets**: your own Selenium driver / an already-built Appium
-  session / an airtest Windows window — `bind()` is SDK-only.
+  session — `bind()` is SDK-only.
 - **Machine-parsing the result**: output is rich-formatted for humans
   (`Done: <output>`); there is no `--json` mode. Parse the exit code only.

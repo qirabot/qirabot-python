@@ -1,7 +1,7 @@
 """Tests for adapter base execute() dispatch logic."""
 
 import importlib.util
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -785,310 +785,6 @@ class TestSeleniumPressKey:
         inst.perform.assert_called_once()
 
 
-class TestAirtestWindowInfo:
-    """window_info() identifies the window under test for per-window recording:
-    Windows only; other platforms and unidentifiable/unconnected devices -> None."""
-
-    def _adapter(self, platform: str):
-        from qirabot.adapters.airtest_adapter import AirtestAdapter
-
-        dev = MagicMock()  # snapshot/get_current_resolution -> concrete-device path
-        dev.platform = platform
-        return AirtestAdapter(dev), dev
-
-    def test_windows_returns_title_and_handle(self):
-        a, dev = self._adapter("windows")
-        dev.handle = 12345
-        dev.get_title.return_value = ["My App"]  # airtest returns list[str]
-        assert a.window_info() == {"title": "My App", "hwnd": 12345}
-
-    def test_non_windows_returns_none(self):
-        a, _ = self._adapter("android")
-        assert a.window_info() is None
-
-    def test_windows_handle_only_when_title_unavailable(self):
-        a, dev = self._adapter("windows")
-        dev.handle = 999
-        dev.get_title.side_effect = RuntimeError("not connected")  # @require_app
-        assert a.window_info() == {"title": None, "hwnd": 999}
-
-    def test_windows_none_when_nothing_identifiable(self):
-        a, dev = self._adapter("windows")
-        dev.handle = None
-        dev.get_title.side_effect = RuntimeError("not connected")
-        assert a.window_info() is None
-
-
-class TestAirtestPressKey:
-    """Windows prefers the DirectInput scancode path (key_press/key_release) so
-    games receive the keys; only keys the scancode table can't express fall back
-    to pywinauto SendKeys. Android/iOS use adb keycode names. Verifies the
-    routing per platform, not pywinauto/adb themselves."""
-
-    @pytest.fixture(autouse=True)
-    def _no_sleep(self, monkeypatch):
-        # The scancode path paces keys with real sleeps; skip them in tests.
-        monkeypatch.setattr("time.sleep", lambda s: None)
-
-    def _adapter(self, platform: str):
-        from qirabot.adapters.airtest_adapter import AirtestAdapter
-
-        dev = MagicMock()  # has snapshot/get_current_resolution -> concrete-device path
-        dev.platform = platform
-        return AirtestAdapter(dev), dev
-
-    @staticmethod
-    def _key_calls(dev):
-        # The DirectInput path drives key_press/key_release on the device; pull
-        # them out (in order) so the interleaving of downs/ups is asserted.
-        return [c for c in dev.method_calls if c[0] in ("key_press", "key_release")]
-
-    def test_windows_backtick_uses_scancode(self):
-        # Regression: the ` game-console key must go through scancodes; SendKeys
-        # sends a virtual key the game's DirectInput never sees.
-        a, dev = self._adapter("windows")
-        a.press_key("`")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("`"),
-            call.key_release("`"),
-        ]
-
-    def test_windows_letter_uses_scancode(self):
-        # WASD movement: a bare letter must reach the game as a scancode.
-        a, dev = self._adapter("windows")
-        a.press_key("w")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("W"),
-            call.key_release("W"),
-        ]
-
-    def test_windows_combo_uses_scancode(self):
-        a, dev = self._adapter("windows")
-        a.press_key("ctrl+c")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("LCTRL"),
-            call.key_press("C"),
-            call.key_release("C"),
-            call.key_release("LCTRL"),
-        ]
-
-    def test_windows_alt_tab(self):
-        a, dev = self._adapter("windows")
-        a.press_key("alt+tab")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("LALT"),
-            call.key_press("TAB"),
-            call.key_release("TAB"),
-            call.key_release("LALT"),
-        ]
-
-    def test_windows_single_special_uses_scancode(self):
-        a, dev = self._adapter("windows")
-        a.press_key("Enter")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("ENTER"),
-            call.key_release("ENTER"),
-        ]
-
-    def test_windows_function_key_uses_scancode(self):
-        a, dev = self._adapter("windows")
-        a.press_key("f5")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("F5"),
-            call.key_release("F5"),
-        ]
-
-    def test_windows_alt_f4_uses_scancode(self):
-        a, dev = self._adapter("windows")
-        a.press_key("alt+f4")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("LALT"),
-            call.key_press("F4"),
-            call.key_release("F4"),
-            call.key_release("LALT"),
-        ]
-
-    def test_windows_arrow_name_uses_scancode(self):
-        # The model may emit "Down" or "ArrowDown"; both normalize to DOWN.
-        a, dev = self._adapter("windows")
-        a.press_key("down")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("DOWN"),
-            call.key_release("DOWN"),
-        ]
-
-    def test_windows_win_combo_uses_down_up(self):
-        # SendKeys' ^%+ prefixes can't express Win; the scancode path injects the
-        # real LWINDOWS the shell hotkeys need.
-        a, dev = self._adapter("windows")
-        a.press_key("win+d")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("LWINDOWS"),
-            call.key_press("D"),
-            call.key_release("D"),
-            call.key_release("LWINDOWS"),
-        ]
-
-    def test_windows_bare_win_opens_start(self):
-        # Bare Win is a press+release of LWINDOWS (taps Start).
-        a, dev = self._adapter("windows")
-        a.press_key("win")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("LWINDOWS"),
-            call.key_release("LWINDOWS"),
-        ]
-
-    def test_windows_combo_nests_and_releases_in_reverse(self):
-        # Mods nest in order and release in reverse; the base reuses the scancode
-        # map (server sends JS-style "arrowleft", not "left").
-        a, dev = self._adapter("windows")
-        a.press_key("ctrl+win+arrowleft")
-        dev.keyevent.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("LCTRL"),
-            call.key_press("LWINDOWS"),
-            call.key_press("LEFT"),
-            call.key_release("LEFT"),
-            call.key_release("LWINDOWS"),
-            call.key_release("LCTRL"),
-        ]
-
-    def test_windows_unsupported_key_falls_back_to_sendkeys(self):
-        # A shifted symbol isn't in the scancode table, so it falls back to
-        # SendKeys (which types it correctly) with no scancode calls.
-        a, dev = self._adapter("windows")
-        a.press_key("!")
-        assert self._key_calls(dev) == []
-        dev.keyevent.assert_called_once_with("!")
-
-    def test_android_single_key_is_adb_keycode(self):
-        a, dev = self._adapter("android")
-        a.press_key("Enter")
-        dev.keyevent.assert_called_once_with("ENTER")
-
-
-class TestAirtestTypeText:
-    """Windows types ASCII via DirectInput scancodes so games receive the text;
-    non-ASCII (or any unmappable char) falls the whole string back to
-    device.text() (SendKeys). Other platforms always use device.text()."""
-
-    @pytest.fixture(autouse=True)
-    def _no_sleep(self, monkeypatch):
-        # type_text paces keys and settles focus with real sleeps; skip in tests.
-        monkeypatch.setattr("time.sleep", lambda s: None)
-
-    def _adapter(self, platform: str):
-        from qirabot.adapters.airtest_adapter import AirtestAdapter
-
-        dev = MagicMock()  # has snapshot/get_current_resolution -> concrete-device path
-        dev.platform = platform
-        return AirtestAdapter(dev), dev
-
-    @staticmethod
-    def _key_calls(dev):
-        return [c for c in dev.method_calls if c[0] in ("key_press", "key_release")]
-
-    def test_windows_ascii_uses_scancodes(self):
-        a, dev = self._adapter("windows")
-        a.type_text(10, 20, "ab 1")
-        dev.touch.assert_called_once_with((10, 20))  # caret placement first
-        dev.text.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("A"), call.key_release("A"),
-            call.key_press("B"), call.key_release("B"),
-            call.key_press("SPACE"), call.key_release("SPACE"),
-            call.key_press("1"), call.key_release("1"),
-        ]
-
-    def test_windows_type_focused_skips_touch(self):
-        # Direct path: same scancode typing, but no caret-placement touch.
-        a, dev = self._adapter("windows")
-        a.type_focused("ab")
-        dev.touch.assert_not_called()
-        dev.text.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("A"), call.key_release("A"),
-            call.key_press("B"), call.key_release("B"),
-        ]
-
-    def test_android_type_focused_skips_touch(self):
-        a, dev = self._adapter("android")
-        a.type_focused("hi")
-        dev.touch.assert_not_called()
-        dev.text.assert_called_once_with("hi", enter=False)
-
-    def test_windows_shifted_chars_hold_shift(self):
-        a, dev = self._adapter("windows")
-        a.type_text(0, 0, "A!")
-        dev.text.assert_not_called()
-        assert self._key_calls(dev) == [
-            call.key_press("LSHIFT"), call.key_press("A"),
-            call.key_release("A"), call.key_release("LSHIFT"),
-            call.key_press("LSHIFT"), call.key_press("1"),
-            call.key_release("1"), call.key_release("LSHIFT"),
-        ]
-
-    def test_windows_game_command_uses_scancodes(self):
-        # The reported case: a chat/console command must reach the game.
-        a, dev = self._adapter("windows")
-        a.type_text(0, 0, "quest accept 7011402")
-        dev.text.assert_not_called()
-        assert self._key_calls(dev)[:2] == [call.key_press("Q"), call.key_release("Q")]
-        assert len(self._key_calls(dev)) == 2 * len("quest accept 7011402")
-
-    def test_windows_non_ascii_falls_back_to_sendkeys(self):
-        a, dev = self._adapter("windows")
-        a.type_text(0, 0, "打电话")
-        assert self._key_calls(dev) == []
-        dev.text.assert_called_once_with("打电话", enter=False)
-
-    def test_windows_mixed_ascii_and_non_ascii_falls_back_whole(self):
-        # One non-ASCII char makes the WHOLE string take the SendKeys path.
-        a, dev = self._adapter("windows")
-        a.type_text(0, 0, "hi打")
-        assert self._key_calls(dev) == []
-        dev.text.assert_called_once_with("hi打", enter=False)
-
-    def test_android_uses_device_text(self):
-        a, dev = self._adapter("android")
-        a.type_text(0, 0, "hello")
-        assert self._key_calls(dev) == []
-        dev.text.assert_called_once_with("hello", enter=False)
-
-
-class TestAirtestHover:
-    """Hover is a cursor concept: Windows moves the cursor (mouse_move, NOT the
-    window-moving device.move); touch platforms keep the base no-op."""
-
-    def _adapter(self, platform: str):
-        from qirabot.adapters.airtest_adapter import AirtestAdapter
-
-        dev = MagicMock()  # has snapshot/get_current_resolution -> concrete-device path
-        dev.platform = platform
-        return AirtestAdapter(dev), dev
-
-    def test_windows_moves_cursor(self):
-        a, dev = self._adapter("windows")
-        a.hover(10.6, 20.4)
-        dev.mouse_move.assert_called_once_with((10, 20))
-        dev.move.assert_not_called()  # device.move relocates the window, not the cursor
-
-    def test_android_is_noop(self):
-        a, dev = self._adapter("android")
-        a.hover(10, 20)
-        dev.mouse_move.assert_not_called()
-
-
 class TestPlaywrightAdapterListener:
     """The adapter hooks the context's "page" event in __init__; close() must
     unhook it so the listener doesn't outlive the adapter and accumulate on the
@@ -1119,286 +815,6 @@ class TestPlaywrightAdapterListener:
 
         adapter = PlaywrightAdapter(page)
         adapter.close()  # must not raise even if the context is already gone
-
-
-@pytest.fixture
-def fake_airtest(monkeypatch):
-    """Inject minimal fake ``airtest`` submodules the adapter lazily imports.
-
-    Returns the ``NoDeviceError`` class so tests can both raise it (from the
-    fake ``G.DEVICE``) and assert the adapter converts it to ``RuntimeError``.
-    """
-    import sys
-    import types
-
-    from PIL import Image
-
-    class NoDeviceError(Exception):
-        pass
-
-    err_mod = types.ModuleType("airtest.core.error")
-    err_mod.NoDeviceError = NoDeviceError
-
-    utils_mod = types.ModuleType("airtest.aircv.utils")
-
-    def cv2_2_pil(img):
-        # Real impl converts a BGR ndarray -> RGB PIL; the tests don't care
-        # about pixels, only that a sized PIL image flows through.
-        return img if isinstance(img, Image.Image) else Image.new("RGB", (320, 640))
-
-    utils_mod.cv2_2_pil = cv2_2_pil
-
-    for name in ("airtest", "airtest.core", "airtest.aircv"):
-        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
-    monkeypatch.setitem(sys.modules, "airtest.core.error", err_mod)
-    monkeypatch.setitem(sys.modules, "airtest.aircv.utils", utils_mod)
-    return NoDeviceError
-
-
-def _fake_device(platform="android", w=320, h=640, orientation=0):
-    dev = MagicMock()
-    dev.platform = platform
-    dev.get_current_resolution.return_value = (w, h)
-    dev.snapshot.return_value = "<bgr-ndarray>"  # cv2_2_pil fake ignores it
-    # Real airtest exposes display_info as a dict; without this the MagicMock
-    # makes int(display_info.get("orientation")) == 1, spuriously triggering the
-    # landscape-rotation path in AirtestAdapter._ensure_upright.
-    dev.display_info = {"orientation": orientation, "width": w, "height": h}
-    return dev
-
-
-def _fake_G(holder, no_device_error):
-    """A stand-in for airtest's ``G`` (a class with a metaclass ``DEVICE`` prop).
-
-    ``holder`` is a 1-element list so a test can swap the current device
-    (``set_current`` semantics) or set it to ``None`` (no device connected).
-    """
-
-    class GMeta(type):
-        @property
-        def DEVICE(cls):
-            if holder[0] is None:
-                raise no_device_error("No devices added.")
-            return holder[0]
-
-    class G(metaclass=GMeta):
-        pass
-
-    G.__module__ = "airtest.core.helper"
-    return G
-
-
-class TestAirtestAdapter:
-    def _adapter(self, target):
-        from qirabot.adapters.airtest_adapter import AirtestAdapter
-
-        return AirtestAdapter(target)
-
-    def test_lazy_resolution_via_G(self, fake_airtest):
-        dev = _fake_device()
-        G = _fake_G([dev], fake_airtest)
-        a = self._adapter(G)
-        a.click(10, 20)
-        dev.touch.assert_called_once_with((10, 20))
-        # current_target stays the original token, not a concrete device.
-        assert a.current_target is G
-
-    def test_lazy_resolution_follows_set_current(self, fake_airtest):
-        dev1, dev2 = _fake_device(), _fake_device()
-        holder = [dev1]
-        G = _fake_G(holder, fake_airtest)
-        a = self._adapter(G)
-        a.click(1, 2)
-        dev1.touch.assert_called_once_with((1, 2))
-        holder[0] = dev2  # set_current(...) switched the active device
-        a.click(3, 4)
-        dev2.touch.assert_called_once_with((3, 4))
-        assert dev1.touch.call_count == 1  # old device untouched after switch
-
-    def test_accepts_G_when_no_device_connected(self, fake_airtest):
-        # #1 regression: accepts() must NOT touch G.DEVICE (metaclass property
-        # that raises NoDeviceError before a device is connected).
-        from qirabot.adapters.airtest_adapter import AirtestAdapter
-
-        G = _fake_G([None], fake_airtest)
-        assert AirtestAdapter.accepts(G) is True  # must not raise
-
-    def test_no_device_raises_friendly_runtime_error(self, fake_airtest):
-        # #2 regression: NoDeviceError -> friendly RuntimeError.
-        G = _fake_G([None], fake_airtest)
-        a = self._adapter(G)
-        with pytest.raises(RuntimeError, match="no current airtest device"):
-            a.click(1, 2)
-
-    def test_accepts_variants(self, fake_airtest):
-        import types
-
-        from qirabot.adapters.airtest_adapter import AirtestAdapter
-
-        class FakeDevice:
-            def snapshot(self):
-                return None
-
-            def get_current_resolution(self):
-                return (100, 100)
-
-        FakeDevice.__module__ = "airtest.core.android.android"
-
-        class FakeTemplate:  # same package, but not a device
-            pass
-
-        FakeTemplate.__module__ = "airtest.core.cv"
-
-        api_mod = types.ModuleType("airtest.core.api")
-
-        assert AirtestAdapter.accepts(FakeDevice()) is True
-        assert AirtestAdapter.accepts(_fake_G([None], fake_airtest)) is True
-        assert AirtestAdapter.accepts(api_mod) is True
-        assert AirtestAdapter.accepts(object()) is False
-        assert AirtestAdapter.accepts(FakeTemplate()) is False
-
-    def test_click_and_type_text(self, fake_airtest):
-        dev = _fake_device()
-        a = self._adapter(dev)
-        a.type_text(5, 6, "hi")
-        dev.touch.assert_called_once_with((5, 6))
-        dev.text.assert_called_once_with("hi", enter=False)
-
-    def test_press_key_maps_to_keyevent(self, fake_airtest):
-        dev = _fake_device()
-        a = self._adapter(dev)
-        a.press_key("Enter")
-        dev.keyevent.assert_called_once_with("ENTER")
-
-    def test_press_key_passthrough_unknown(self, fake_airtest):
-        dev = _fake_device()
-        a = self._adapter(dev)
-        a.press_key("VOLUME_UP")
-        dev.keyevent.assert_called_once_with("VOLUME_UP")
-
-    def test_scroll_via_execute_calls_swipe(self, fake_airtest):
-        dev = _fake_device(w=400, h=800)
-        a = self._adapter(dev)
-        a.execute("scroll", {"direction": "down", "amount": 300})
-        assert dev.swipe.call_count == 1
-        (p1, p2), kwargs = dev.swipe.call_args
-        # down: end y is above the start y (smaller), x unchanged at center.
-        assert p1 == (200, 400)
-        assert p2[0] == 200 and p2[1] < p1[1]
-
-    def test_device_info_uses_last_screenshot_size(self, fake_airtest):
-        dev = _fake_device(platform="android")
-        a = self._adapter(dev)
-        a.screenshot()  # fake cv2_2_pil yields a 320x640 image
-        info = a.device_info()
-        assert (info.platform, info.width, info.height) == ("android", 320, 640)
-
-    def test_device_info_platform_mapping_windows(self, fake_airtest):
-        dev = _fake_device(platform="windows", w=1920, h=1080)
-        a = self._adapter(dev)
-        info = a.device_info()  # no screenshot -> get_current_resolution
-        assert (info.platform, info.width, info.height) == ("desktop", 1920, 1080)
-
-    def test_screenshot_returns_bytes_and_caches_size(self, fake_airtest):
-        dev = _fake_device()
-        a = self._adapter(dev)
-        data = a.screenshot()
-        assert isinstance(data, bytes) and len(data) > 0
-        assert a._last_size == (320, 640)
-
-    def test_screenshot_retries_transient_none_then_succeeds(
-        self, fake_airtest, monkeypatch
-    ):
-        # snapshot() can momentarily return None (adb hiccup / minicap restart);
-        # the adapter retries instead of feeding None into cv2_2_pil.
-        import time
-
-        monkeypatch.setattr(time, "sleep", lambda s: None)
-        dev = _fake_device()
-        dev.snapshot.side_effect = [None, None, "<bgr-ndarray>"]
-        a = self._adapter(dev)
-        data = a.screenshot()
-        assert isinstance(data, bytes) and len(data) > 0
-        assert dev.snapshot.call_count == 3
-
-    def test_screenshot_recovers_from_snapshot_exception(
-        self, fake_airtest, monkeypatch
-    ):
-        # A raised capture error is also transient — retry, don't propagate.
-        import time
-
-        monkeypatch.setattr(time, "sleep", lambda s: None)
-        dev = _fake_device()
-        dev.snapshot.side_effect = [RuntimeError("adb broke"), "<bgr-ndarray>"]
-        a = self._adapter(dev)
-        data = a.screenshot()
-        assert isinstance(data, bytes) and len(data) > 0
-
-    def test_screenshot_empty_frame_raises_qirabot_error(
-        self, fake_airtest, monkeypatch
-    ):
-        # Persistent capture failure surfaces a clear QirabotError, not OpenCV's
-        # raw !_src.empty() C++ assertion.
-        import time
-
-        from qirabot.exceptions import QirabotError
-
-        monkeypatch.setattr(time, "sleep", lambda s: None)
-        dev = _fake_device()
-        dev.snapshot.return_value = None
-        a = self._adapter(dev)
-        with pytest.raises(QirabotError) as exc:
-            a.screenshot()
-        assert exc.value.code == "airtest.snapshot_empty"
-        assert dev.snapshot.call_count == 3
-
-    def test_screenshot_treats_zero_size_ndarray_as_empty(
-        self, fake_airtest, monkeypatch
-    ):
-        # An empty ndarray (size == 0) trips the same assertion as None inside
-        # cv2_2_pil, so it must be treated as a failed capture too.
-        import time
-        import types
-
-        from qirabot.exceptions import QirabotError
-
-        monkeypatch.setattr(time, "sleep", lambda s: None)
-        dev = _fake_device()
-        dev.snapshot.return_value = types.SimpleNamespace(size=0)
-        a = self._adapter(dev)
-        with pytest.raises(QirabotError) as exc:
-            a.screenshot()
-        assert exc.value.code == "airtest.snapshot_empty"
-
-    def test_screen_changing_action_settles(self, fake_airtest, monkeypatch):
-        import time
-
-        sleeps: list[float] = []
-        monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
-        a = self._adapter(_fake_device())
-        a.execute("click", {"x": 1, "y": 2})
-        assert sleeps == [a._SETTLE_SECONDS]
-
-    def test_no_settle_action_does_not_wait(self, fake_airtest, monkeypatch):
-        import time
-
-        sleeps: list[float] = []
-        monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
-        a = self._adapter(_fake_device())
-        a.execute("save_note", {"content": "x"})
-        assert sleeps == []
-
-    def test_hover_settles(self, fake_airtest, monkeypatch):
-        # hover reveals delayed UI (tooltip/submenu), so it must settle before the
-        # next screenshot — it is NOT a _NO_SETTLE action. (Settle is independent
-        # of platform; the cursor move itself only happens on Windows.)
-        import time
-
-        sleeps: list[float] = []
-        monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
-        a = self._adapter(_fake_device())
-        a.execute("hover", {"x": 1, "y": 2})
-        assert sleeps == [a._SETTLE_SECONDS]
 
 
 class TestBind:
@@ -1510,3 +926,47 @@ class TestBind:
                 f"  expected (minus target): {expected}\n"
                 f"  actual:                  {actual}"
             )
+
+
+class TestAirtestTombstone:
+    """2.0 removed airtest; detect() must recognize its targets by module-name
+    strings (zero imports) and answer with the migration guidance."""
+
+    def _assert_tombstone(self, target):
+        from qirabot.adapters.auto import detect
+
+        with pytest.raises(TypeError) as ei:
+            detect(target)
+        msg = str(ei.value)
+        assert "removed in qirabot 2.0" in msg
+        assert "qirabot.AdbDevice" in msg
+        assert "qirabot.Window" in msg
+        assert "qirabot.WdaClient" in msg
+        assert "qirabot<2.0" in msg
+
+    def test_device_instance(self):
+        class FakeDevice:
+            pass
+
+        FakeDevice.__module__ = "airtest.core.device"
+        self._assert_tombstone(FakeDevice())
+
+    def test_api_module(self):
+        import types
+
+        self._assert_tombstone(types.ModuleType("airtest.core.api"))
+
+    def test_g_global(self):
+        class G:
+            pass
+
+        G.__module__ = "airtest.core.helper"
+        self._assert_tombstone(G)  # the class itself, as airtest exposes it
+
+    def test_unrelated_target_gets_plain_unsupported_error(self):
+        from qirabot.adapters.auto import detect
+
+        with pytest.raises(TypeError) as ei:
+            detect(object())
+        assert "removed in qirabot 2.0" not in str(ei.value)
+        assert "Unsupported target type" in str(ei.value)

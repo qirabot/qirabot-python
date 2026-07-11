@@ -348,7 +348,7 @@ class Qirabot:
         # Fixed delay (seconds) each adapter sleeps after a screen-changing action
         # so the next screenshot lands on the repainted frame. ``None`` keeps each
         # platform's built-in default (desktop 1.0 / mobile 0.6 / browser 0.6 /
-        # airtest 1); an explicit value (incl. 0 to disable) overrides all of them.
+        # adb 1); an explicit value (incl. 0 to disable) overrides all of them.
         # Falls back to the QIRA_SETTLE_SECONDS env var when the arg is omitted.
         if settle_seconds is None:
             env_settle = os.environ.get("QIRA_SETTLE_SECONDS", "")
@@ -405,7 +405,7 @@ class Qirabot:
         self._record_mjpeg_url = record_mjpeg_url or os.environ.get("QIRA_RECORD_MJPEG_URL", "") or None
         # Record the automated device's own screen instead of the host screen:
         # the recorder is picked from the first action's target (Appium driver
-        # → session recording API; airtest Android → adb screenrecord), so the
+        # → session recording API; AdbDevice → adb screenrecord), so the
         # start is deferred like record_window's.
         self._record_device = record_device or _env_truthy(os.environ.get("QIRA_RECORD_DEVICE", ""))
         self._recorder: Recorder | None = None
@@ -483,7 +483,7 @@ class Qirabot:
                 bot.type_text("Email", "a@b.com")
 
         Best for frameworks that drive a single, stable target for the whole
-        session (Airtest, pyautogui, Appium, Selenium). For Playwright's
+        session (adb, WDA, Windows, pyautogui, Appium, Selenium). For Playwright's
         new-tab flows the explicit ``page = bot.click(page, ...)`` form keeps
         the returned (possibly new) page visible; with a bound proxy, reach the
         live page via ``bot.current_page()`` for native Playwright interop.
@@ -635,7 +635,7 @@ class Qirabot:
 
         ``modifier`` holds modifier key(s) around the click (``"alt"``,
         ``"ctrl"``, ``"shift"``, ``"win"``; join several with ``+``, e.g.
-        ``"ctrl+shift"``) — desktop backends only (pyautogui / Airtest
+        ``"ctrl+shift"``) — desktop backends only (pyautogui / the Windows
         Windows); other backends degrade to a plain click.
 
         When ``timeout > 0``, auto-waits until the element looks present before
@@ -1302,7 +1302,7 @@ class Qirabot:
         """Window title (or handle) to record for ``target``, or ``None``.
 
         Reads the adapter's :meth:`~qirabot.adapters.base.DeviceAdapter.window_info`
-        (only airtest/Windows returns one); prefers the title, falls back to the
+        (only the Windows window backend returns one); prefers the title, falls back to the
         numeric handle. Any failure degrades to ``None`` (full-screen).
         """
         try:
@@ -1355,14 +1355,14 @@ class Qirabot:
         ``record_device`` (or ``QIRA_RECORD_DEVICE``) picks a recorder from the
         action ``target``: an Appium driver uses the session recording API
         (stopped automatically before the report; callers quitting the driver
-        themselves must call :meth:`stop_recording` first), an airtest Android
+        themselves must call :meth:`stop_recording` first), an AdbDevice
         device uses ``adb screenrecord``. On Windows it can instead follow a
         single window and capture system audio:
 
         * ``window`` — a window title (or numeric handle) to record via legacy
           per-window capture.
         * ``target`` — when ``record_window`` is set, the window is resolved
-          automatically from this action target (airtest/Windows only). By
+          automatically from this action target (Windows window backend only). By
           default its visible rect is cropped out of a desktop grab (works for
           GPU/game windows); set ``QIRA_RECORD_WINDOW_NATIVE=1`` to force the
           legacy per-window mode instead.
@@ -1391,7 +1391,7 @@ class Qirabot:
             recorder = MjpegStreamRecorder(output, self._record_mjpeg_url)
         elif self._record_device:
             # Device-screen recording resolved from the action target (Appium
-            # driver / airtest Android). Falling back to the host screen would
+            # driver / AdbDevice). Falling back to the host screen would
             # record the wrong thing (the desktop the SDK runs on), so an
             # unsupported target skips recording — the report then carries the
             # requested-but-not-produced notice.
@@ -1399,7 +1399,7 @@ class Qirabot:
             if recorder is None:
                 logger.warning(
                     "record: don't know how to record the device screen for %s "
-                    "(need an Appium driver or an airtest Android device); recording skipped",
+                    "(need an Appium driver or an AdbDevice target); recording skipped",
                     type(target).__name__,
                 )
                 return False
@@ -1536,13 +1536,13 @@ class Qirabot:
         ``key`` is a single key (``"Enter"``, ``"Escape"``, ``"ArrowDown"``) or a
         combo joined with ``+`` (``"ctrl+c"``, ``"alt+tab"``). Each backend maps
         the name to its own vocabulary, so the same call works across Playwright,
-        Selenium, Appium, Airtest and pyautogui — Android/iOS take single keycodes
+        Selenium, Appium, adb, WDA, Windows and pyautogui — Android/iOS take single keycodes
         (``"Back"``/``"Home"``/``"Enter"``); ctrl-style combos are desktop/browser
         only.
 
         ``duration_seconds`` > 0 holds the key(s) for that long before releasing
         (blocking call), for game-style movement where an instant tap is too
-        short. Desktop backends only (pyautogui, Airtest on Windows); other
+        short. Desktop backends only (pyautogui, the Windows window backend); other
         backends degrade to an instant tap. Clamped to 10 seconds.
 
         Returns the current target (same kind you passed in). On Playwright a

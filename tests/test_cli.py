@@ -46,40 +46,6 @@ def fake_appium(monkeypatch):
 
 
 @pytest.fixture
-def fake_airtest(monkeypatch):
-    """Inject a fake ``airtest`` package (the android/ios default engine).
-
-    Returns the fake ``airtest.core.api`` module so tests can inspect the
-    connect_device/start_app calls and the device object handed to the run.
-    """
-    device = MagicMock(name="airtest_device")
-    api = types.ModuleType("airtest.core.api")
-    api.connect_device = MagicMock(name="connect_device", return_value=device)
-    api.start_app = MagicMock(name="start_app")
-
-    # facebook-wda, used by the ios command's WDA pre-check. Defaults to a
-    # reachable WDA (HTTP probe succeeds) so the happy-path tests pass.
-    wda = types.ModuleType("wda")
-    wda.DEBUG = False
-    wda.Client = MagicMock(name="wda.Client")
-    wda.Client.return_value.is_ready.return_value = True
-    wda.BaseClient = MagicMock(name="wda.BaseClient")
-    wda.BaseClient.return_value.is_ready.return_value = True
-    wda.list_devices = MagicMock(name="wda.list_devices", return_value=[])
-
-    for name, mod in {
-        "airtest": types.ModuleType("airtest"),
-        "airtest.core": types.ModuleType("airtest.core"),
-        "airtest.core.api": api,
-        "wda": wda,
-    }.items():
-        monkeypatch.setitem(sys.modules, name, mod)
-
-    api.wda = wda
-    return api
-
-
-@pytest.fixture
 def stub_bot(monkeypatch):
     """Bypass task creation / AI run so the command exercises only wiring."""
     from qirabot.cli import main

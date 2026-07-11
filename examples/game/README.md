@@ -14,7 +14,7 @@ open-ended audits).
 ## Install
 
 ```bash
-python -m pip install "qirabot[airtest]" pywin32
+python -m pip install qirabot   # the Windows window backend is built in
 ```
 
 `pywin32` provides the `win32gui` calls used to find the game's renderer

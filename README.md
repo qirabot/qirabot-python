@@ -2,7 +2,7 @@
 
 Cross-platform GUI automation, driven by multimodal AI vision. Drive browsers, mobile apps, full desktops, and games through pixels — no DOM, no selectors — reaching what frameworks like Playwright, Selenium, and Appium cannot.
 
-Run it standalone (`bot.open()` launches a browser for you), bolt it onto your existing Playwright / Selenium / Appium / Airtest / pyautogui session, drop it into a pytest suite, or bind by HWND to drive a Unity / Unreal / native desktop game. Same API across all of them.
+Run it standalone (`bot.open()` launches a browser for you; Android / iOS / Windows-window backends are built in with zero extra dependencies), bolt it onto your existing Playwright / Selenium / Appium / pyautogui session, drop it into a pytest suite, or bind by HWND to drive a Unity / Unreal / native desktop game. Same API across all of them.
 
 **Contents:** [Installation](#installation) · [Quick Start](#quick-start) · [CLI](#cli) ·
 [Bolt-On to Any Framework](#bolt-on-to-any-framework) · [API Reference](#api-reference) ·
@@ -45,28 +45,34 @@ Requires Python 3.10+. That's everything the [Quick Start](#quick-start) needs;
 > no `DISPLAY`), a visible browser window can't open — `bot.open()` and the CLI
 > detect that and automatically run headless instead, with a warning.
 
-**Already have an automation stack?** Then you don't need the browser extra at
-all. The core package (`python -m pip install qirabot`) has no automation engine of its
-own — it bolts onto the Playwright / Selenium / Appium / Airtest / pyautogui
-session you already run, so your fixtures, CI, and device setup stay untouched
-(see [Bolt-On to Any Framework](#bolt-on-to-any-framework)). Install the extra
-matching your framework — or nothing, if the framework is already in your
+**Driving a device instead?** Android (direct adb), iOS (direct
+WebDriverAgent), and Windows single-window automation are **built into the core
+package** — `python -m pip install qirabot` is the whole install, no extras, no
+heavy transitive dependencies (the only host requirements are the adb binary
+for Android, and a running WDA for iOS):
+
+```bash
+python -m pip install qirabot              # Android + iOS + Windows window — built in
+```
+
+**Already have an automation stack?** The same core package bolts onto the
+Playwright / Selenium / Appium / pyautogui session you already run, so your
+fixtures, CI, and device setup stay untouched (see
+[Bolt-On to Any Framework](#bolt-on-to-any-framework)). Frameworks stay in
+extras — install the one matching yours, or nothing if it's already in your
 environment:
 
 ```bash
-python -m pip install "qirabot[desktop]"   # pyautogui (native desktop apps)
-python -m pip install "qirabot[appium]"    # Appium (Android / iOS)
-python -m pip install "qirabot[airtest]"   # Airtest (Android / iOS / Windows, image-based)
+python -m pip install "qirabot[desktop]"   # pyautogui (whole-desktop, any OS)
+python -m pip install "qirabot[appium]"    # Appium (Android / iOS via a server; device clouds)
+python -m pip install "qirabot[all]"       # everything above + browser
 
 python -m pip install qirabot selenium     # Selenium is not an extra — bring your own driver
 ```
 
-> Airtest itself declares no Python version, but its `numpy<2.0` pin means
-> prebuilt wheels stop at **Python 3.12**. On 3.13+ pip builds numpy from
-> source — that works with a C toolchain installed (verified on 3.14) and fails
-> without one. Easiest path: **`qirabot[airtest]` on Python 3.10–3.12**, ideally
-> in a fresh virtualenv — `uv venv --python 3.12` gets you one without touching
-> the system Python. AirtestIDE (the standalone GUI) also targets 3.10–3.12.
+> All extras install cleanly together in one environment — since 2.0 nothing
+> here pins numpy/opencv or ships compiled dependencies beyond what the
+> frameworks themselves need.
 
 Whichever path you took, `qirabot doctor` reports what is installed, what is
 missing (with the exact command to fix it), and whether your API key reaches
@@ -122,34 +128,35 @@ timeouts — is a constructor option (see [Configuration](#configuration)).
 ## CLI
 
 The `qirabot` command runs a task end-to-end without writing Python. It ships in
-the core package (installed with `python -m pip install qirabot`), but each backend still
-needs its extra — `qirabot[browser]` for `browser`, `[airtest]` for `android`/`ios`
-(their default direct engine; `[appium]` when using `--engine appium`), `[desktop]`
-for `desktop` (`[airtest]` instead when using `desktop --engine airtest`).
+the core package (installed with `python -m pip install qirabot`). `android`,
+`ios`, and `desktop --window-title/--hwnd` run on the built-in backends — no
+extras. Only `browser` (`qirabot[browser]`), whole-screen `desktop`
+(`qirabot[desktop]`), and the Appium engine (`qirabot[appium]`) need one.
 
 ```bash
 # Browser (needs qirabot[browser] + `playwright install chromium`)
 qirabot browser "Search for SpaceX and get the first sentence of the article" --url wikipedia.org
 
-# Android — direct over adb (needs qirabot[airtest]; no Appium server)
+# Android — direct over adb (built in; only needs the adb binary, no server)
 qirabot android "Open settings and turn on airplane mode"
 
-# iOS — direct to WebDriverAgent (needs qirabot[airtest] + WDA running on :8100).
+# iOS — direct to WebDriverAgent (built in; WDA must be running on :8100).
 # The device is picked by --wda-url, not by name; USB real device: `iproxy 8100 8100`
 # first (see "iOS: real device vs simulator" below)
 qirabot ios "Send hi to Alice on WeChat" --bundle-id com.tencent.xin
 
-# Either can go through an Appium server instead (needs qirabot[appium])
-qirabot android "..." --engine appium
-qirabot ios "..." --engine appium --device "iPhone 15"   # simulators only — see below
+# Either can go through an Appium server instead (needs qirabot[appium]):
+# passing --appium-url selects the Appium engine
+qirabot android "..." --appium-url http://localhost:4723
+qirabot ios "..." --device "iPhone 15"   # simulators only (selects Appium) — see below
 
 # Desktop via pyautogui (needs qirabot[desktop])
 qirabot desktop "Create a new note titled Groceries" --app Notes
 
-# Desktop via Airtest (Windows only, needs qirabot[airtest]) — DirectInput
-# scancode input that games can read; bind a window by title regex or HWND
-qirabot desktop "Open the inventory and list all items" --engine airtest --window-title "Genshin"
-qirabot desktop "..." --engine airtest --hwnd 132456
+# Desktop bound to ONE Windows window (built in) — DirectInput scancode input
+# that games can read; bind by title regex or HWND
+qirabot desktop "Open the inventory and list all items" --window-title "Genshin"
+qirabot desktop "..." --hwnd 132456
 
 # Environment check — what's installed, what's missing, is the server reachable
 qirabot doctor
@@ -165,9 +172,9 @@ qirabot models                    # list model aliases
 | Command | Purpose |
 |---|---|
 | `browser INSTRUCTION` | Run an AI task in a local browser (Playwright) |
-| `android INSTRUCTION` | Run an AI task on an Android device (adb direct; `--engine appium` for Appium) |
-| `ios INSTRUCTION` | Run an AI task on an iOS device (WDA direct; `--engine appium` for Appium) |
-| `desktop INSTRUCTION` | Run an AI task on the desktop screen (pyautogui; `--engine airtest` for Windows games, with `--window-title`/`--hwnd` window binding) |
+| `android INSTRUCTION` | Run an AI task on an Android device (adb direct, built in; `--appium-url` for Appium) |
+| `ios INSTRUCTION` | Run an AI task on an iOS device (WDA direct, built in; `--appium-url`/`--device` for Appium) |
+| `desktop INSTRUCTION` | Run an AI task on the desktop screen (pyautogui; `--window-title`/`--hwnd` binds one Windows window with game-readable input, built in) |
 | `doctor` | Check Python, API key/server, and per-backend dependencies; exits non-zero when nothing can run |
 | `task TASK_ID` | Print a task's status, commands, and steps |
 | `screenshot TASK_ID` | Download a task screenshot |
@@ -196,15 +203,15 @@ take `--record`, saving `recording.mp4` into the run dir and embedding it in the
 report — but what gets recorded differs:
 
 - `browser` / `desktop` — the **host** screen via ffmpeg (needs ffmpeg on PATH).
-  With `desktop --engine airtest` and a window bound (`--window-title`/`--hwnd`),
-  the recording follows that window instead of capturing the full screen.
+  With a window bound (`--window-title`/`--hwnd`), the recording follows that
+  window instead of capturing the full screen.
 - `android` — the **device** screen: `adb screenrecord` on the default engine
   (ffmpeg only needed to merge runs longer than 3 minutes), or Appium's
-  recording API with `--engine appium`.
+  recording API on the Appium engine.
 - `ios` — the **device** screen: WDA's MJPEG stream on the default engine
   (needs ffmpeg; a USB real device also needs `iproxy 9100 9100` alongside the
   usual 8100 forward — the CLI checks the stream before starting and tells you
-  if it isn't reachable), or Appium's recording API with `--engine appium`.
+  if it isn't reachable), or Appium's recording API on the Appium engine.
   `--mjpeg-url` overrides the stream URL (default: the `--wda-url` host on
   port 9100).
 
@@ -215,7 +222,7 @@ Runs also honor the same env vars as the SDK — `QIRA_REPORT_DIR`,
 by what you're driving:
 
 - **Real device → default (WDA direct) engine.** The device is selected by
-  `--wda-url`, not by a device name (`-d` is rejected here). Three steps:
+  `--wda-url`, not by a device name. Three steps:
   1. Run WebDriverAgent on the phone and keep it running — in Xcode, run the
      `WebDriverAgentRunner` scheme against the device with your own signing team
      (or `xcodebuild ... -destination 'id=<udid>' -allowProvisioningUpdates test`).
@@ -224,11 +231,11 @@ by what you're driving:
   3. `qirabot ios "..." --bundle-id com.example.app` — the default `--wda-url`
      (`http://127.0.0.1:8100`) now reaches the phone. For multiple devices, run
      one `iproxy` per device on different local ports and select with `--wda-url`.
-- **Simulator → `--engine appium`.** Here `-d/--device` is a *simulator device
-  type* (a name from `xcrun simctl list devicetypes`, e.g. `iPhone 15`) — Appium
-  creates/boots a matching simulator. It is **not** a real device's name: the CLI
-  currently has no `--udid` option, so the appium engine cannot target real iOS
-  devices; passing a real device's name fails with
+- **Simulator → pass `-d/--device`** (which selects the Appium engine). It is a
+  *simulator device type* (a name from `xcrun simctl list devicetypes`, e.g.
+  `iPhone 15`) — Appium creates/boots a matching simulator. It is **not** a real
+  device's name: the CLI currently has no `--udid` option, so the Appium engine
+  cannot target real iOS devices; passing a real device's name fails with
   `Could not create simulator ... device type id '<your name>'`.
 
 ## Bolt-On to Any Framework
@@ -295,110 +302,112 @@ bot.close()
 driver.quit()
 ```
 
-### Android / iOS / Windows (Airtest)
+### Android — built in, direct over adb
 
-Airtest connects to the device itself (no Appium server). `G` resolves the
-current device, so `bind(G)` keeps your usual Airtest style and adds AI on top.
-The minimal form:
+No framework, no server, nothing installed on the device for input: the
+built-in backend shells out to adb (screenshot via `screencap`, input via
+`input tap/swipe/keyevent`). Non-ASCII typing (Chinese, emoji) works through
+the bundled ADBKeyboard IME, installed on demand and switched back afterwards.
 
 ```python
-from airtest.core.api import *       # your usual Airtest imports
-from qirabot import Qirabot
+from qirabot import AdbDevice, Qirabot
 
-auto_setup(__file__)                 # your usual Airtest setup, unchanged
-bot = Qirabot().bind(G)
+device = AdbDevice()                 # or AdbDevice(serial="emulator-5554")
+bot = Qirabot().bind(device)
 
-bot.click("Login button")            # AI-located — replaces brittle Template images
+bot.click("Login button")            # AI-located — no Template images
 result = bot.ai("Open Settings and turn on dark mode")
 print(f"Success: {result.success}")
-touch(Template("native.png"))        # native Airtest still works side by side
 bot.close()
 ```
 
-#### Full Android example
+Record the **device** screen (adb screenrecord) into the report with
+`Qirabot(record=True, record_device=True)` — see
+[Screen recording](#screen-recording). Full example:
+[examples/adb/quickstart.py](examples/adb/quickstart.py).
 
-A real run usually drives a specific app, streams steps, and records the screen.
-This connects to an emulator/device over ADB, runs an AI task, and records the
-**device** screen into `bot.report_dir` so the HTML report embeds it
-automatically: `record=True, record_device=True` picks the device's own
-recorder (`adb screenrecord` here — see
-[Screen recording](#screen-recording)) instead of capturing the host screen a
-headless device doesn't appear on:
+### iOS — built in, direct via WebDriverAgent
+
+The built-in WDA client talks HTTP to a WebDriverAgent already running on the
+device (USB real device: `iproxy 8100 8100` first). No Appium server, no extra
+packages:
 
 ```python
-# -*- encoding=utf8 -*-
-import os
-from airtest.core.api import *
-from airtest.cli.parser import cli_setup
+from qirabot import Qirabot, WdaClient
 
-from qirabot import Qirabot, StepResult
+client = WdaClient("http://127.0.0.1:8100")
+client.app_launch("com.apple.Preferences")
+bot = Qirabot().bind(client)
 
-# When launched outside `airtest run ...`, set up the device ourselves.
-# The connection string selects the device and touch backend (MAXTOUCH here).
-if not cli_setup():
-    auto_setup(
-        __file__,
-        logdir=True,
-        devices=["android://127.0.0.1:5037/127.0.0.1:5555?touch_method=MAXTOUCH&"],
-    )
-
-# Credentials — prefer setting these in the environment, not in source.
-# QIRA_BASE_URL is optional: it defaults to https://app.qirabot.com. Set it only
-# for a self-hosted or regional deployment (the URL below is one such example).
-os.environ.setdefault("QIRA_BASE_URL", "https://app.gcp.qirabot.com")
-os.environ.setdefault("QIRA_API_KEY", "qk_...your_key...")
-
-def on_step(step: StepResult) -> None:
-    label = "done" if step.finished else step.action_type
-    print(f"  step {step.step}: {label} {step.params}")
-
-APP = "com.pokercity.lobby"
-TASK = "Check that the UI controls at the top of the poker lobby work correctly"
-
-start_app(APP)
-
-# balanced_pro = stronger model; screenshot_annotate draws a crosshair at each
-# tap; record_device records the phone screen via adb screenrecord (recording
-# starts with the first action and stops in bot.close()).
-bot = Qirabot(
-    model_alias="balanced_pro", screenshot_annotate=True,
-    record=True, record_device=True,
-).bind(G)
-
-try:
-    result = bot.ai(TASK, max_steps=25, on_step=on_step, language="en")
-    print(f" Result: {result.output}")
-    sleep(5.0)
-finally:
-    bot.close()                       # stops recording, writes report.html with the video embedded
-
-stop_app(APP)
+result = bot.ai("Open General > About and report the iOS version")
+print(f"Success: {result.success}")
+bot.close()
 ```
 
-Notes on this example:
+Full example: [examples/ios/quickstart.py](examples/ios/quickstart.py). For
+simulators or auto WDA build/sign, use the Appium path instead.
 
-- **`cli_setup()` guard** lets the same file run both via `airtest run ...` (IDE /
-  CI, which calls `cli_setup()` for you) and as a plain `python script.py`.
-- **`bind(G)`** binds the bot to the current device, so `bot.ai(TASK, ...)` takes
-  the instruction directly (no `target` argument). Bound calls accept
-  `max_steps`, `on_step`, `model_alias`, `language`, `custom_tools`, and
-  `exclude_tools`.
-- **`on_step`** fires after every action — use it for live logging or to push
-  progress somewhere. `step.finished` marks the terminal step.
-- **Recording** uses `record=True, record_device=True`: the recorder is picked
-  from the device (`adb screenrecord` for airtest Android), runs on the phone,
-  and `bot.close()` pulls the video into `bot.report_dir` as `recording.mp4`
-  (see [Screen recording](#screen-recording)). Airtest's native
-  `device().start_recording(...)` aimed at the same path still works if you
-  prefer it.
-- **`result.output`** is the model's final answer; `result.success` is the
-  pass/fail verdict, and `result.status` says how the run ended (see
-  [Error Handling](#error-handling)).
+### Windows — built in, one window, game-readable input
 
-Trade-offs and capability notes (e.g. `navigate` unsupported, `go_back` Android-only)
-are in [examples/airtest/](examples/airtest/). You can also pass `G`, the
-`airtest.core.api` module, or an explicit `connect_device(...)` handle directly
-without `bind()`.
+`qirabot.Window` binds to a single window (by title regex or HWND): screenshots
+are its client area, clicks are window-relative, and keys are DirectInput
+scancodes — the level games poll, which virtual-key automation can't reach.
+Stdlib ctypes only:
+
+```python
+from qirabot import Qirabot, Window
+
+window = Window(title_re="Genshin")   # or Window(hwnd=0x132456)
+bot = Qirabot().bind(window)
+
+result = bot.ai("Open the inventory and list all items")
+bot.close()
+```
+
+Full examples: [examples/windows/quickstart.py](examples/windows/quickstart.py)
+and the game walkthrough in [examples/game/](examples/game/). For whole-desktop
+automation (any OS) use the pyautogui backend.
+
+## Migrating from 1.x (airtest) to 2.0
+
+2.0 removes the airtest integration — and with it the `numpy<2` /
+`opencv-contrib` pins that made `qirabot[airtest]` collide with modern
+environments. The direct backends above are drop-in replacements; the AI loop,
+reports, and recording behave the same. Passing an airtest target to 2.0 raises
+an error with these same pointers; to defer migrating, pin `qirabot<2.0`.
+
+**Android** — `connect_device`/`G` becomes `AdbDevice` (same adb serial):
+
+```python
+# 1.x                                          # 2.0
+from airtest.core.api import connect_device    from qirabot import AdbDevice
+dev = connect_device("Android:///emu-5554")    dev = AdbDevice("emu-5554")
+bot = Qirabot().bind(dev)                      bot = Qirabot().bind(dev)   # unchanged
+```
+
+**iOS** — `connect_device("iOS:///...")` becomes `WdaClient` (same WDA URL):
+
+```python
+# 1.x                                          # 2.0
+dev = connect_device("iOS:///http://...:8100") client = WdaClient("http://...:8100")
+dev.driver.app_launch("com.example")           client.app_launch("com.example")
+```
+
+**Windows** — `connect_device("Windows:///<hwnd>")` becomes `Window` (same hwnd):
+
+```python
+# 1.x                                          # 2.0
+dev = connect_device("Windows:///132456")      window = Window(hwnd=132456)
+```
+
+**CLI** — the `--engine` flag is gone; the engine is inferred from the flags
+you pass: `--engine appium` becomes an explicit `--appium-url ...` (android/ios)
+or `-d/--device` (ios simulators), and `desktop --engine airtest
+--window-title X` becomes just `desktop --window-title X`.
+
+Whole-desktop Windows automation (1.x `desktop --engine airtest` with no window
+flags) is now served by the pyautogui backend — bind to a window, or drop the
+flags.
 
 ## Bind a target (optional)
 
@@ -408,14 +417,14 @@ stable target** for the whole session, call `bot.bind(target)` once to get a
 drop-in proxy that drops the repeated first argument:
 
 ```python
-bot = Qirabot().bind(driver)     # Selenium/Appium driver, pyautogui, Airtest G/device
+bot = Qirabot().bind(driver)     # Selenium/Appium driver, pyautogui, AdbDevice/WdaClient/Window
 bot.click("Login")
 bot.type_text("Email", "a@b.com")
 with Qirabot().bind(driver) as bot:   # works as a context manager too
     ...
 ```
 
-`bind()` is recommended for **Airtest, pyautogui, Appium, Selenium**. For
+`bind()` is recommended for **the device backends (adb/WDA/Window), pyautogui, Appium, Selenium**. For
 **Playwright** keep the explicit form `page = bot.click(page, ...)` so new-tab
 follows stay visible (a click can open a new tab; the returned page is the one
 your native `page.fill(...)` calls should use). With a bound proxy, reach the
@@ -562,7 +571,7 @@ Runnable examples: [examples/game/custom_tool_gm.py](examples/game/custom_tool_g
 After every screen-changing action each adapter pauses briefly so the UI repaints
 before the next screenshot — without it the model can capture a mid-animation frame
 and wrongly conclude the action did nothing. The defaults are tuned per platform
-(desktop `1.0`s, mobile/browser `0.6`s, Airtest `1`s; Playwright relies on its own
+(desktop/Android `1.0`s, Appium/WDA `0.6`s; Playwright relies on its own
 auto-waiting and adds none).
 
 Override the floor globally with `settle_seconds` — useful to slow down for a laggy
@@ -626,16 +635,16 @@ it to its own vocabulary.
 | Arrows / paging | `ArrowUp/Down/Left/Right` `PageUp` `PageDown` `Home` `End` | |
 | Combos (desktop/browser) | `ctrl+c` `ctrl+a` `alt+tab` `ctrl+shift+t` | modifiers `ctrl` `alt` `shift` `cmd` (= meta/win); join with `+` |
 | Mobile (Android/iOS) | `Back` `Home` `Menu` `Enter` | single keys only, no combos |
-| Hold (desktop) | `duration_seconds=2` (float, 0.1–10) | holds the key(s) that long before releasing — quantified in-game movement (`w`, `shift+w`), etc. Desktop backends only (pyautogui, Airtest Windows); web/mobile ignore it and tap |
+| Hold (desktop) | `duration_seconds=2` (float, 0.1–10) | holds the key(s) that long before releasing — quantified in-game movement (`w`, `shift+w`), etc. Desktop backends only (pyautogui, the Windows window backend); web/mobile ignore it and tap |
 
 So `bot.press_key(t, "Enter")` becomes an adb keycode on Android and a
-DirectInput scancode on Airtest Windows automatically; `ctrl+t`/`ctrl+w` switch
+DirectInput scancode on the Windows window backend automatically; `ctrl+t`/`ctrl+w` switch
 the active tab on Playwright (reassign the returned page).
 
 **Modifier-click (desktop).** `bot.click(..., modifier="alt")` holds modifier
 key(s) (`alt` / `ctrl` / `shift` / `win`, join with `+`) around the click —
 atomic alt+click for games, ctrl+click multi-select, etc. Desktop backends only
-(pyautogui, Airtest Windows); web/mobile ignore it and click plainly.
+(pyautogui, the Windows window backend); web/mobile ignore it and click plainly.
 
 **Smart `go_back` (Playwright):** if the current page has back history it goes
 back in place; if it doesn't — e.g. a click opened a link in a **new tab**,
@@ -655,26 +664,26 @@ regardless of history.
 
 Platform support (all actions):
 
-| Action         | Playwright | Selenium | Appium (mobile) | pyautogui (desktop) | Airtest |
-| -------------- | :--------: | :------: | :-------------: | :-----------------: | :-----: |
-| `click`        |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
-| `double_click` |     ✅     |    ✅    |      ✅ ᵃ       |         ✅          |  ✅ ᵃ   |
-| `right_click`  |     ✅     |    ✅    |    = tap ᵇ      |         ✅          | Windows / = tap ᵇ |
-| `hover`        |     ✅     |    ✅    |    no-op ᶜ      |         ✅          | Windows / no-op ᶜ |
-| `type_text`    |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
-| `clear_text`   |     ✅     |    ✅    |       ✅        |         ✅          | Android ᵈ |
-| `press_key`    |     ✅     |    ✅    |       ✅        |         ✅          |  ✅ ᵉ   |
-| `scroll`       |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
-| `drag`         |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
-| `long_press`   |     ❌ ᶠ    |    ❌ ᶠ   |       ✅        |         ❌ ᶠ         |   ✅    |
-| `mouse_down`   |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          | Windows |
-| `mouse_up`     |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          | Windows |
-| `key_down`     |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          | Windows |
-| `key_up`       |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          | Windows |
-| `navigate`     |     ✅     |    ✅    |       ✅        |         ❌          |   ❌    |
-| `go_back`      |     ✅     |    ✅    |       ✅        |         ❌          | Android |
-| `close_tab`    |     ✅     |    ❌    |       ❌        |         ❌          |   ❌    |
-| `screenshot`   |     ✅     |    ✅    |       ✅        |         ✅          |   ✅    |
+| Action         | Playwright | Selenium | Appium (mobile) | pyautogui (desktop) | adb (Android) | WDA (iOS) | Window (Windows) |
+| -------------- | :--------: | :------: | :-------------: | :-----------------: | :-----------: | :-------: | :--------------: |
+| `click`        |     ✅     |    ✅    |       ✅        |         ✅          |      ✅       |    ✅     |        ✅        |
+| `double_click` |     ✅     |    ✅    |      ✅ ᵃ       |         ✅          |     ✅ ᵃ      |    ✅     |        ✅        |
+| `right_click`  |     ✅     |    ✅    |    = tap ᵇ      |         ✅          |    = tap ᵇ    |  = tap ᵇ  |        ✅        |
+| `hover`        |     ✅     |    ✅    |    no-op ᶜ      |         ✅          |    no-op ᶜ    |  no-op ᶜ  |        ✅        |
+| `type_text`    |     ✅     |    ✅    |       ✅        |         ✅          |      ✅       |    ✅     |        ✅        |
+| `clear_text`   |     ✅     |    ✅    |       ✅        |         ✅          |     ✅ ᵈ      |   ✅ ᵈ    |        ✅        |
+| `press_key`    |     ✅     |    ✅    |       ✅        |         ✅          |      ✅       |    ✅     |       ✅ ᵉ       |
+| `scroll`       |     ✅     |    ✅    |       ✅        |         ✅          |      ✅       |    ✅     |        ✅        |
+| `drag`         |     ✅     |    ✅    |       ✅        |         ✅          |      ✅       |    ✅     |        ✅        |
+| `long_press`   |     ❌ ᶠ    |    ❌ ᶠ   |       ✅        |         ❌ ᶠ         |      ✅       |    ✅     |       ❌ ᶠ        |
+| `mouse_down`   |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          |     ❌ ᵍ      |   ❌ ᵍ    |        ✅        |
+| `mouse_up`     |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          |     ❌ ᵍ      |   ❌ ᵍ    |        ✅        |
+| `key_down`     |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          |     ❌ ᵍ      |   ❌ ᵍ    |        ✅        |
+| `key_up`       |     ❌ ᵍ    |    ❌ ᵍ   |       ❌ ᵍ      |         ✅          |     ❌ ᵍ      |   ❌ ᵍ    |        ✅        |
+| `navigate`     |     ✅     |    ✅    |       ✅        |         ❌          |      ❌       |    ❌     |        ❌        |
+| `go_back`      |     ✅     |    ✅    |       ✅        |         ❌          |      ✅       |   ✅ ʰ    |        ❌        |
+| `close_tab`    |     ✅     |    ❌    |       ❌        |         ❌          |      ❌       |    ❌     |        ❌        |
+| `screenshot`   |     ✅     |    ✅    |       ✅        |         ✅          |      ✅       |    ✅     |        ✅        |
 
 AI-located actions (`click`, `type_text`, `double_click`) and the AI operations
 (`extract`, `verify`, `wait_for`, `ai`) work on **every** framework — the matrix
@@ -682,20 +691,20 @@ shows how each underlying action maps per platform. `type_text`'s locate is
 optional (pass `""` to type into the currently focused element — deterministic,
 no AI, no billing — like `mouse_up`'s optional locate).
 
-- ᵃ Appium/Airtest emulate `double_click` as two quick taps.
-- ᵇ Mobile has no right-click: Appium taps; Airtest right-clicks on Windows only, taps elsewhere.
-- ᶜ Touch targets have no hover: Appium and Airtest Android/iOS treat `hover` as a no-op; Airtest moves the cursor (no click) on Windows.
-- ᵈ Airtest has no element model; `clear_text` is best-effort on Android (caret-to-end + repeated delete).
-- ᵉ Airtest maps common key names per platform automatically — Android/iOS to adb keycodes, Windows to DirectInput scancodes (real hardware-level keys, so games that read raw scancodes receive them, incl. `ctrl`/`alt`/`win` combos), falling back to pywinauto `SendKeys` only for keys scancodes can't express (e.g. shifted symbols like `!`, F13+). `duration_seconds` (hold) takes effect on pyautogui + Airtest Windows only; elsewhere it degrades to an instant tap.
-- ᶠ `long_press` is a touch-only gesture (Appium/Airtest mobile); the server only offers it on Android/iOS. Browser/desktop adapters raise `NotImplementedError`.
-- ᵍ `mouse_down`/`mouse_up`/`key_down`/`key_up` are desktop-only split press/release primitives (pyautogui, plus Airtest on Windows) for holding an input across other actions — hold a key to keep moving in a game, press-and-hold the mouse to drag, etc. Pair each press with its release; as a safety net any input still held is auto-released at the end of an `ai()` run and on `close()`. `mouse_up`'s locate is optional (omit to release at the current cursor; `bot.mouse_up(target)` is then deterministic — no AI, no billing — like `key_down`/`key_up`). Browser/mobile adapters raise `NotImplementedError`.
+- ᵃ Touch platforms emulate `double_click` as two quick taps.
+- ᵇ Mobile has no right-click: it degrades to a tap.
+- ᶜ Touch targets have no hover: it's a no-op on mobile.
+- ᵈ No element model over raw adb/WDA; `clear_text` is best-effort (caret-to-end + repeated delete on Android, backspace burst on iOS).
+- ᵉ The Windows window backend sends DirectInput scancodes (real hardware-level keys, so games that read raw scancodes receive them, incl. `ctrl`/`alt`/`win` combos); characters outside the scancode table are injected as unicode key events. `duration_seconds` (hold) takes effect on pyautogui + the Windows window backend only; elsewhere it degrades to an instant tap.
+- ᶠ `long_press` is a touch-only gesture; the server only offers it on Android/iOS. Browser/desktop adapters raise `NotImplementedError`.
+- ᵍ `mouse_down`/`mouse_up`/`key_down`/`key_up` are desktop-only split press/release primitives (pyautogui + the Windows window backend) for holding an input across other actions — hold a key to keep moving in a game, press-and-hold the mouse to drag, etc. Pair each press with its release; as a safety net any input still held is auto-released at the end of an `ai()` run and on `close()`. `mouse_up`'s locate is optional (omit to release at the current cursor; `bot.mouse_up(target)` is then deterministic — no AI, no billing — like `key_down`/`key_up`). Browser/mobile adapters raise `NotImplementedError`.
+- ʰ iOS has no back button; `go_back` performs the universal left-edge swipe gesture.
 
-`navigate`/`go_back` raise `NotImplementedError` where unsupported (pyautogui has
-no browser-style navigation; Airtest has no URL concept). `close_tab` is
-Playwright-only (other targets raise `NotImplementedError`); the new-tab fallback
-inside `go_back` therefore applies to Playwright only — on Selenium/Appium
-`go_back` is always history-back, and on Airtest it maps to `keyevent("BACK")`
-(Android only; iOS/Windows raise).
+`navigate`/`go_back` raise `NotImplementedError` where unsupported (desktop
+backends have no browser-style navigation). `close_tab` is Playwright-only
+(other targets raise `NotImplementedError`); the new-tab fallback inside
+`go_back` therefore applies to Playwright only — on Selenium/Appium `go_back`
+is always history-back, and on Android it maps to `keyevent BACK`.
 
 ### Launch a Desktop App (No AI)
 
@@ -796,7 +805,7 @@ screen instead (both used by the CLI's `android`/`ios --record`):
 ```python
 # Android (or any Appium driver): the recorder is picked from the action target.
 bot = Qirabot(record=True, record_device=True)   # or QIRA_RECORD_DEVICE=1
-bot.ai(dev, "open settings")   # airtest Android -> adb screenrecord
+bot.ai(dev, "open settings")   # AdbDevice -> adb screenrecord
 bot.close()                    # pulls the video into report_dir/recording.mp4
 
 # iOS via WDA (no Appium): record WDA's MJPEG stream (port 9100; USB real
@@ -806,7 +815,7 @@ bot = Qirabot(record=True, record_mjpeg_url="http://127.0.0.1:9100")
 
 - `record_device=True` defers the start until the first action, then resolves a
   recorder from its target: an **Appium driver** (android *and* ios) uses
-  Appium's session recording API; an **airtest Android** device uses
+  Appium's session recording API; an **AdbDevice** uses
   `adb screenrecord` on the phone (segments beyond screenrecord's 3-minute cap
   are merged with ffmpeg — without ffmpeg only the first segment is kept, with
   a warning). Unsupported targets skip recording rather than silently capturing
@@ -820,16 +829,17 @@ bot = Qirabot(record=True, record_mjpeg_url="http://127.0.0.1:9100")
 the window under test and capture its sound:
 
 ```python
-from airtest.core.api import connect_device
-dev = connect_device("Windows:///?title_re=Notepad.*")   # a concrete window
+from qirabot import Qirabot, Window
+
+window = Window(title_re="Notepad.*")   # a concrete window
 bot = Qirabot(record=True, record_window=True, record_audio=True)
-bot.ai(dev, "type a note")          # recording starts here, following the window
+bot.ai(window, "type a note")       # recording starts here, following the window
 bot.close()                         # recording.mp4 = just that window, with sound
 ```
 
 - `record_window=True` records only the window under test instead of the whole
   desktop. The window is resolved automatically from the action target, so it
-  only works with the **airtest Windows** backend (other backends and any
+  only works with the **Windows window backend** (other backends and any
   resolution failure fall back to full screen). You can also target a window
   explicitly with `bot.start_recording(window="Window Title")`, which works for
   any Windows backend. Keep the window visible — `gdigrab` produces black/frozen
@@ -899,10 +909,10 @@ Constructor options:
 | `report_dir` | `QIRA_REPORT_DIR` | `./qira_runs/<date>/<time-id>/` | Output root; the `<date>/<time-id>/` subdirs are always appended |
 | `record` | `QIRA_RECORD` | `False` | Record the screen with ffmpeg into `recording.mp4` (embedded in the report) |
 | `record_fps` | — | `12` | Recording frame rate |
-| `record_window` | `QIRA_RECORD_WINDOW` | `False` | **Windows + airtest only.** Record just the window under test (auto-resolved from the first action) instead of the full screen; falls back to full screen otherwise |
+| `record_window` | `QIRA_RECORD_WINDOW` | `False` | **Windows window backend only.** Record just the window under test (auto-resolved from the first action) instead of the full screen; falls back to full screen otherwise |
 | `record_audio` | `QIRA_RECORD_AUDIO` | `False` | **Windows only.** Capture system audio into the recording. `True` auto-detects a loopback device, or pass a DirectShow device name |
 | `record_audio_offset` | `QIRA_AUDIO_OFFSET` | `None` | A/V sync offset in seconds (usually negative, e.g. `-0.4`) applied to the audio input |
-| `record_device` | `QIRA_RECORD_DEVICE` | `False` | Record the automated **device's** screen instead of the host's: Appium driver → session recording API, airtest Android → `adb screenrecord` (resolved from the first action's target) |
+| `record_device` | `QIRA_RECORD_DEVICE` | `False` | Record the automated **device's** screen instead of the host's: Appium driver → session recording API, AdbDevice → `adb screenrecord` (resolved from the first action's target) |
 | `record_mjpeg_url` | `QIRA_RECORD_MJPEG_URL` | `None` | Record this MJPEG-over-HTTP stream instead of the host screen (e.g. WDA's iOS device stream on port 9100); needs ffmpeg |
 | `screenshot_annotate` | — | `True` | Draw a red crosshair at click/type coordinates |
 | `screenshot_format` | — | `"jpeg"` | Saved screenshot format (`"jpeg"` or `"png"`) |

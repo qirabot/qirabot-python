@@ -763,10 +763,10 @@ class AdbScreenRecorder:
 def device_recorder(output: str, target: Any) -> Recorder | None:
     """Best recorder for ``target``'s own (device) screen, or ``None``.
 
-    Appium drivers (android + ios) expose the session recording API; airtest
-    Android devices carry an adb client usable for screenrecord. Anything
-    else — browsers, pyautogui, airtest iOS — has no device stream here
-    (airtest iOS records via :class:`MjpegStreamRecorder` instead).
+    Appium drivers (android + ios) expose the session recording API; an
+    :class:`~qirabot.adb.AdbDevice` carries the adb base command for
+    screenrecord. Anything else — browsers, pyautogui, WDA iOS — has no device
+    stream here (WDA iOS records via :class:`MjpegStreamRecorder` instead).
     """
     if hasattr(target, "start_recording_screen"):
         return AppiumScreenRecorder(output, target)
@@ -778,14 +778,6 @@ def device_recorder(output: str, target: Any) -> Recorder | None:
         adb_cmd = None  # serial resolution failed; recording is best-effort
     if adb_cmd:
         return AdbScreenRecorder(output, list(adb_cmd))
-    adb_obj = getattr(target, "adb", None)
-    serial = getattr(adb_obj, "serialno", None) or getattr(target, "serialno", None)
-    if adb_obj is not None and serial:
-        adb_path = getattr(adb_obj, "adb_path", None) or shutil.which("adb")
-        if not adb_path:
-            logger.warning("recording skipped: no adb binary found to run screenrecord")
-            return None
-        return AdbScreenRecorder(output, [str(adb_path), "-s", str(serial)])
     return None
 
 

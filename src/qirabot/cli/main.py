@@ -153,8 +153,8 @@ def _run_local(
 def _fail_setup(bot: Any, e: Exception) -> NoReturn:
     """Report a setup-phase failure (before _run_local takes over) and exit.
 
-    Setup — bot.open() for browser, Appium Remote() / airtest connect for
-    android/ios — runs after the
+    Setup — bot.open() for browser, Appium Remote() / device resolution for
+    android/ios/desktop — runs after the
     server task is created but before _run_local starts reporting outcomes. An
     error there leaves the task un-terminalized, so the command's
     finally:bot.close() would otherwise complete it as *succeeded*. Record it as

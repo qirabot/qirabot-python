@@ -1,6 +1,6 @@
 ---
 name: qirabot
-description: "Drive any GUI with AI vision on raw screenshots — no DOM, no CSS/XPath selectors — via the Qirabot Python SDK or the qirabot CLI. Hand it a whole goal to complete autonomously, or make single natural-language actions: click, type, extract, and verify on web browsers, Android, iOS, desktop apps, and games. Use this when the user wants to automate, test, or scrape a UI by describing elements in plain language; when driving a mobile app, native desktop app, canvas UI, or game that DOM-based tools like Playwright/Selenium alone can't reach; when adding AI steps to an existing Playwright/Selenium/Appium/Airtest/pyautogui or pytest setup; or for visual UI verification, screenshots, and RPA. Triggers include: automate a website or app, UI/end-to-end test, fill a form, scrape a page, tap or click a button, verify what's on screen, drive an Android/iOS app or desktop application, automate a game, add AI element location to existing tests, run a one-shot automation task from the terminal."
+description: "Drive any GUI with AI vision on raw screenshots — no DOM, no CSS/XPath selectors — via the Qirabot Python SDK or the qirabot CLI. Hand it a whole goal to complete autonomously, or make single natural-language actions: click, type, extract, and verify on web browsers, Android, iOS, desktop apps, and games. Use this when the user wants to automate, test, or scrape a UI by describing elements in plain language; when driving a mobile app, native desktop app, canvas UI, or game that DOM-based tools like Playwright/Selenium alone can't reach; when adding AI steps to an existing Playwright/Selenium/Appium/pyautogui or pytest setup; or for visual UI verification, screenshots, and RPA. Triggers include: automate a website or app, UI/end-to-end test, fill a form, scrape a page, tap or click a button, verify what's on screen, drive an Android/iOS app or desktop application, automate a game, add AI element location to existing tests, run a one-shot automation task from the terminal."
 license: MIT
 metadata:
   author: qirabot
@@ -31,13 +31,12 @@ Bootstrap only when preflight reports something missing — prefer a venv:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 python -m pip install "qirabot[browser]"    # then: playwright install chromium
-#  or qirabot[appium] / qirabot[desktop] / qirabot[airtest] (Python 3.10-3.12)
+#  or qirabot[appium] / qirabot[desktop]; Android/iOS/Windows-window are built in
 echo 'QIRA_API_KEY=qk_...' > .env   # from https://app.qirabot.com — never hard-code it
 ```
 
-CAVEAT: airtest pins `numpy<2`, which conflicts with the browser/desktop
-extras — if one project genuinely needs airtest AND another backend, give
-airtest its own env (e.g. `.venv-airtest`) instead of sharing `.venv`.
+All extras install cleanly together (no numpy/opencv pins anywhere): one
+`.venv` with `qirabot[all]` covers every backend.
 
 ## Step 1 — CLI or SDK? Pick the invocation path
 
@@ -47,7 +46,7 @@ CLI; the script must branch or read values → SDK.*
 **CLI — the default for one-shot goals.** No script file to write; a live
 per-step trace, Ctrl+C → *cancelled* (exit 130), and non-zero exit on failure
 are built in, so it's a direct CI gate. Full flag matrix, engine rules
-(airtest vs appium), and recording setup: `references/CLI.md`. On this path,
+(direct vs appium), and recording setup: `references/CLI.md`. On this path,
 skip straight to Step 4's result-checking guidance.
 
 ```bash
@@ -71,15 +70,15 @@ Utility commands help on both paths: `qirabot doctor` (env check),
 | Target | Template | Extra |
 |---|---|---|
 | Web browser (launches Chromium; or attach to running Chrome via `cdp_url`) | `templates/browser.py` | `qirabot[browser]` + `playwright install chromium` |
-| Android — Airtest (adb direct, no server, fastest start) | `templates/android.py` | `qirabot[airtest]` |
-| iOS — Airtest (drives WDA directly; real device) | `templates/ios_airtest.py` | `qirabot[airtest]`; WDA running on :8100 (`iproxy 8100 8100`) |
+| Android — direct adb (built in, no server, fastest start) | `templates/android.py` | core `qirabot` + the adb binary |
+| iOS — direct WDA (built in; real device) | `templates/ios_wda.py` | core `qirabot`; WDA running on :8100 (`iproxy 8100 8100`) |
 | iOS — Appium XCUITest (simulators, auto WDA build/sign) | `templates/ios_appium.py` | `qirabot[appium]` + running Appium server |
 | Any Selenium driver / other Appium targets (`bind()` your driver) | `templates/bolt_on.py` | `qirabot` + your framework |
-| Desktop — Windows & macOS | `templates/bolt_on.py` | `qirabot[desktop]` (whole screen, any OS) · `qirabot[airtest]` (Windows, one window) |
+| Desktop — Windows & macOS | `templates/bolt_on.py` | `qirabot[desktop]` (whole screen, any OS) · core `qirabot.Window` (Windows, one window) |
 
 Copy the template, fill in the `TODO`s, run it with the preflight-echoed
-interpreter. iOS has two starters: default to `ios_airtest.py` when the user
-says "airtest" or WDA already answers (`curl http://127.0.0.1:8100/status`);
+interpreter. iOS has two starters: default to `ios_wda.py` when the user
+wants the minimal path or WDA already answers (`curl http://127.0.0.1:8100/status`);
 pick `ios_appium.py` for "appium", simulators, or when the script needs
 Appium's device APIs. The platform gotchas (iOS 17 app launch, WDA reuse) are
 already handled inside the templates; the per-platform action matrix and

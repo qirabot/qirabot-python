@@ -715,42 +715,6 @@ class TestDeviceRecorder:
 
         assert device_recorder(str(tmp_path / "r.mp4"), _Unresolvable()) is None
 
-    def test_airtest_android_selected(self, tmp_path):
-        class _Adb:
-            serialno = "emulator-5554"
-            adb_path = "/opt/adb"
-
-        class _AirtestAndroid:
-            adb = _Adb()
-
-        rec = device_recorder(str(tmp_path / "r.mp4"), _AirtestAndroid())
-        assert isinstance(rec, AdbScreenRecorder)
-        assert rec._adb == ["/opt/adb", "-s", "emulator-5554"]
-
-    def test_airtest_android_falls_back_to_which(self, monkeypatch, tmp_path):
-        class _Adb:
-            serialno = "emu-1"
-            adb_path = None
-
-        class _AirtestAndroid:
-            adb = _Adb()
-
-        monkeypatch.setattr(recording.shutil, "which", lambda _: "/usr/bin/adb")
-        rec = device_recorder(str(tmp_path / "r.mp4"), _AirtestAndroid())
-        assert isinstance(rec, AdbScreenRecorder)
-        assert rec._adb[0] == "/usr/bin/adb"
-
-    def test_no_adb_binary_returns_none(self, monkeypatch, tmp_path):
-        class _Adb:
-            serialno = "emu-1"
-            adb_path = None
-
-        class _AirtestAndroid:
-            adb = _Adb()
-
-        monkeypatch.setattr(recording.shutil, "which", lambda _: None)
-        assert device_recorder(str(tmp_path / "r.mp4"), _AirtestAndroid()) is None
-
     def test_unsupported_target_returns_none(self, tmp_path):
         assert device_recorder(str(tmp_path / "r.mp4"), object()) is None
         assert device_recorder(str(tmp_path / "r.mp4"), None) is None
@@ -1041,7 +1005,7 @@ class TestClientDeviceRecordingWiring:
         assert _FakeRecorder.instances == []  # host ScreenRecorder untouched
 
     def test_mjpeg_url_wins_over_record_device(self, monkeypatch, tmp_path):
-        # Both set (ios airtest passes mjpeg; device flag could come from env):
+        # Both set (ios direct passes mjpeg; device flag could come from env):
         # the MJPEG stream starts immediately, no deferral.
         made = self._setup(monkeypatch)
         fake_mjpeg = []

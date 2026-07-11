@@ -34,6 +34,8 @@ def test_selenium_hints_plain_pip_install(missing_everything):
 
 
 def test_explicit_extra_still_wins(missing_everything):
+    # An explicit extra overrides the top-level-package inference ("appium"
+    # would infer "appium" anyway; use a mismatched pair to prove precedence).
     with pytest.raises(MissingDependencyError) as ei:
-        _optional.require("airtest.core.api", "airtest")
-    assert 'python -m pip install "qirabot[airtest]"' in str(ei.value)
+        _optional.require("some_backend.api", "appium")
+    assert 'python -m pip install "qirabot[appium]"' in str(ei.value)
