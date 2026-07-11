@@ -11,54 +11,50 @@ Run it standalone (`bot.open()` launches a browser for you; Android / iOS / Wind
 
 ## Installation
 
-New to qirabot? Take the default path — browser automation, no other setup:
+One line — installs [uv](https://docs.astral.sh/uv/), qirabot (isolated, never
+touches your system Python), and Chromium. No pre-installed Python required:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate   # recommended: a fresh virtualenv
+# macOS / Linux
+curl -LsSf https://qirabot.com/install | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://qirabot.com/install.ps1 | iex"
+```
+
+Already have uv? The same result by hand:
+
+```bash
+uv tool install "qirabot[browser]" && qirabot install-browser
+```
+
+**Driving a device instead of a browser?** The Android (adb), iOS (WDA), and
+Windows single-window backends are built into the core package — the install
+is just:
+
+```bash
+uv tool install qirabot        # Android + iOS + Windows window; zero extras
+```
+
+<details>
+<summary><b>pip / virtualenv install, using qirabot as a library, extras, troubleshooting</b></summary>
+
+**pip** (requires Python 3.10+; use a virtualenv — Debian/Ubuntu block
+system-Python installs per PEP 668):
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
 python -m pip install "qirabot[browser]"
-playwright install chromium      # one-time browser download
-export QIRA_API_KEY="qk_your_api_key"   # from your dashboard: https://app.qirabot.com
-qirabot doctor                   # optional: verify the environment end-to-end
+qirabot install-browser          # or: playwright install chromium
 ```
 
-Requires Python 3.10+. That's everything the [Quick Start](#quick-start) needs;
-`bot.open()` launches the browser for you.
+**As a library** (importing `qirabot` in your own tests): install into your
+project's environment instead of a tool environment —
+`uv pip install "qirabot[browser]"` or the pip lines above.
 
-> **Using [uv](https://docs.astral.sh/uv/)?** The first two lines get shorter.
-> For the CLI, `uv tool install "qirabot[browser]"` installs into its own
-> isolated environment — no virtualenv to manage, and no pre-installed Python
-> required (uv downloads one on demand). For library use (importing `qirabot`
-> in your own tests), `uv venv && uv pip install "qirabot[browser]"` replaces
-> the venv-and-pip lines above and sidesteps the
-> `externally-managed-environment` error below entirely.
-
-> Seeing `error: externally-managed-environment`? You're installing into the
-> system Python (Debian/Ubuntu block that, per PEP 668) — create and activate a
-> virtualenv as above, and prefer `python -m pip` over bare `pip` so the install
-> always targets the interpreter that's actually active.
-
-> On a fresh **Linux** machine, also run `sudo playwright install-deps chromium`
-> once: the Chromium download doesn't include the system libraries it links
-> against, so launch fails with `error while loading shared libraries:
-> libnspr4.so ...` until they're installed. `qirabot doctor` detects this state
-> and prints the same fix. And on a **display-less** box (headless server / VM,
-> no `DISPLAY`), a visible browser window can't open — `bot.open()` and the CLI
-> detect that and automatically run headless instead, with a warning.
-
-**Driving a device instead?** Android (direct adb), iOS (direct
-WebDriverAgent), and Windows single-window automation are **built into the core
-package** — `python -m pip install qirabot` is the whole install, no extras, no
-heavy transitive dependencies (the only host requirements are the adb binary
-for Android, and a running WDA for iOS):
-
-```bash
-python -m pip install qirabot              # Android + iOS + Windows window — built in
-```
-
-**Already have an automation stack?** The same core package bolts onto the
-Playwright / Selenium / Appium / pyautogui session you already run, so your
-fixtures, CI, and device setup stay untouched (see
-[Bolt-On to Any Framework](#bolt-on-to-any-framework)). Frameworks stay in
+**Bolting onto an existing automation stack?** The core package attaches to
+the Playwright / Selenium / Appium / pyautogui session you already run (see
+[Bolt-On to Any Framework](#bolt-on-to-any-framework)); frameworks stay in
 extras — install the one matching yours, or nothing if it's already in your
 environment:
 
@@ -70,9 +66,23 @@ python -m pip install "qirabot[all]"       # everything above + browser
 python -m pip install qirabot selenium     # Selenium is not an extra — bring your own driver
 ```
 
-> All extras install cleanly together in one environment — since 2.0 nothing
-> here pins numpy/opencv or ships compiled dependencies beyond what the
-> frameworks themselves need.
+All extras install cleanly together in one environment — since 2.0 nothing
+here pins numpy/opencv.
+
+**Troubleshooting**
+
+- The one-line installer is also served directly from this repo:
+  `curl -LsSf https://raw.githubusercontent.com/qirabot/qirabot-python/main/scripts/install.sh | sh`
+- `error: externally-managed-environment` — you're installing into the system
+  Python (PEP 668); use the uv path above, or create/activate a virtualenv.
+- Fresh **Linux** box: run `sudo playwright install-deps chromium` once — the
+  Chromium download doesn't include the system libraries it links against
+  (`error while loading shared libraries: libnspr4.so ...`).
+- **Display-less** box (headless server / VM, no `DISPLAY`): a visible browser
+  window can't open — `bot.open()` and the CLI detect that and automatically
+  run headless, with a warning.
+
+</details>
 
 Whichever path you took, `qirabot doctor` reports what is installed, what is
 missing (with the exact command to fix it), and whether your API key reaches
@@ -80,24 +90,18 @@ the server.
 
 ## Quick Start
 
-If you skipped it during [Installation](#installation): grab an API key from
-your [dashboard](https://app.qirabot.com) and export it (a project `.env` file
-works too — see [Configuration](#configuration)):
+Two commands — save your API key once (get it from your
+[dashboard](https://app.qirabot.com)), then hand the AI a task:
 
 ```bash
-export QIRA_API_KEY="qk_your_api_key"
-```
-
-Then, with the default path installed ([Installation](#installation)), the
-fastest way to see it work is one CLI command — no Python file needed:
-
-```bash
+qirabot login      # paste the key once; verified, stored, picked up by every later run
 qirabot browser "Search for SpaceX and get the first sentence of the article" --url wikipedia.org
 ```
 
 That's a complete run: the browser opens, the AI does the task, and the result
 (plus an HTML report) lands in your terminal. All commands and options are in
-[CLI](#cli).
+[CLI](#cli). (Prefer environment variables? `QIRA_API_KEY` and a project
+`.env` still work and take precedence — see [Configuration](#configuration).)
 
 The same task through the Python SDK — the form you'll use to build real
 automations. `bot.ai()` is the same engine the CLI command runs: the AI looks
@@ -175,6 +179,8 @@ qirabot models                    # list model aliases
 | `android INSTRUCTION` | Run an AI task on an Android device (adb direct, built in; `--appium-url` for Appium) |
 | `ios INSTRUCTION` | Run an AI task on an iOS device (WDA direct, built in; `--appium-url`/`--device` for Appium) |
 | `desktop INSTRUCTION` | Run an AI task on the desktop screen (pyautogui; `--window-title`/`--hwnd` binds one Windows window with game-readable input, built in) |
+| `login` | Save your API key once (verified against the server, stored in the user config; `--status` shows the active key, masked) |
+| `install-browser` | One-time Chromium download for the browser backend (wraps `playwright install chromium`, works in isolated installs) |
 | `doctor` | Check Python, API key/server, and per-backend dependencies; exits non-zero when nothing can run |
 | `task TASK_ID` | Print a task's status, commands, and steps |
 | `screenshot TASK_ID` | Download a task screenshot |
@@ -186,11 +192,14 @@ qirabot models                    # list model aliases
 qirabot --api-key qk_... --base-url https://app.qirabot.com browser "..."
 ```
 
-`--api-key` / `--base-url` fall back to `QIRA_API_KEY` / `QIRA_BASE_URL`; also
-available are `--timeout` and `--verify-ssl` / `--no-verify-ssl`. The CLI loads a
-project `.env` automatically (same rules as [`load_dotenv`](#configuration):
-`$QIRA_DOTENV` or `./.env`; exported variables win). Run `qirabot -h`
-or `qirabot <command> -h` for the full, default-annotated option list.
+The API key resolves in this order: `--api-key` flag > `QIRA_API_KEY` env var >
+project `.env` (loaded automatically, same rules as
+[`load_dotenv`](#configuration): `$QIRA_DOTENV` or `./.env`) > the
+`qirabot login` config file — so `login` covers the everyday case and an env
+var still wins for CI or one-off overrides; `qirabot login --status` shows
+which layer is active. `--base-url` falls back to `QIRA_BASE_URL`; also
+available are `--timeout` and `--verify-ssl` / `--no-verify-ssl`. Run
+`qirabot -h` or `qirabot <command> -h` for the full option list.
 
 **Exit codes** are script-friendly: `0` task succeeded, `1` task failed or any
 error, `130` interrupted with Ctrl+C — so `qirabot browser "..." && next-step`

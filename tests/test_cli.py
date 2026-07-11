@@ -707,7 +707,7 @@ class TestMakeBotErrors:
         result = CliRunner().invoke(cli, ["browser", "do something"])
 
         assert result.exit_code == 1
-        assert "Set QIRA_API_KEY or pass --api-key" in result.output
+        assert "Run `qirabot login`" in result.output
 
 
 class TestHelpers:
@@ -887,7 +887,7 @@ class TestDesktopKeyCheckBeforeAppLaunch:
         result = CliRunner().invoke(cli, ["desktop", "do it", "--app", "Notes"])
 
         assert result.exit_code == 1
-        assert "Set QIRA_API_KEY or pass --api-key" in result.output
+        assert "Run `qirabot login`" in result.output
         launch.assert_not_called()
 
 

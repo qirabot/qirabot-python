@@ -124,6 +124,8 @@ window-relative screenshots).
 
 | Command | What it does |
 |---|---|
+| `qirabot login` | Save the API key once (verified, stored in the user config; flag/env/.env still win). `--status` shows the active key masked + its source layer. |
+| `qirabot install-browser` | One-time Chromium download for the browser backend (wraps `playwright install chromium`; required form in isolated `uv tool` installs, where playwright's own CLI is not on PATH). |
 | `qirabot doctor` | Environment check: Python, API key + server reachability, each backend's deps, ffmpeg. Exit `0` when at least one backend can run end-to-end — gate setup scripts/CI on it. |
 | `qirabot task <task_id>` | Server-side status + commands + steps tables for any task (CLI- or SDK-created). |
 | `qirabot screenshot <task_id> [-s N] [-o PATH] [-f]` | Download a task screenshot (`-s 0` = latest step). Refuses to overwrite without `-f`. |
