@@ -376,6 +376,13 @@ environments. The direct backends above are drop-in replacements; the AI loop,
 reports, and recording behave the same. Passing an airtest target to 2.0 raises
 an error with these same pointers; to defer migrating, pin `qirabot<2.0`.
 
+> **1.x maintenance policy.** The 1.x series lives on the
+> [`1.x` branch](https://github.com/qirabot/qirabot-python/tree/1.x) in
+> maintenance mode: bug and security fixes only, released as 1.9.x patch
+> versions — `pip install "qirabot<2"` always resolves to the newest one. No
+> new features land there. The end-of-maintenance date will be announced with
+> the 2.0.0 final release notes.
+
 **Android** — `connect_device`/`G` becomes `AdbDevice` (same adb serial):
 
 ```python
