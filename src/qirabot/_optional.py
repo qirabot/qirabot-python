@@ -11,6 +11,7 @@ exact ``python -m pip install "qirabot[<extra>]"`` command to run.
 from __future__ import annotations
 
 import importlib
+import warnings
 from types import ModuleType
 
 from qirabot.exceptions import MissingDependencyError
@@ -46,7 +47,13 @@ def require(module: str, extra: str | None = None) -> ModuleType:
         MissingDependencyError: if the module is not installed.
     """
     try:
-        return importlib.import_module(module)
+        # airtest and facebook-wda still contain pre-3.12 escape sequences
+        # ('\d' in docstrings etc.); on Python >=3.12 their first bytecode
+        # compile emits SyntaxWarnings that read like qirabot errors. They are
+        # third-party code we can't fix, so silence them for the import only.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            return importlib.import_module(module)
     except ImportError as e:
         package = module.split(".")[0]
         if package in _NOT_AN_EXTRA:

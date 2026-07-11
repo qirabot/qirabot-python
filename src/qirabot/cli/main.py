@@ -785,9 +785,11 @@ def _check_wda_ready(wda_url: str) -> None:
     """
     from urllib.parse import urlsplit
 
-    import wda  # facebook-wda, an airtest dependency
+    # facebook-wda, an airtest dependency; require() also keeps its Python
+    # 3.12 SyntaxWarnings out of the CLI output.
+    wda = require("wda", "airtest")
 
-    wda.DEBUG = False
+    wda.DEBUG = False  # type: ignore[attr-defined]  # require() returns ModuleType
     url = wda_url if wda_url.startswith("http") else f"http://{wda_url}"
     if wda.Client(url).is_ready():
         return
