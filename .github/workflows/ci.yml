@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 1.x]
   pull_request:
-    branches: [main]
+    branches: [main, 1.x]
   # Reusable: the publish workflow runs this same lint+test suite as its
   # release gate, so the two can't drift apart.
   workflow_call:
@@ -25,11 +25,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # 2.x has no numpy/opencv pins anywhere, so the matrix can track new
+        # Python releases freely (the 1.x branch stays capped at 3.12).
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev,cli]"
+      - run: pip install -e ".[dev]"
       - run: pytest --cov=qirabot

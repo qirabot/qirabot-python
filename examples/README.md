@@ -27,7 +27,9 @@ framework you bring:
 - [playwright/](playwright/) — Playwright `page` (pytest-playwright or your own)
 - [selenium/](selenium/) — your own `webdriver.Chrome()`
 - [appium/](appium/) — Android / iOS via `webdriver.Remote`
-- [airtest/](airtest/) — Android / iOS / Windows via `connect_device` (image-based)
+- [adb/](adb/) — Android direct over adb (built in, zero dependencies)
+- [ios/](ios/) — iOS direct via WebDriverAgent (built in, zero dependencies)
+- [windows/](windows/) — one Windows window, game-readable scancode input (built in)
 - [desktop/](desktop/) — native apps via pyautogui
 
 ## 4. Run desktop scripts on a dedicated machine

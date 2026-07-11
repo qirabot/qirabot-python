@@ -694,41 +694,26 @@ class TestDeviceRecorder:
         rec = device_recorder(str(tmp_path / "r.mp4"), _FakeAppiumDriver())
         assert isinstance(rec, AppiumScreenRecorder)
 
-    def test_airtest_android_selected(self, tmp_path):
-        class _Adb:
-            serialno = "emulator-5554"
-            adb_path = "/opt/adb"
+    def test_adbdevice_selected(self, tmp_path):
+        from qirabot.adb import AdbDevice
 
-        class _AirtestAndroid:
-            adb = _Adb()
-
-        rec = device_recorder(str(tmp_path / "r.mp4"), _AirtestAndroid())
+        dev = AdbDevice(serial="emulator-5554")
+        dev._adb_path = "/opt/adb"
+        dev._serial_checked = True
+        rec = device_recorder(str(tmp_path / "r.mp4"), dev)
         assert isinstance(rec, AdbScreenRecorder)
         assert rec._adb == ["/opt/adb", "-s", "emulator-5554"]
 
-    def test_airtest_android_falls_back_to_which(self, monkeypatch, tmp_path):
-        class _Adb:
-            serialno = "emu-1"
-            adb_path = None
+    def test_adbdevice_resolution_failure_returns_none(self, tmp_path):
+        from qirabot.adb import AdbDevice
+        from qirabot.exceptions import QirabotError
 
-        class _AirtestAndroid:
-            adb = _Adb()
+        class _Unresolvable(AdbDevice):
+            @property
+            def adb_command(self) -> list[str]:
+                raise QirabotError("no adb", code="adb.not_found")
 
-        monkeypatch.setattr(recording.shutil, "which", lambda _: "/usr/bin/adb")
-        rec = device_recorder(str(tmp_path / "r.mp4"), _AirtestAndroid())
-        assert isinstance(rec, AdbScreenRecorder)
-        assert rec._adb[0] == "/usr/bin/adb"
-
-    def test_no_adb_binary_returns_none(self, monkeypatch, tmp_path):
-        class _Adb:
-            serialno = "emu-1"
-            adb_path = None
-
-        class _AirtestAndroid:
-            adb = _Adb()
-
-        monkeypatch.setattr(recording.shutil, "which", lambda _: None)
-        assert device_recorder(str(tmp_path / "r.mp4"), _AirtestAndroid()) is None
+        assert device_recorder(str(tmp_path / "r.mp4"), _Unresolvable()) is None
 
     def test_unsupported_target_returns_none(self, tmp_path):
         assert device_recorder(str(tmp_path / "r.mp4"), object()) is None
@@ -1020,7 +1005,7 @@ class TestClientDeviceRecordingWiring:
         assert _FakeRecorder.instances == []  # host ScreenRecorder untouched
 
     def test_mjpeg_url_wins_over_record_device(self, monkeypatch, tmp_path):
-        # Both set (ios airtest passes mjpeg; device flag could come from env):
+        # Both set (ios direct passes mjpeg; device flag could come from env):
         # the MJPEG stream starts immediately, no deferral.
         made = self._setup(monkeypatch)
         fake_mjpeg = []

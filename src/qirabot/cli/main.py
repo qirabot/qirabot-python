@@ -13,7 +13,7 @@ from click.core import ParameterSource
 from qirabot._dotenv import load_dotenv
 from qirabot._optional import require
 from qirabot._transport import Transport
-from qirabot.exceptions import MissingDependencyError, QirabotError
+from qirabot.exceptions import QirabotError
 
 
 def _require_api_key(ctx: click.Context) -> str:
@@ -153,8 +153,8 @@ def _run_local(
 def _fail_setup(bot: Any, e: Exception) -> NoReturn:
     """Report a setup-phase failure (before _run_local takes over) and exit.
 
-    Setup — bot.open() for browser, Appium Remote() / airtest connect for
-    android/ios — runs after the
+    Setup — bot.open() for browser, Appium Remote() / device resolution for
+    android/ios/desktop — runs after the
     server task is created but before _run_local starts reporting outcomes. An
     error there leaves the task un-terminalized, so the command's
     finally:bot.close() would otherwise complete it as *succeeded*. Record it as
@@ -339,14 +339,27 @@ def models(ctx: click.Context) -> None:
 
 
 def _has_module(module: str) -> bool:
-    """Probe an optional dependency without require()'s raise (doctor only)."""
+    """Probe an optional dependency without require()'s raise (doctor only).
+
+    Catches every exception, not just ImportError: pyautogui raises KeyError
+    at import time on a display-less Linux box (no $DISPLAY), and a probe
+    must report "not usable here", never crash doctor.
+    """
     import importlib
 
     try:
         importlib.import_module(module)
         return True
-    except ImportError:
+    except Exception:
         return False
+
+
+def _adb_binary_found() -> bool:
+    """Probe the adb binary (doctor only) — the android backend is pure stdlib,
+    so the binary, not a Python module, is the thing that can be missing."""
+    from qirabot.adb import _which_adb
+
+    return _which_adb() is not None
 
 
 def _display_available() -> bool:
@@ -468,9 +481,10 @@ def doctor(ctx: click.Context) -> None:
             'python -m pip install "qirabot[desktop]"',
         ),
         (
-            "android/ios/windows-desktop direct (Airtest)",
-            _has_module("airtest"),
-            'python -m pip install "qirabot[airtest]"  (Python 3.10–3.12 recommended)',
+            "android direct (adb — built in, needs the adb binary)",
+            _adb_binary_found(),
+            "install Android platform-tools and put adb on PATH "
+            "(https://developer.android.com/tools/releases/platform-tools)",
         ),
         (
             "android/ios via server (Appium)",
@@ -485,6 +499,12 @@ def doctor(ctx: click.Context) -> None:
     ]
 
     console.print("\n[bold]Backends[/bold] — you only need the one you plan to drive:")
+    # Informational (not a gate): the direct iOS backend is built into the core
+    # package; its only requirement — WebDriverAgent running on the device —
+    # can't be probed from here.
+    console.print(
+        f"  {ok} ios direct (WDA — built in; needs WebDriverAgent running on the device)"
+    )
     for label, ready, hint in backends:
         if ready:
             console.print(f"  {ok} {escape(label)}")
@@ -595,17 +615,6 @@ def _flag_given(ctx: click.Context, param: str) -> bool:
     return ctx.get_parameter_source(param) == ParameterSource.COMMANDLINE
 
 
-def _require_airtest() -> None:
-    """require() with the CLI escape hatch appended: airtest is the default
-    engine, so a missing install must also point at --engine appium."""
-    try:
-        require("airtest.core.api", "airtest")
-    except MissingDependencyError as e:
-        raise MissingDependencyError(
-            f"{e} Or pass --engine appium to go through an Appium server instead."
-        ) from e
-
-
 def _run_appium(
     ctx: click.Context,
     instruction: str,
@@ -657,7 +666,7 @@ def _run_appium(
         bot.close()
 
 
-def _run_airtest(
+def _run_direct(
     ctx: click.Context,
     instruction: str,
     name: str,
@@ -672,14 +681,14 @@ def _run_airtest(
     record_mjpeg_url: str = "",
     record_device: bool = False,
 ) -> None:
-    """Shared android/ios airtest body: build the bot, connect the device, run.
+    """Shared direct-engine body: build the bot, connect the device, run.
 
-    ``connect`` performs the airtest connect + optional app launch and returns
-    the bind target. Like _run_appium, the bot is built first (it validates the
-    API key and may sys.exit()); unlike Appium there is no remote session to
-    quit, so the only teardown is bot.close(). Recording is device-side:
-    ``record_mjpeg_url`` for ios (WDA's MJPEG stream), ``record_device`` for
-    android (adb screenrecord, resolved from the airtest device).
+    ``connect`` resolves the device + optional app launch and returns the bind
+    target. Like _run_appium, the bot is built first (it validates the API key
+    and may sys.exit()); there is no remote session to quit, so the only
+    teardown is bot.close(). Recording is device-side: ``record_mjpeg_url``
+    for ios (WDA's MJPEG stream), ``record_device`` for android (adb
+    screenrecord, resolved from the AdbDevice target).
     """
     bot = _make_bot(
         ctx, model=model, language=language, report=report, report_dir=report_dir,
@@ -700,38 +709,59 @@ def _run_airtest(
         bot.close()
 
 
+def _adb_launch_app(dev: Any, package: str, activity: str) -> None:
+    """Launch an app over adb: explicit activity via ``am start -W``, else the
+    LAUNCHER intent via monkey (no need to know the activity name)."""
+    if activity:
+        component = f"{package}/{activity}"
+        out = dev.shell(f"am start -W -n {component}")
+        if "Error" in out or "does not exist" in out:
+            raise RuntimeError(
+                f"could not launch {component}: {out.strip().splitlines()[-1]}"
+            )
+    else:
+        out = dev.shell(
+            f"monkey -p {package} -c android.intent.category.LAUNCHER 1"
+        )
+        if "No activities found" in out or "aborted" in out.lower():
+            raise RuntimeError(
+                f"could not launch {package}: no LAUNCHER activity found "
+                "(is the package name right? try --app-activity)"
+            )
+
+
 @cli.command()
 @click.argument("instruction")
 @_task_options
-@click.option("--engine", default="airtest", type=click.Choice(["airtest", "appium"]), help="Automation backend: airtest drives the device directly over adb (no server); appium goes through an Appium server at --appium-url")
-@click.option("--device", "-d", default="", help="Which device: an adb serial from `adb devices` (e.g. emulator-5554 or 192.168.1.8:5555). Optional when exactly one device is connected. Appium engine: passed as deviceName.")
-@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL (appium engine)")
+@click.option("--device", "-d", default="", help="Which device: an adb serial from `adb devices` (e.g. emulator-5554 or 192.168.1.8:5555). Optional when exactly one device is connected. With --appium-url: passed as deviceName.")
+@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL — passing this flag switches the run to the Appium engine", show_default="direct adb, no server")
 # Android — app launch
 @click.option("--app-package", default="", help="App package to launch (e.g. com.android.settings)")
 @click.option("--app-activity", default="", help="App activity to launch")
 # Android — device-screen recording: adb screenrecord (direct engine) or
 # Appium's recording API — both capture the phone screen, not the host's.
-@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (direct engine: adb screenrecord, ffmpeg merges runs over 3 min; appium engine: Appium's recording API)")
+@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (direct engine: adb screenrecord, ffmpeg merges runs over 3 min; Appium engine: Appium's recording API)")
 @_debug_options(record=False)
 @click.pass_context
-def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, report: bool, report_dir: str, annotate: bool) -> None:
-    """Run an AI task on an Android device (direct over adb; --engine appium for Appium).
+def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, report: bool, report_dir: str, annotate: bool) -> None:
+    """Run an AI task on an Android device (direct over adb; --appium-url for Appium).
 
     \b
-    Default engine — drives the device straight over adb, no server needed:
+    Default — drives the device straight over adb. Zero Python dependencies;
+    the only requirement is an adb binary (platform-tools) on PATH:
       qirabot android "Open settings"                    # the only adb device
       qirabot android "..." -d emulator-5554             # pick one of several
       qirabot android "..." -d 192.168.1.8:5555          # network device (adb connect)
       qirabot android "..." --app-package com.android.settings --app-activity .Settings
     \b
-    Appium engine — needs a running server (npm i -g appium && appium driver
-    install uiautomator2 && appium), reached via --appium-url:
-      qirabot android "..." --engine appium -d emulator-5554 --app-package com.android.settings
+    Appium — passing --appium-url selects the Appium engine; needs a running
+    server (npm i -g appium && appium driver install uiautomator2 && appium):
+      qirabot android "..." --appium-url http://localhost:4723 -d emulator-5554
     \b
     Recording — --record saves the device screen (works on both engines):
       qirabot android "..." --record
     """
-    if engine == "appium":
+    if _flag_given(ctx, "appium_url"):
         require("appium.webdriver", "appium")
         from appium.options.android import UiAutomator2Options
 
@@ -749,64 +779,35 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
         )
         return
 
-    if _flag_given(ctx, "appium_url"):
-        raise click.UsageError("--appium-url only applies to --engine appium")
-    _require_airtest()
-    from airtest.core.api import connect_device, start_app
+    from qirabot.adb import AdbDevice
+
+    dev = AdbDevice(serial=device or None)
 
     def connect() -> Any:
-        try:
-            target = connect_device(f"Android:///{device}")
-        except Exception as e:
-            raise RuntimeError(
-                f"could not connect to an adb device ({e}); check `adb devices`, "
-                "or use --engine appium"
-            ) from e
+        # Resolve the serial now so 0/many/unauthorized/offline devices fail
+        # with their actionable errors inside _fail_setup's reporting.
+        dev.serial  # noqa: B018 — resolution side effect
         if app_package:
-            start_app(app_package, app_activity or None)
-        return target
+            _adb_launch_app(dev, app_package, app_activity)
+        return dev
 
-    _run_airtest(
+    _run_direct(
         ctx, instruction, name, model, language, max_steps, connect,
         report, report_dir, annotate,
         record=record, record_device=record,
     )
 
 
-def _check_wda_ready(wda_url: str) -> None:
-    """Fail fast when WebDriverAgent isn't reachable, before airtest connects.
-
-    airtest's iOS backend treats a localhost --wda-url as a local USB device
-    and, when WDA isn't up, auto-launches the xctest runner via go-ios/
-    tidevice — on iOS 17+ that dead-ends only after tidevice downloads
-    developer disk images. Probing first turns that into an immediate,
-    actionable error. Local devices are also probed over usbmux, because
-    airtest talks to them that way and works without iproxy.
-    """
-    from urllib.parse import urlsplit
-
-    # facebook-wda, an airtest dependency; require() also keeps its Python
-    # 3.12 SyntaxWarnings out of the CLI output.
-    wda = require("wda", "airtest")
-
-    wda.DEBUG = False  # type: ignore[attr-defined]  # require() returns ModuleType
-    url = wda_url if wda_url.startswith("http") else f"http://{wda_url}"
-    if wda.Client(url).is_ready():
+def _check_wda_ready(client: Any, wda_url: str) -> None:
+    """Fail fast, with the full fix, when WebDriverAgent isn't answering."""
+    if client.is_ready():
         return
-    if urlsplit(url).hostname in ("localhost", "127.0.0.1"):
-        try:
-            usb = [d for d in wda.list_devices() if d.connection_type == "USB"]
-        except Exception:
-            usb = []
-        if len(usb) == 1 and wda.BaseClient(
-            f"http+usbmux://{usb[0].serial}:8100"
-        ).is_ready():
-            return
     raise RuntimeError(
-        f"WDA is not running (nothing answered at {wda_url} or over USB); start "
-        "WebDriverAgent first (Xcode: run the WebDriverAgentRunner test scheme on "
-        "the device, or `tidevice3 runwda` / pymobiledevice3), then retry — or "
-        "use --engine appium to have Appium build and launch WDA"
+        f"WDA is not running (nothing answered at {wda_url}); start "
+        "WebDriverAgent first (USB real device: `iproxy 8100 8100` alongside "
+        "it; Xcode: run the WebDriverAgentRunner test scheme on the device, "
+        "or `tidevice3 runwda` / pymobiledevice3), then retry — or pass "
+        "--appium-url to have Appium build and launch WDA"
     )
 
 
@@ -845,42 +846,42 @@ def _check_mjpeg_ready(mjpeg_url: str) -> None:
 @cli.command()
 @click.argument("instruction")
 @_task_options
-@click.option("--engine", default="airtest", type=click.Choice(["airtest", "appium"]), help="Automation backend: airtest drives WebDriverAgent directly at --wda-url (no Appium server); appium goes through an Appium server (simulators, auto WDA build)")
 @click.option("--wda-url", default="http://127.0.0.1:8100", help="WebDriverAgent URL — this is how the default engine picks the device (USB real device: run `iproxy 8100 8100` and keep the default; another device = its WDA address)")
-@click.option("--device", "-d", default="", help="Simulator device type for the appium engine (a name from `xcrun simctl list devicetypes`, e.g. \"iPhone 15\") — simulators only, not a real device's name. Real devices: use the default engine, which selects the device via --wda-url.")
-@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL (appium engine)")
+@click.option("--device", "-d", default="", help="Simulator device type (a name from `xcrun simctl list devicetypes`, e.g. \"iPhone 15\") — passing this flag switches the run to the Appium engine (simulators only). Real devices: keep the default engine, which selects the device via --wda-url.")
+@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL — passing this flag switches the run to the Appium engine", show_default="direct WDA, no server")
 # iOS — app launch
 @click.option("--bundle-id", default="", help="App bundle id to launch (e.g. com.tencent.xin)")
 # iOS — device-screen recording: the default engine transcodes WDA's MJPEG
-# stream with ffmpeg; the appium engine uses Appium's recording API. Either
+# stream with ffmpeg; the Appium engine uses Appium's recording API. Either
 # way this captures the phone screen, unlike the desktop --record.
-@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (default engine: WDA's MJPEG stream, requires ffmpeg, USB real device also needs `iproxy 9100 9100`; appium engine: Appium's recording API)")
-@click.option("--mjpeg-url", default="", help="WDA MJPEG stream URL for --record (default: --wda-url's host on port 9100; airtest engine only)")
+@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (default engine: WDA's MJPEG stream, requires ffmpeg, USB real device also needs `iproxy 9100 9100`; Appium engine: Appium's recording API)")
+@click.option("--mjpeg-url", default="", help="WDA MJPEG stream URL for --record (default: --wda-url's host on port 9100; direct engine only)")
 @_debug_options(record=False)
 @click.pass_context
-def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, report: bool, report_dir: str, annotate: bool) -> None:
-    """Run an AI task on an iOS device (direct via WDA; --engine appium for Appium).
+def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, report: bool, report_dir: str, annotate: bool) -> None:
+    """Run an AI task on an iOS device (direct via WDA; --appium-url/--device for Appium).
 
     \b
-    Default engine — talks to WebDriverAgent directly, no Appium server. WDA
-    must be running on the device (USB real device: `iproxy 8100 8100` first):
+    Default — talks to WebDriverAgent directly (built in, zero extra installs).
+    WDA must be running on the device (USB real device: `iproxy 8100 8100`):
       qirabot ios "..." --bundle-id com.tencent.xin          # WDA on 127.0.0.1:8100
       qirabot ios "..." --wda-url http://192.168.1.20:8100   # another device's WDA
     \b
-    Appium engine — needs a running server (npm i -g appium && appium driver
-    install xcuitest && appium); use for simulators or to auto build/sign WDA:
-      qirabot ios "..." --engine appium -d "iPhone 15" --bundle-id com.apple.Preferences
+    Appium — passing --appium-url or --device (simulator) selects the Appium
+    engine; needs a running server (npm i -g appium && appium driver install
+    xcuitest && appium), and can auto build/sign WDA for you:
+      qirabot ios "..." -d "iPhone 15" --bundle-id com.apple.Preferences
     \b
     Recording — --record saves the device screen. Default engine: WDA's MJPEG
     stream (port 9100; USB real device: also `iproxy 9100 9100`). Appium
     engine: Appium's own recording API, no extra setup:
       qirabot ios "..." --record
     """
-    if engine == "appium":
+    if _flag_given(ctx, "appium_url") or _flag_given(ctx, "device"):
         if _flag_given(ctx, "wda_url"):
-            raise click.UsageError("--wda-url only applies to --engine airtest")
+            raise click.UsageError("--wda-url only applies to the direct engine (drop --appium-url/--device)")
         if _flag_given(ctx, "mjpeg_url"):
-            raise click.UsageError("--mjpeg-url only applies to --engine airtest (the appium engine records via Appium's own API)")
+            raise click.UsageError("--mjpeg-url only applies to the direct engine (the Appium engine records via Appium's own API)")
         require("appium.webdriver", "appium")
         from appium.options.ios import XCUITestOptions
 
@@ -896,39 +897,24 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
         )
         return
 
-    if _flag_given(ctx, "appium_url"):
-        raise click.UsageError("--appium-url only applies to --engine appium")
-    if _flag_given(ctx, "device"):
-        raise click.UsageError("--device only applies to --engine appium; the airtest engine connects via --wda-url")
     if _flag_given(ctx, "mjpeg_url") and not record:
         raise click.UsageError("--mjpeg-url only applies with --record")
     record_mjpeg_url = ""
     if record:
         record_mjpeg_url = mjpeg_url or _wda_mjpeg_url(wda_url)
         _check_mjpeg_ready(record_mjpeg_url)
-    _require_airtest()
-    from airtest.core.api import connect_device
+
+    from qirabot.wda import WdaClient
+
+    client = WdaClient(wda_url)
 
     def connect() -> Any:
-        # Refuse to hand a dead WDA to airtest: its connect would try to
-        # auto-launch the runner (go-ios, then tidevice + disk-image
-        # downloads) and still fail on iOS 17+.
-        _check_wda_ready(wda_url)
-        try:
-            target = connect_device(f"iOS:///{wda_url}")
-        except Exception as e:
-            raise RuntimeError(
-                f"could not reach WDA at {wda_url} ({e}); start WDA (real device: "
-                "`iproxy 8100 8100`), or use --engine appium"
-            ) from e
+        _check_wda_ready(client, wda_url)
         if bundle_id:
-            # Launch via WDA's app_launch, NOT airtest's start_app: start_app
-            # routes through the bundled go-ios CLI, which fails on iOS 17+
-            # without a RemoteXPC tunnel daemon.
-            target.driver.app_launch(bundle_id)
-        return target
+            client.app_launch(bundle_id)
+        return client
 
-    _run_airtest(
+    _run_direct(
         ctx, instruction, name, model, language, max_steps, connect,
         report, report_dir, annotate,
         record=record, record_mjpeg_url=record_mjpeg_url,
@@ -949,45 +935,40 @@ def _launch_desktop_app(app: str, app_wait: float) -> None:
 @cli.command()
 @click.argument("instruction")
 @_task_options
-@click.option("--engine", default="pyautogui", type=click.Choice(["pyautogui", "airtest"]), help="Automation backend: pyautogui drives the whole screen (cross-platform); airtest (Windows only) sends DirectInput scancodes that games can read, and can bind to one window")
-@click.option("--window-title", default="", help="airtest engine: bind to the window whose title matches this regex (screenshots/coords become window-relative, recording follows the window)")
-@click.option("--hwnd", default=0, type=int, help="airtest engine: bind to a specific window handle")
+@click.option("--window-title", default="", help="Bind to the window whose title matches this regex — selects the built-in Windows window backend (screenshots/coords become window-relative, input is game-readable scancodes, recording follows the window). Windows only.")
+@click.option("--hwnd", default=0, type=int, help="Bind to a specific window handle — selects the built-in Windows window backend. Windows only.")
 # Desktop — app launch
 @click.option("--app", default="", help="Launch/activate an app before the task. macOS: app name (\"WeChat\") or bundle id; Windows: exe path, registered name, or UWP AppUserModelID; Linux: executable.")
 @click.option("--app-wait", default=2.0, type=float, help="Seconds to wait after --app launch for the window to appear")
 @_debug_options()
 @click.pass_context
-def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, window_title: str, hwnd: int, app: str, app_wait: float, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
-    """Run an AI task on the desktop screen (pyautogui; --engine airtest for Windows games).
+def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, window_title: str, hwnd: int, app: str, app_wait: float, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
+    """Run an AI task on the desktop (pyautogui; --window-title/--hwnd for one Windows window).
 
     \b
-    Default engine — pyautogui, drives the whole screen (macOS/Windows/Linux):
+    Default — pyautogui, drives the whole screen (macOS/Windows/Linux):
       qirabot desktop "Create a note titled Groceries" --app Notes
     \b
-    Airtest engine (Windows only) — DirectInput scancode input that games can
-    read (pyautogui's virtual key codes often can't reach them); optionally
-    bind to one window so screenshots and clicks are window-relative:
-      qirabot desktop "..." --engine airtest
-      qirabot desktop "..." --engine airtest --window-title "Genshin"
-      qirabot desktop "..." --engine airtest --app "C:/game.exe" --app-wait 15 --window-title "..."
+    Windows window backend (built in, zero extra installs) — passing
+    --window-title or --hwnd binds to one window: screenshots and clicks are
+    window-relative, and keys go out as DirectInput scancodes that games can
+    read (virtual-key input often can't reach them):
+      qirabot desktop "..." --window-title "Genshin"
+      qirabot desktop "..." --app "C:/game.exe" --app-wait 15 --window-title "..."
     """
-    if engine == "airtest":
+    if window_title or hwnd:
         if window_title and hwnd:
             raise click.UsageError("--window-title and --hwnd are mutually exclusive")
         if sys.platform != "win32":
+            # macOS's CGEvent has no concept of delivering input to a
+            # background window, so a real window-bound backend cannot exist
+            # there — fail with the workable alternative, don't degrade.
             raise click.UsageError(
-                "--engine airtest drives the Windows desktop only; on other "
-                "platforms use the default pyautogui engine"
+                "--window-title/--hwnd need the Windows window backend, which "
+                "only exists on Windows; on macOS/Linux use the default "
+                "full-screen mode and bring the target window to the front"
             )
-        # Not _require_airtest(): its escape hatch points at --engine appium,
-        # which doesn't exist here — the desktop fallback is pyautogui.
-        try:
-            require("airtest.core.api", "airtest")
-        except MissingDependencyError as e:
-            raise MissingDependencyError(
-                f"{e} Or drop --engine airtest to use the default pyautogui engine."
-            ) from e
-        from airtest.core.api import connect_device
+        from qirabot.windows import Window
 
         # Validate the key before the --app side effect (same contract as the
         # pyautogui path below).
@@ -995,42 +976,17 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
         if app:
             _launch_desktop_app(app, app_wait)
 
-        if hwnd:
-            uri = f"Windows:///{hwnd}"
-        elif window_title:
-            from urllib.parse import quote
-
-            uri = f"Windows:///?title_re={quote(window_title)}"
-        else:
-            uri = "Windows:///"
+        window = Window(hwnd=hwnd or None, title_re=window_title or None)
 
         def connect() -> Any:
-            try:
-                target = connect_device(uri)
-            except Exception as e:
-                raise RuntimeError(
-                    f"could not connect to {uri} ({e}); check the window exists "
-                    "(--window-title is a regex matched against visible window "
-                    "titles), or increase --app-wait if the app is still starting"
-                ) from e
-            # Games only receive input in the foreground. Best-effort: the
-            # whole-desktop device has no single window to raise.
-            try:
-                target.to_foreground()
-            except Exception:
-                pass
-            return target
+            window.hwnd  # noqa: B018 — resolve now for actionable errors
+            return window
 
-        _run_airtest(
+        _run_direct(
             ctx, instruction, name, model, language, max_steps, connect,
             report, report_dir, annotate, record=record,
         )
         return
-
-    if _flag_given(ctx, "window_title"):
-        raise click.UsageError("--window-title only applies to --engine airtest")
-    if _flag_given(ctx, "hwnd"):
-        raise click.UsageError("--hwnd only applies to --engine airtest")
 
     pyautogui = require("pyautogui", "desktop")
 

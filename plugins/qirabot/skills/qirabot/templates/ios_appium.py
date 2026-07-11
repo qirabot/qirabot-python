@@ -22,12 +22,12 @@ Install:
     python -m pip install "qirabot[appium]"
     echo 'QIRA_API_KEY=qk_...' > .env    # load_dotenv() reads this (also QIRA_BASE_URL)
 
-When to pick this over ios_airtest.py:
+When to pick this over ios_wda.py:
     - Simulators (Appium can build WDA itself — see Variant A below).
     - No pre-running WDA: let Appium build/sign on every run (Variant B).
     - You want Appium's first-party device APIs (screen recording, file
       transfer, deep XCUITest features).
-    Pick ios_airtest.py instead if WDA is already on :8100 and you want the
+    Pick ios_wda.py instead if WDA is already on :8100 and you want the
     minimal-deps path (no `appium` server, no XCUITest driver).
 
 The HTML report is written to ./qira_runs/<date>/<run>/report.html on close.

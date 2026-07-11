@@ -3,13 +3,13 @@
 Use this for native desktop, or any case where you already construct a
 Selenium / Appium driver: build the framework object as usual, `bind()` it once,
 then drive it by natural language. (For "Qirabot launches Chromium" use
-templates/browser.py; for Android over Airtest use templates/android.py; for
-iOS use templates/ios_airtest.py or templates/ios_appium.py — both cover
+templates/browser.py; for Android over adb use templates/android.py; for
+iOS use templates/ios_wda.py or templates/ios_appium.py — both cover
 real-device WDA reuse.)
 
 The concrete example below is Selenium. Swap the marked block for one of the
-Appium, pyautogui (whole-screen desktop, any OS), or Airtest (window-scoped
-Windows desktop) variants at the bottom.
+Appium, pyautogui (whole-screen desktop, any OS), or Window (window-scoped
+Windows desktop, built in) variants at the bottom.
 
 Run (Selenium):
     python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
@@ -60,7 +60,7 @@ driver.quit()
 
 
 # --- Android via Appium UiAutomator2 (needs a running Appium server) ---------
-# For iOS use templates/ios_airtest.py or templates/ios_appium.py instead —
+# For iOS use templates/ios_wda.py or templates/ios_appium.py instead —
 # they cover real-device capabilities (udid / WDA reuse / signing) and, in the
 # Appium case, device screen recording.
 # from appium import webdriver
@@ -91,12 +91,13 @@ driver.quit()
 #     print(result.success, result.output)
 
 
-# --- Windows desktop via Airtest (pywinauto — scopes to ONE window) ----------
-# Prefer this over pyautogui on Windows when you must target a single window
-# (by HWND) instead of the whole screen. Needs qirabot[airtest].
-# from airtest.core.api import connect_device, G
+# --- Windows desktop via qirabot.Window (built in — scopes to ONE window) ----
+# Prefer this over pyautogui on Windows when you must target a single window:
+# screenshots/clicks are window-relative and keys are DirectInput scancodes
+# that games can read. Zero extra installs.
+# from qirabot import Window
 #
-# connect_device("Windows:///")          # or "Windows:///<hwnd>" for one window
-# with Qirabot(task_name="windows-bolt-on").bind(G) as bot:
+# window = Window(title_re="Notepad")    # or Window(hwnd=0x12345)
+# with Qirabot(task_name="windows-bolt-on").bind(window) as bot:
 #     result = bot.ai("Create a new note titled 'Groceries'")
 #     print(result.success, result.output)

@@ -87,14 +87,6 @@ def main() -> int:
     line(OK if py_ok else NO, f"Python {v.major}.{v.minor} (need >= 3.10)",
          "" if py_ok else "Install Python 3.10+.")
     hard_ok = hard_ok and py_ok
-    if target == "android" and not ((3, 10) <= (v.major, v.minor) <= (3, 12)):
-        line(WARN, "airtest extra prefers Python 3.10-3.12",
-             "numpy<2 wheels stop at 3.12; on 3.13+ pip builds numpy from source, "
-             "which needs a C toolchain.")
-    if (target == "desktop" and is_windows
-            and not ((3, 10) <= (v.major, v.minor) <= (3, 12))):
-        line(WARN, "airtest (window-scoped) desktop backend wants Python 3.10-3.12",
-             "pyautogui (whole-screen) is fine on any 3.10+; only the airtest path pins numpy<2.")
 
     # 2. API key (also accept it from ./.env, like the templates' load_dotenv())
     load_dotenv()
@@ -109,10 +101,10 @@ def main() -> int:
         import qirabot  # noqa: F401
         line(OK, f"qirabot importable (v{getattr(qirabot, '__version__', '?')})")
     except ImportError:
-        extra = {"browser": "browser", "android": "airtest",
-                 "ios": "appium", "desktop": "desktop"}[target]
+        extra = {"browser": "[browser]", "android": "",
+                 "ios": "", "desktop": "[desktop]"}[target]
         line(NO, "qirabot importable",
-             f"python -m pip install 'qirabot[{extra}]'  (prefer a venv: "
+             f"python -m pip install 'qirabot{extra}'  (prefer a venv: "
              "python -m venv .venv && source .venv/bin/activate)")
         hard_ok = False
 
@@ -153,11 +145,8 @@ def main() -> int:
         else:
             hard_ok = False
     elif target == "android":
-        # Import the API module (it pulls cv2/numpy) so a missing or ABI-broken
-        # airtest — e.g. numpy<2 / opencv wheels absent on Python >3.12 — fails
-        # here instead of mid-run.
-        if not check_import("airtest.core.api", "airtest", "airtest importable"):
-            hard_ok = False
+        # The direct adb backend is built into core qirabot (pure stdlib); the
+        # only thing that can be missing is the adb binary itself.
         adb = shutil.which("adb")
         line(OK if adb else NO, "adb on PATH",
              "" if adb else "Install Android platform-tools and connect a device/emulator.")
@@ -173,22 +162,17 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 line(WARN, "adb devices", str(exc))
     elif target == "ios":
-        # No bot.open() for iOS — you build an Appium or Airtest driver and
-        # bind() it. Verify at least one iOS-capable client imports; the Appium
-        # server / WebDriverAgent / device chain is external and can't be checked.
-        backends = []
-        for mod, name in (("appium", "appium"), ("airtest.core.api", "airtest")):
-            try:
-                importlib.import_module(mod)
-                backends.append(name)
-            except Exception:  # noqa: BLE001
-                pass
-        if backends:
-            line(OK, f"iOS client importable ({'/'.join(backends)})")
-        else:
-            line(NO, "iOS client importable",
-                 'install one: python -m pip install "qirabot[appium]"  (or "qirabot[airtest]")')
-            hard_ok = False
+        # The direct WDA client is built into core qirabot — nothing to
+        # install. Appium remains the alternative for simulators / auto WDA
+        # builds; the WDA / device chain itself is external and can't be
+        # checked from here.
+        line(OK, "iOS WDA client built in (qirabot.WdaClient)")
+        try:
+            importlib.import_module("appium")
+            line(OK, "appium client importable (optional, for simulators)")
+        except Exception:  # noqa: BLE001
+            line(WARN, "appium client not installed (optional)",
+                 'python -m pip install "qirabot[appium]"  (simulators / auto WDA build)')
         if shutil.which("appium"):
             line(OK, "appium server on PATH")
         else:
@@ -197,13 +181,10 @@ def main() -> int:
         line(WARN, "iOS device + WebDriverAgent",
              "Needs macOS + Xcode, a built/signed WebDriverAgent, and a trusted device or simulator.")
     elif target == "desktop":
-        # Desktop backends — "ready" if EITHER imports on this interpreter:
+        # Desktop backends:
         #   * pyautogui — any OS (Win/macOS/Linux), drives the whole primary screen
-        #   * airtest's pywinauto backend — Windows-only, scopes to one window.
-        # airtest itself also drives Android/iOS, but has NO macOS desktop backend,
-        # so on macOS pyautogui is the only path. Core qirabot pulls in neither
-        # (lazy adapters); import here so a missing one — or a headless-Linux
-        # "no display" — fails now, not mid-run.
+        #   * qirabot.Window — built in, Windows-only, scopes to one window with
+        #     game-readable scancode input (nothing to install).
         backends = []
         try:
             importlib.import_module("pyautogui")
@@ -211,20 +192,12 @@ def main() -> int:
         except Exception:  # noqa: BLE001
             pass
         if is_windows:
-            # airtest ships pywinauto only on win32; offer it as the window-scoped
-            # alternative when present.
-            try:
-                importlib.import_module("pywinauto")
-                backends.append("airtest/pywinauto (Windows, window-scoped)")
-            except Exception:  # noqa: BLE001
-                pass
+            backends.append("qirabot.Window (built in, window-scoped)")
         if backends:
             line(OK, f"desktop backend importable ({'; '.join(backends)})")
         else:
-            hint = 'python -m pip install "qirabot[desktop]"  (whole screen)'
-            if is_windows:
-                hint += '  — or "qirabot[airtest]" for window-scoped'
-            line(NO, "desktop backend importable", hint)
+            line(NO, "desktop backend importable",
+                 'python -m pip install "qirabot[desktop]"  (whole screen)')
             hard_ok = False
         line(WARN, "desktop runtime",
              "Ensure the target app is installed; on macOS grant Screen Recording + Accessibility.")

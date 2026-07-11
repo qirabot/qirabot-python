@@ -21,11 +21,11 @@ Common constructor options (all keyword):
 | `task_name` | `""` | shown in dashboard / report |
 | `report` | `True` | write HTML report on close |
 | `report_dir` / env `QIRA_REPORT_DIR` | `./qira_runs/<date>/<run>/` | output root |
-| `record` / env `QIRA_RECORD` | `False` | ffmpeg recording of the **host machine's screen** into `report_dir/recording.mp4`, auto-embedded in the report — NOT the device screen. For mobile use `record_device`/`record_mjpeg_url` below, or drop your own `recording.mp4` into `report_dir` before `close()` (Airtest: `device().start_recording(output=...)` / `stop_recording(output=...)`; Appium: `driver.start_recording_screen()` then b64-decode `driver.stop_recording_screen()` to that path; stop before `close()` — it scans for the file). |
-| `record_device` / env `QIRA_RECORD_DEVICE` | `False` | With `record=True`: record the automated **device's** screen instead of the host's, resolved from the first action's target — Appium driver → session recording API (auto-stopped before the report; if you `driver.quit()` yourself, call `bot.stop_recording()` first), airtest Android → `adb screenrecord`. Unsupported targets skip recording rather than capture the wrong (host) screen. |
+| `record` / env `QIRA_RECORD` | `False` | ffmpeg recording of the **host machine's screen** into `report_dir/recording.mp4`, auto-embedded in the report — NOT the device screen. For mobile use `record_device`/`record_mjpeg_url` below, or drop your own `recording.mp4` into `report_dir` before `close()` (Appium: `driver.start_recording_screen()` then b64-decode `driver.stop_recording_screen()` to that path; stop before `close()` — it scans for the file). |
+| `record_device` / env `QIRA_RECORD_DEVICE` | `False` | With `record=True`: record the automated **device's** screen instead of the host's, resolved from the first action's target — Appium driver → session recording API (auto-stopped before the report; if you `driver.quit()` yourself, call `bot.stop_recording()` first), `qirabot.AdbDevice` → `adb screenrecord`. Unsupported targets skip recording rather than capture the wrong (host) screen. |
 | `record_mjpeg_url` / env `QIRA_RECORD_MJPEG_URL` | `None` | With `record=True`: record this MJPEG-over-HTTP stream instead of the host screen — in practice WDA's iOS device stream on port 9100 (USB real device: `iproxy 9100 9100`). Needs ffmpeg. |
 | `record_fps` | `12` | recording frame rate (host-screen recorder) |
-| `record_window` / env `QIRA_RECORD_WINDOW` | `False` | **Windows + airtest only.** Record just the window under test (auto-resolved from the first action's target) instead of the full desktop; any other backend or resolution failure falls back to full screen. By default it crops a desktop grab to the window's visible rect, so **GPU/game windows record correctly** (keep the window visible/foreground — whatever overlaps the rect is captured). Set `QIRA_RECORD_WINDOW_NATIVE=1` to force legacy `gdigrab` per-window capture (can follow a background/occluded *non-GPU* window, but is black/frozen for minimized/GPU game windows). Manual override: `start_recording(window="Title")`. |
+| `record_window` / env `QIRA_RECORD_WINDOW` | `False` | **Windows window backend only.** Record just the window under test (auto-resolved from the first action's target) instead of the full desktop; any other backend or resolution failure falls back to full screen. By default it crops a desktop grab to the window's visible rect, so **GPU/game windows record correctly** (keep the window visible/foreground — whatever overlaps the rect is captured). Set `QIRA_RECORD_WINDOW_NATIVE=1` to force legacy `gdigrab` per-window capture (can follow a background/occluded *non-GPU* window, but is black/frozen for minimized/GPU game windows). Manual override: `start_recording(window="Title")`. |
 | `record_audio` / env `QIRA_RECORD_AUDIO` | `False` | **Windows only**, any backend. Capture **system audio** into the recording. ffmpeg has no native loopback, so needs a DirectShow source: install screen-capture-recorder (`virtual-audio-capturer`) or enable "Stereo Mix". Auto-detected; override with `record_audio="Device"` or `QIRA_AUDIO_DEVICE`. Missing device → silent + warning. |
 | `record_audio_offset` / env `QIRA_AUDIO_OFFSET` | `None` | A/V sync offset in seconds (usually negative, e.g. `-0.4`) applied to the audio input. |
 | `screenshot_annotate` | `True` | red crosshair at click/type point |
@@ -91,13 +91,13 @@ Every action's first argument is the framework object (`page`/`driver`/device).
 For a single stable target, `bind()` once:
 
 ```python
-bot = Qirabot().bind(driver)   # Selenium/Appium driver, pyautogui, Airtest G/device
+bot = Qirabot().bind(driver)   # Selenium/Appium driver, pyautogui, AdbDevice/WdaClient/Window
 bot.ai("complete the task")    # no target arg
 bot.click("Login")
 bot.current_page()             # reach the live page from a bound proxy
 ```
 
-Recommended for Airtest / pyautogui / Appium / Selenium. For **Playwright keep
+Recommended for adb/WDA/Window / pyautogui / Appium / Selenium. For **Playwright keep
 the explicit form** `page = bot.click(page, ...)` so new-tab follows stay visible.
 
 ## AI-located actions (one model call each)
@@ -106,11 +106,11 @@ the explicit form** `page = bot.click(page, ...)` so new-tab follows stay visibl
 bot.click(target, locate, *, modifier="", timeout=0.0, interval=2.0, wait="", model_alias="", language="")
 bot.type_text(target, locate, text, *, press_enter=False, clear_before_typing=False, timeout=0.0, ...)
 bot.double_click(target, locate, ...)
-bot.long_press(target, locate, *, duration=2.0, timeout=0.0, ...)  # Appium/Airtest mobile only
+bot.long_press(target, locate, *, duration=2.0, timeout=0.0, ...)  # mobile only
 ```
 
 - `locate` is a natural-language description ("the blue Submit button").
-- `modifier` (desktop only: pyautogui / Airtest Windows) holds modifier key(s)
+- `modifier` (desktop only: pyautogui / the Windows window backend) holds modifier key(s)
   around the click — `"alt"`, `"ctrl+shift"`, etc. (`alt|ctrl|shift|win`, join
   with `+`). Atomic alt+click for games, ctrl+click multi-select. Other
   backends degrade to a plain click.
@@ -202,15 +202,16 @@ intended pattern for any auth-gated automation.
   `usePrebuiltWDA` to skip xcodebuild on every run (see `templates/ios_appium.py`).
   On a real device WDA must be built/signed once (Xcode or `appium driver run
   xcuitest open-wda`); a simulator lets Appium build it automatically. To skip
-  the Appium server entirely and drive WDA over HTTP, use `templates/ios_airtest.py`
-  (airtest's facebook-wda backend) — same WDA, fewer moving parts.
-- Airtest = Android / iOS / Windows desktop — one framework spanning mobile and
+  the Appium server entirely and drive WDA over HTTP, use `templates/ios_wda.py`
+  (qirabot's built-in WDA client) — same WDA, fewer moving parts.
+- Built-in direct backends = Android (adb) / iOS (WDA) / Windows window — zero
+  extra installs, spanning mobile and
   desktop. Its **desktop** backend (pywinauto) is **Windows-only (no macOS)**;
   reports as `desktop`, scopes to one window by HWND (`connect_device("Windows:///<hwnd>")`).
 - pyautogui = desktop, **whole primary screen**, any OS (Win / macOS / Linux).
 
-For Windows pick by scope: pyautogui for the whole screen (simplest), Airtest
-when you must isolate a single window. (Airtest's key map is Android-first, so
+For Windows pick by scope: pyautogui for the whole screen (simplest),
+`qirabot.Window` when you must isolate a single window. (Note:
 `press_key` is less complete there than on pyautogui.)
 
 **Windows: run elevated to drive elevated targets.** If the target app/game runs
@@ -223,11 +224,11 @@ AI-located actions (`click`/`type_text`/`double_click`) and AI ops
 actions vary:
 
 - `navigate`/`close_tab`: browser only (`close_tab` = Playwright only).
-- `go_back`: Playwright/Selenium/Appium; Airtest = Android only; pyautogui = no.
-- `long_press`: Appium/Airtest mobile only.
+- `go_back`: Playwright/Selenium/Appium/adb; WDA = edge swipe; pyautogui/Window = no.
+- `long_press`: mobile only (Appium/adb/WDA).
 - `press_key` on iOS: key names are mapped to characters (`enter`/`return`→`\n`,
   `tab`→`\t`); arrows/esc/home have no iOS soft-keyboard equivalent.
-- `mouse_down`/`mouse_up`/`key_down`/`key_up`: desktop only (pyautogui + Airtest Windows); pair them — held input auto-released after `ai()`/`close()`. For a fixed-length hold prefer `press_key(target, key, duration_seconds=...)` (single blocking call, auto-release); keep `key_down`/`key_up` for holds that must span other actions. For a modifier+click prefer `click(target, locate, modifier="alt")` (atomic, millisecond-scale hold) over a `key_down`/`click`/`key_up` sequence — the sequence holds the modifier for seconds across decision steps, which flips UI state in many games.
+- `mouse_down`/`mouse_up`/`key_down`/`key_up`: desktop only (pyautogui + the Windows window backend); pair them — held input auto-released after `ai()`/`close()`. For a fixed-length hold prefer `press_key(target, key, duration_seconds=...)` (single blocking call, auto-release); keep `key_down`/`key_up` for holds that must span other actions. For a modifier+click prefer `click(target, locate, modifier="alt")` (atomic, millisecond-scale hold) over a `key_down`/`click`/`key_up` sequence — the sequence holds the modifier for seconds across decision steps, which flips UI state in many games.
 - `right_click`/`hover`: full on browser/desktop; mobile taps / no-ops.
 
 Unsupported actions raise `NotImplementedError`.

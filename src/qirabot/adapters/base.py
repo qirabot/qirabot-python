@@ -297,7 +297,7 @@ class DeviceAdapter(ABC):
         """Identify the window under test, for per-window screen recording.
 
         Returns ``{"title": str | None, "hwnd": int | None}`` for backends bound
-        to a concrete OS window (currently airtest on Windows), or ``None`` when
+        to a concrete OS window (currently the Windows window backend), or ``None`` when
         there is no single window to follow (browsers, touch devices, whole-
         desktop automation). The recorder degrades to full-screen on ``None``.
         """
