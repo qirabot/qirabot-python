@@ -115,7 +115,8 @@ def test_ios_without_bundle_id_sets_no_bundle(fake_appium, stub_bot):
 
 def test_android_app_launch_flags_are_passed_to_options(fake_appium, stub_bot):
     result = _invoke([
-        "android", "Open Display settings", "--engine", "appium",
+        "android", "Open Display settings",
+        "--appium-url", "http://localhost:4723",  # explicit flag selects Appium
         "--device", "emulator-5554",
         "--app-package", "com.android.settings",
         "--app-activity", ".Settings",
@@ -128,30 +129,122 @@ def test_android_app_launch_flags_are_passed_to_options(fake_appium, stub_bot):
     assert options.app_activity == ".Settings"
 
 
-class TestAirtestEngine:
-    """android/ios default to the direct engine (adb / WDA via airtest) — no
-    Appium server involved."""
+@pytest.fixture
+def fake_adb(monkeypatch):
+    """Script AdbDevice._run so the android command sees one ready emulator.
 
-    def test_android_defaults_to_airtest(self, fake_airtest, fake_appium, stub_bot):
+    Returns the recorded per-device arg lists (e.g. ["shell", "input tap ..."]).
+    """
+    import subprocess
+
+    from qirabot.adb import AdbDevice
+
+    calls = []
+
+    def fake_run(self, args, *, scoped=True, timeout=30.0, check=True):
+        calls.append(list(args))
+        if args == ["devices"]:
+            out = b"List of devices attached\nemulator-5554\tdevice\n"
+            return subprocess.CompletedProcess([], 0, out, b"")
+        return subprocess.CompletedProcess([], 0, b"", b"")
+
+    monkeypatch.setattr(AdbDevice, "_run", fake_run)
+    monkeypatch.setattr(AdbDevice, "adb_path", property(lambda self: "/fake/adb"))
+    return calls
+
+
+@pytest.fixture
+def run_local_spy(monkeypatch):
+    """stub_bot alternative that also captures the target handed to _run_local."""
+    from qirabot.cli import main
+
+    captured = {}
+    monkeypatch.setattr(main, "_make_bot", lambda *a, **k: MagicMock(name="bot"))
+
+    def spy(bot, target, *a, **k):
+        captured["target"] = target
+
+    monkeypatch.setattr(main, "_run_local", spy)
+    return captured
+
+
+class TestAndroidDirectEngine:
+    """android defaults to the built-in adb backend; an explicit --appium-url
+    switches to Appium. No --engine flag anymore."""
+
+    def test_defaults_to_adb_device_target(self, fake_adb, fake_appium, run_local_spy):
+        from qirabot.adb import AdbDevice
+
+        result = _invoke(["android", "Open settings"])
+        assert result.exit_code == 0, result.output
+
+        target = run_local_spy["target"]
+        assert isinstance(target, AdbDevice)
+        assert target.serial == "emulator-5554"  # auto-picked single device
+        fake_appium.assert_not_called()
+
+    def test_explicit_serial_is_used(self, fake_adb, run_local_spy):
+        result = _invoke(["android", "do it", "-d", "emulator-5554"])
+        assert result.exit_code == 0, result.output
+        assert run_local_spy["target"].serial == "emulator-5554"
+
+    def test_app_package_with_activity_uses_am_start(self, fake_adb, run_local_spy):
         result = _invoke([
-            "android", "Open Display settings",
-            "--device", "emulator-5554",
+            "android", "do it",
             "--app-package", "com.android.settings",
             "--app-activity", ".Settings",
         ])
         assert result.exit_code == 0, result.output
+        shells = [a[1] for a in fake_adb if a and a[0] == "shell"]
+        assert "am start -W -n com.android.settings/.Settings" in shells
 
-        fake_airtest.connect_device.assert_called_once_with("Android:///emulator-5554")
-        fake_airtest.start_app.assert_called_once_with("com.android.settings", ".Settings")
-        # The default engine must never touch the Appium server.
-        fake_appium.assert_not_called()
+    def test_app_package_without_activity_uses_monkey(self, fake_adb, run_local_spy):
+        result = _invoke(["android", "do it", "--app-package", "com.android.settings"])
+        assert result.exit_code == 0, result.output
+        shells = [a[1] for a in fake_adb if a and a[0] == "shell"]
+        assert (
+            "monkey -p com.android.settings -c android.intent.category.LAUNCHER 1"
+            in shells
+        )
 
-    def test_android_without_app_package_skips_launch(self, fake_airtest, stub_bot):
+    def test_no_devices_fails_setup_with_hint(self, monkeypatch):
+        import subprocess
+
+        from qirabot.adb import AdbDevice
+        from qirabot.cli import main
+
+        def no_devices(self, args, *, scoped=True, timeout=30.0, check=True):
+            return subprocess.CompletedProcess(
+                [], 0, b"List of devices attached\n", b""
+            )
+
+        monkeypatch.setattr(AdbDevice, "_run", no_devices)
+        monkeypatch.setattr(AdbDevice, "adb_path", property(lambda self: "/fake/adb"))
+        bot = MagicMock(name="bot")
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
+
         result = _invoke(["android", "do something"])
+
+        assert result.exit_code == 1
+        assert "adb devices" in result.output  # actionable hint
+        bot.fail.assert_called_once()
+        bot.close.assert_called_once()
+
+    def test_explicit_appium_url_selects_appium(self, fake_appium, stub_bot):
+        result = _invoke([
+            "android", "do it", "--appium-url", "http://localhost:4723",
+        ])
+        assert result.exit_code == 0, result.output
+        fake_appium.assert_called_once()
+
+    def test_record_flag_accepted(self, fake_adb, run_local_spy):
+        result = _invoke(["android", "do it", "--record"])
         assert result.exit_code == 0, result.output
 
-        fake_airtest.connect_device.assert_called_once_with("Android:///")
-        fake_airtest.start_app.assert_not_called()
+
+class TestAirtestEngine:
+    """ios defaults to the direct engine (WDA via airtest) — no Appium server
+    involved."""
 
     def test_ios_defaults_to_wda_direct(self, fake_airtest, fake_appium, stub_bot):
         result = _invoke(["ios", "Send hi to honey", "--bundle-id", "com.tencent.xin"])
@@ -220,41 +313,6 @@ class TestAirtestEngine:
         fake_airtest.wda.list_devices.assert_not_called()
         fake_airtest.connect_device.assert_not_called()
 
-    def test_connect_failure_reports_fail_with_hint(self, fake_airtest, monkeypatch):
-        from qirabot.cli import main
-
-        bot = MagicMock(name="bot")
-        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
-        fake_airtest.connect_device.side_effect = RuntimeError("adb: no devices/emulators found")
-
-        result = _invoke(["android", "do something"])
-
-        assert result.exit_code == 1
-        assert "adb devices" in result.output
-        assert "--engine appium" in result.output
-        bot.fail.assert_called_once()
-        bot.close.assert_called_once()
-
-    def test_missing_airtest_error_points_at_appium_engine(self, monkeypatch):
-        # Simulate airtest being absent (the dev env may have it installed):
-        # the default engine must fail with the install hint AND the --engine
-        # appium escape hatch. (MissingDependencyError is rendered one-line by
-        # main(), which CliRunner bypasses — so assert on the exception itself.)
-        from qirabot.cli import main
-        from qirabot.exceptions import MissingDependencyError
-
-        def missing(module, extra=None):
-            raise MissingDependencyError(
-                'Install it with:  python -m pip install "qirabot[airtest]"'
-            )
-
-        monkeypatch.setattr(main, "require", missing)
-
-        result = _invoke(["android", "do something"])
-
-        assert result.exit_code == 1
-        assert 'qirabot[airtest]' in str(result.exception)
-        assert "--engine appium" in str(result.exception)
 
 
 class TestDesktopAirtestEngine:
@@ -383,12 +441,6 @@ class TestEngineFlagValidation:
         assert result.exit_code != 0
         assert "--engine airtest" in result.output
 
-    def test_android_airtest_rejects_appium_url(self, fake_airtest, stub_bot):
-        result = _invoke(["android", "do it", "--appium-url", "http://x:4723"])
-
-        assert result.exit_code != 0
-        assert "--engine appium" in result.output
-
     def test_ios_airtest_rejects_appium_url(self, fake_airtest, stub_bot):
         result = _invoke(["ios", "do it", "--appium-url", "http://x:4723"])
 
@@ -479,7 +531,7 @@ class TestDeviceRecording:
         assert captured["make_bot"]["record"] is False
         assert captured["make_bot"]["record_mjpeg_url"] == ""
 
-    def test_android_record_uses_adb_screenrecord(self, fake_airtest, monkeypatch):
+    def test_android_record_uses_adb_screenrecord(self, fake_adb, monkeypatch):
         captured = self._capture(monkeypatch)
 
         result = _invoke(["android", "do it", "--record"])
@@ -493,7 +545,9 @@ class TestDeviceRecording:
     def test_android_appium_record_threads_device_recording(self, fake_appium, monkeypatch):
         captured = self._capture(monkeypatch)
 
-        result = _invoke(["android", "do it", "--engine", "appium", "--record"])
+        result = _invoke([
+            "android", "do it", "--appium-url", "http://localhost:4723", "--record",
+        ])
 
         assert result.exit_code == 0, result.output
         assert captured["make_bot"]["record"] is True
@@ -522,7 +576,9 @@ class TestDeviceRecording:
         monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
         monkeypatch.setattr(main, "_run_local", lambda *a, **k: None)
 
-        result = _invoke(["android", "do it", "--engine", "appium", "--record"])
+        result = _invoke([
+            "android", "do it", "--appium-url", "http://localhost:4723", "--record",
+        ])
 
         assert result.exit_code == 0, result.output
         assert order == ["stop_recording", "quit"]
@@ -633,15 +689,22 @@ class TestSetupFailureReporting:
         bot.fail.assert_called_once()
         bot.close.assert_called_once()
 
-    @pytest.mark.parametrize("command", ["android", "ios"])
-    def test_appium_remote_failure_reports_fail(self, fake_appium, monkeypatch, command):
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["android", "do something", "--appium-url", "http://localhost:4723"],
+            ["ios", "do something", "--engine", "appium"],
+        ],
+        ids=["android", "ios"],
+    )
+    def test_appium_remote_failure_reports_fail(self, fake_appium, monkeypatch, args):
         from qirabot.cli import main
 
         bot = MagicMock(name="bot")
         monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
         fake_appium.side_effect = RuntimeError("appium server unreachable")
 
-        result = _invoke([command, "do something", "--engine", "appium"])
+        result = _invoke(args)
 
         assert result.exit_code == 1
         bot.fail.assert_called_once()
@@ -659,7 +722,9 @@ class TestSetupFailureReporting:
         driver.quit.side_effect = RuntimeError("quit boom")
         fake_appium.return_value = driver
 
-        _invoke(["android", "do something", "--engine", "appium"])
+        _invoke([
+            "android", "do something", "--appium-url", "http://localhost:4723",
+        ])
 
         bot.fail.assert_not_called()
         bot.close.assert_called_once()
@@ -916,7 +981,8 @@ class TestDoctor:
     """doctor is pure wiring around probes — stub the probes, assert the verdict."""
 
     def _run(
-        self, monkeypatch, *, has=(), chromium=None, key=True, server_ok=True, display=True
+        self, monkeypatch, *, has=(), chromium=None, key=True, server_ok=True,
+        display=True, adb=False,
     ):
         """Invoke doctor with stubbed probes; returns the click result."""
         from qirabot.cli import main
@@ -924,6 +990,7 @@ class TestDoctor:
         monkeypatch.setattr(main, "_has_module", lambda m: m.split(".")[0] in has)
         monkeypatch.setattr(main, "_chromium_status", lambda: chromium)
         monkeypatch.setattr(main, "_display_available", lambda: display)
+        monkeypatch.setattr(main, "_adb_binary_found", lambda: adb)
         transport = MagicMock(name="transport")
         if not server_ok:
             transport.request.side_effect = RuntimeError("401 bad key")
@@ -1009,6 +1076,7 @@ class TestDoctor:
         monkeypatch.setattr(main, "_has_module", lambda m: False)
         monkeypatch.setattr(main, "_chromium_status", lambda: None)
         monkeypatch.setattr(main, "_display_available", lambda: True)
+        monkeypatch.setattr(main, "_adb_binary_found", lambda: False)
         transport_cls = MagicMock(name="Transport")
         monkeypatch.setattr(main, "Transport", transport_cls)
 
@@ -1030,8 +1098,15 @@ class TestDoctor:
 
     def test_other_backend_alone_is_ready(self, monkeypatch):
         """The default path (browser) is a recommendation, not a requirement —
-        an Airtest-only environment is a valid, ready setup."""
-        result = self._run(monkeypatch, has={"airtest"}, chromium=None)
+        an adb-only environment is a valid, ready setup."""
+        result = self._run(monkeypatch, chromium=None, adb=True)
 
         assert result.exit_code == 0, result.output
         assert "Ready" in self._flat(result)
+
+    def test_missing_adb_binary_prints_platform_tools_hint(self, monkeypatch):
+        result = self._run(monkeypatch, has={"playwright"}, chromium="ready", adb=False)
+
+        out = self._flat(result)
+        assert result.exit_code == 0, result.output  # browser still ready
+        assert "platform-tools" in out

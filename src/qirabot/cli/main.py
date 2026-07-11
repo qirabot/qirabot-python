@@ -349,6 +349,14 @@ def _has_module(module: str) -> bool:
         return False
 
 
+def _adb_binary_found() -> bool:
+    """Probe the adb binary (doctor only) — the android backend is pure stdlib,
+    so the binary, not a Python module, is the thing that can be missing."""
+    from qirabot.adb import _which_adb
+
+    return _which_adb() is not None
+
+
 def _display_available() -> bool:
     """False only on Linux with no display server — headed launches would fail
     there, and Qirabot.open() falls back to headless with a warning."""
@@ -468,9 +476,10 @@ def doctor(ctx: click.Context) -> None:
             'python -m pip install "qirabot[desktop]"',
         ),
         (
-            "android/ios/windows-desktop direct (Airtest)",
-            _has_module("airtest"),
-            'python -m pip install "qirabot[airtest]"  (Python 3.10–3.12 recommended)',
+            "android direct (adb — built in, needs the adb binary)",
+            _adb_binary_found(),
+            "install Android platform-tools and put adb on PATH "
+            "(https://developer.android.com/tools/releases/platform-tools)",
         ),
         (
             "android/ios via server (Appium)",
@@ -657,7 +666,7 @@ def _run_appium(
         bot.close()
 
 
-def _run_airtest(
+def _run_direct(
     ctx: click.Context,
     instruction: str,
     name: str,
@@ -672,14 +681,14 @@ def _run_airtest(
     record_mjpeg_url: str = "",
     record_device: bool = False,
 ) -> None:
-    """Shared android/ios airtest body: build the bot, connect the device, run.
+    """Shared direct-engine body: build the bot, connect the device, run.
 
-    ``connect`` performs the airtest connect + optional app launch and returns
-    the bind target. Like _run_appium, the bot is built first (it validates the
-    API key and may sys.exit()); unlike Appium there is no remote session to
-    quit, so the only teardown is bot.close(). Recording is device-side:
-    ``record_mjpeg_url`` for ios (WDA's MJPEG stream), ``record_device`` for
-    android (adb screenrecord, resolved from the airtest device).
+    ``connect`` resolves the device + optional app launch and returns the bind
+    target. Like _run_appium, the bot is built first (it validates the API key
+    and may sys.exit()); there is no remote session to quit, so the only
+    teardown is bot.close(). Recording is device-side: ``record_mjpeg_url``
+    for ios (WDA's MJPEG stream), ``record_device`` for android (adb
+    screenrecord, resolved from the AdbDevice target).
     """
     bot = _make_bot(
         ctx, model=model, language=language, report=report, report_dir=report_dir,
@@ -700,38 +709,59 @@ def _run_airtest(
         bot.close()
 
 
+def _adb_launch_app(dev: Any, package: str, activity: str) -> None:
+    """Launch an app over adb: explicit activity via ``am start -W``, else the
+    LAUNCHER intent via monkey (no need to know the activity name)."""
+    if activity:
+        component = f"{package}/{activity}"
+        out = dev.shell(f"am start -W -n {component}")
+        if "Error" in out or "does not exist" in out:
+            raise RuntimeError(
+                f"could not launch {component}: {out.strip().splitlines()[-1]}"
+            )
+    else:
+        out = dev.shell(
+            f"monkey -p {package} -c android.intent.category.LAUNCHER 1"
+        )
+        if "No activities found" in out or "aborted" in out.lower():
+            raise RuntimeError(
+                f"could not launch {package}: no LAUNCHER activity found "
+                "(is the package name right? try --app-activity)"
+            )
+
+
 @cli.command()
 @click.argument("instruction")
 @_task_options
-@click.option("--engine", default="airtest", type=click.Choice(["airtest", "appium"]), help="Automation backend: airtest drives the device directly over adb (no server); appium goes through an Appium server at --appium-url")
-@click.option("--device", "-d", default="", help="Which device: an adb serial from `adb devices` (e.g. emulator-5554 or 192.168.1.8:5555). Optional when exactly one device is connected. Appium engine: passed as deviceName.")
-@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL (appium engine)")
+@click.option("--device", "-d", default="", help="Which device: an adb serial from `adb devices` (e.g. emulator-5554 or 192.168.1.8:5555). Optional when exactly one device is connected. With --appium-url: passed as deviceName.")
+@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL — passing this flag switches the run to the Appium engine", show_default="direct adb, no server")
 # Android — app launch
 @click.option("--app-package", default="", help="App package to launch (e.g. com.android.settings)")
 @click.option("--app-activity", default="", help="App activity to launch")
 # Android — device-screen recording: adb screenrecord (direct engine) or
 # Appium's recording API — both capture the phone screen, not the host's.
-@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (direct engine: adb screenrecord, ffmpeg merges runs over 3 min; appium engine: Appium's recording API)")
+@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (direct engine: adb screenrecord, ffmpeg merges runs over 3 min; Appium engine: Appium's recording API)")
 @_debug_options(record=False)
 @click.pass_context
-def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, engine: str, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, report: bool, report_dir: str, annotate: bool) -> None:
-    """Run an AI task on an Android device (direct over adb; --engine appium for Appium).
+def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, report: bool, report_dir: str, annotate: bool) -> None:
+    """Run an AI task on an Android device (direct over adb; --appium-url for Appium).
 
     \b
-    Default engine — drives the device straight over adb, no server needed:
+    Default — drives the device straight over adb. Zero Python dependencies;
+    the only requirement is an adb binary (platform-tools) on PATH:
       qirabot android "Open settings"                    # the only adb device
       qirabot android "..." -d emulator-5554             # pick one of several
       qirabot android "..." -d 192.168.1.8:5555          # network device (adb connect)
       qirabot android "..." --app-package com.android.settings --app-activity .Settings
     \b
-    Appium engine — needs a running server (npm i -g appium && appium driver
-    install uiautomator2 && appium), reached via --appium-url:
-      qirabot android "..." --engine appium -d emulator-5554 --app-package com.android.settings
+    Appium — passing --appium-url selects the Appium engine; needs a running
+    server (npm i -g appium && appium driver install uiautomator2 && appium):
+      qirabot android "..." --appium-url http://localhost:4723 -d emulator-5554
     \b
     Recording — --record saves the device screen (works on both engines):
       qirabot android "..." --record
     """
-    if engine == "appium":
+    if _flag_given(ctx, "appium_url"):
         require("appium.webdriver", "appium")
         from appium.options.android import UiAutomator2Options
 
@@ -749,24 +779,19 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
         )
         return
 
-    if _flag_given(ctx, "appium_url"):
-        raise click.UsageError("--appium-url only applies to --engine appium")
-    _require_airtest()
-    from airtest.core.api import connect_device, start_app
+    from qirabot.adb import AdbDevice
+
+    dev = AdbDevice(serial=device or None)
 
     def connect() -> Any:
-        try:
-            target = connect_device(f"Android:///{device}")
-        except Exception as e:
-            raise RuntimeError(
-                f"could not connect to an adb device ({e}); check `adb devices`, "
-                "or use --engine appium"
-            ) from e
+        # Resolve the serial now so 0/many/unauthorized/offline devices fail
+        # with their actionable errors inside _fail_setup's reporting.
+        dev.serial  # noqa: B018 — resolution side effect
         if app_package:
-            start_app(app_package, app_activity or None)
-        return target
+            _adb_launch_app(dev, app_package, app_activity)
+        return dev
 
-    _run_airtest(
+    _run_direct(
         ctx, instruction, name, model, language, max_steps, connect,
         report, report_dir, annotate,
         record=record, record_device=record,
@@ -928,7 +953,7 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
             target.driver.app_launch(bundle_id)
         return target
 
-    _run_airtest(
+    _run_direct(
         ctx, instruction, name, model, language, max_steps, connect,
         report, report_dir, annotate,
         record=record, record_mjpeg_url=record_mjpeg_url,
@@ -1021,7 +1046,7 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
                 pass
             return target
 
-        _run_airtest(
+        _run_direct(
             ctx, instruction, name, model, language, max_steps, connect,
             report, report_dir, annotate, record=record,
         )
