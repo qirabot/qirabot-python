@@ -16,10 +16,10 @@ touches your system Python), and Chromium. No pre-installed Python required:
 
 ```bash
 # macOS / Linux
-curl -LsSf https://raw.githubusercontent.com/qirabot/qirabot-python/main/scripts/install.sh | sh
+curl -LsSf https://qirabot.com/install | sh
 
 # Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/qirabot/qirabot-python/main/scripts/install.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm https://qirabot.com/install.ps1 | iex"
 ```
 
 Already have uv? The same result by hand:
@@ -71,6 +71,8 @@ here pins numpy/opencv.
 
 **Troubleshooting**
 
+- The one-line installer is also served directly from this repo:
+  `curl -LsSf https://raw.githubusercontent.com/qirabot/qirabot-python/main/scripts/install.sh | sh`
 - `error: externally-managed-environment` — you're installing into the system
   Python (PEP 668); use the uv path above, or create/activate a virtualenv.
 - Fresh **Linux** box: run `sudo playwright install-deps chromium` once — the

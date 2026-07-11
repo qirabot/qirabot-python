@@ -1,6 +1,6 @@
 # qirabot one-line installer (Windows PowerShell).
 #
-#   powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/qirabot/qirabot-python/main/scripts/install.ps1 | iex"
+#   powershell -ExecutionPolicy ByPass -c "irm https://qirabot.com/install.ps1 | iex"
 #
 # What it does — and nothing else:
 #   1. Installs uv (https://docs.astral.sh/uv/) if missing. uv downloads a

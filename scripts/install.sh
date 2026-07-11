@@ -1,7 +1,7 @@
 #!/bin/sh
 # qirabot one-line installer (macOS / Linux).
 #
-#   curl -LsSf https://raw.githubusercontent.com/qirabot/qirabot-python/main/scripts/install.sh | sh
+#   curl -LsSf https://qirabot.com/install | sh
 #
 # What it does — and nothing else:
 #   1. Installs uv (https://docs.astral.sh/uv/) if missing. uv downloads a
