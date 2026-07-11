@@ -46,7 +46,12 @@ appium = ["Appium-Python-Client>=4.0"]
 # NOTE: Airtest pins numpy<2.0 and opencv-contrib-python 4.4-4.6; installing
 # this extra into an env that already has numpy>=2 may downgrade or conflict.
 # Prefer a dedicated virtualenv. We don't re-pin those here — Airtest declares them.
-airtest = ["airtest>=1.3.0"]
+# facebook-wda 1.5.4 removed USBClient's wda_bundle_id parameter, which every
+# Airtest release still passes (core/ios/ios.py). Airtest <1.4 only requires
+# facebook-wda>=1.3.3, so on non-Windows (where resolvers fall back to Airtest
+# 1.3.x because 1.4.x needs pywin32 unconditionally) the broken combo resolves
+# by default and iOS connect dies with a TypeError. Cap it until Airtest adapts.
+airtest = ["airtest>=1.3.0", "facebook-wda<1.5.4"]
 agent = ["uvicorn>=0.30", "starlette>=0.37"]
 cli = []  # CLI now ships in the core package; kept as a no-op for backward compatibility
 all = ["qirabot[browser,desktop,appium,airtest]"]
