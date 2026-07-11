@@ -1,5 +1,14 @@
 # Qirabot Python SDK
 
+> **⚠️ 1.x maintenance branch.** This branch carries the qirabot **1.x** series
+> in maintenance mode: bug and security fixes only (released as 1.9.x
+> patches), no new features. To stay on 1.x, pin `pip install "qirabot<2"`.
+> Active development — including the built-in zero-dependency Android / iOS /
+> Windows-window backends that replaced airtest — happens on
+> [`main` (2.x)](https://github.com/qirabot/qirabot-python/tree/main); see its
+> [2.0 migration guide](https://github.com/qirabot/qirabot-python/tree/main#migrating-from-1x-airtest-to-20)
+> when you're ready to upgrade.
+
 Cross-platform GUI automation, driven by multimodal AI vision. Drive browsers, mobile apps, full desktops, and games through pixels — no DOM, no selectors — reaching what frameworks like Playwright, Selenium, and Appium cannot.
 
 Run it standalone (`bot.open()` launches a browser for you), bolt it onto your existing Playwright / Selenium / Appium / Airtest / pyautogui session, drop it into a pytest suite, or bind by HWND to drive a Unity / Unreal / native desktop game. Same API across all of them.

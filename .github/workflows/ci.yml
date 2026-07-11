@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 1.x]
   pull_request:
-    branches: [main]
+    branches: [main, 1.x]
   # Reusable: the publish workflow runs this same lint+test suite as its
   # release gate, so the two can't drift apart.
   workflow_call:
