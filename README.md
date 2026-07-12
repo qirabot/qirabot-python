@@ -331,7 +331,7 @@ bot.close()
 ```
 
 Record the **device** screen (adb screenrecord) into the report with
-`Qirabot(record=True, record_device=True)` — see
+`Qirabot(record_device=True)` — see
 [Screen recording](#screen-recording). Full example:
 [examples/adb/quickstart.py](examples/adb/quickstart.py).
 
@@ -851,13 +851,13 @@ screen instead (both used by the CLI's `android`/`ios --record`):
 
 ```python
 # Android (or any Appium driver): the recorder is picked from the action target.
-bot = Qirabot(record=True, record_device=True)   # or QIRA_RECORD_DEVICE=1
+bot = Qirabot(record_device=True)   # or QIRA_RECORD_DEVICE=1
 bot.ai(dev, "open settings")   # AdbDevice -> adb screenrecord
 bot.close()                    # pulls the video into report_dir/recording.mp4
 
 # iOS via WDA (no Appium): record WDA's MJPEG stream (port 9100; USB real
 # device: `iproxy 9100 9100`). Needs ffmpeg on the host.
-bot = Qirabot(record=True, record_mjpeg_url="http://127.0.0.1:9100")
+bot = Qirabot(record_mjpeg_url="http://127.0.0.1:9100")
 ```
 
 - `record_device=True` defers the start until the first action, then resolves a
@@ -965,8 +965,8 @@ Constructor options:
 | `record_window` | `QIRA_RECORD_WINDOW` | `False` | **Windows window backend only.** Record just the window under test (auto-resolved from the first action) instead of the full screen; falls back to full screen otherwise |
 | `record_audio` | `QIRA_RECORD_AUDIO` | `False` | **Windows only.** Capture system audio into the recording. `True` auto-detects a loopback device, or pass a DirectShow device name |
 | `record_audio_offset` | `QIRA_AUDIO_OFFSET` | `None` | A/V sync offset in seconds (usually negative, e.g. `-0.4`) applied to the audio input |
-| `record_device` | `QIRA_RECORD_DEVICE` | `False` | Record the automated **device's** screen instead of the host's: Appium driver → session recording API, AdbDevice → `adb screenrecord` (resolved from the first action's target) |
-| `record_mjpeg_url` | `QIRA_RECORD_MJPEG_URL` | `None` | Record this MJPEG-over-HTTP stream instead of the host screen (e.g. WDA's iOS device stream on port 9100); needs ffmpeg |
+| `record_device` | `QIRA_RECORD_DEVICE` | `False` | Record the automated **device's** screen instead of the host's: Appium driver → session recording API, AdbDevice → `adb screenrecord` (resolved from the first action's target). Implies `record` |
+| `record_mjpeg_url` | `QIRA_RECORD_MJPEG_URL` | `None` | Record this MJPEG-over-HTTP stream instead of the host screen (e.g. WDA's iOS device stream on port 9100); needs ffmpeg. Implies `record` |
 | `screenshot_annotate` | — | `True` | Draw a red crosshair at click/type coordinates |
 | `screenshot_format` | — | `"jpeg"` | Saved screenshot format (`"jpeg"` or `"png"`) |
 | `screenshot_quality` | — | `80` | JPEG quality, 1–100 |
