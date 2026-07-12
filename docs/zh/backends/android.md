@@ -1,0 +1,88 @@
+---
+title: Android 免 Appium 自动化——adb 直连
+description: 用 AI 视觉自动化 Android 真机和模拟器,无需 Appium 服务器、设备端零安装。基于纯 adb 的 Python SDK 与 CLI,支持中文/emoji 输入与设备录屏。
+---
+
+# Android —— adb 直连
+
+Qirabot 内置的 Android 后端**不需要 Appium 服务器、不需要框架、设备端
+零安装**:它直接调用 adb(截图走 `screencap`,输入走
+`input tap/swipe/keyevent`)。`adb devices` 能看到的设备——真机或模拟器
+——都能驱动。
+
+元素定位是对截图做 AI 视觉识别,所以没有 UiAutomator 选择器,也不依赖
+无障碍树:原生 App、WebView、Flutter、React Native、游戏,在它眼里都
+一样。
+
+```python
+from qirabot import AdbDevice, Qirabot
+
+device = AdbDevice()                 # 或 AdbDevice(serial="emulator-5554")
+bot = Qirabot().bind(device)
+
+bot.click("登录按钮")                # AI 定位——不需要模板图片
+result = bot.ai("打开设置并开启深色模式")
+print(f"Success: {result.success}")
+bot.close()
+```
+
+核心包即可,无需 extras:
+
+```bash
+uv tool install qirabot
+qirabot android "打开设置并开启飞行模式"
+qirabot android "..." -d emulator-5554 --app-package com.android.settings
+```
+
+## 非 ASCII 输入(中文、emoji)
+
+超出 ASCII 的输入通过内置的 ADBKeyboard 输入法完成——按需安装、用完自动
+切回。`bot.type_text(...)` 输入中文或 emoji 开箱即用。
+
+## 设备录屏
+
+把**设备**屏幕(而不是宿主机)录进运行报告:
+
+```python
+bot = Qirabot(record_device=True)   # 或 QIRA_RECORD_DEVICE=1
+bot.ai(device, "打开设置")
+bot.close()                         # 视频自动拉取到 report_dir/recording.mp4
+```
+
+底层是 `adb screenrecord`;超过其 3 分钟上限的运行会用 ffmpeg 合并分段。
+CLI 写法:`qirabot android "..." --record`。
+
+## 改走 Appium
+
+已有 Appium 环境或云真机平台?同一套 API 也能驱动 Appium driver——安装
+`qirabot[appium]` 后传入 driver:
+
+```python
+from appium import webdriver
+from appium.options.android import UiAutomator2Options
+from qirabot import Qirabot
+
+options = UiAutomator2Options()
+options.platform_name = "Android"
+options.device_name = "emulator-5554"
+driver = webdriver.Remote("http://localhost:4723", options=options)
+bot = Qirabot().bind(driver)
+
+result = bot.ai("打开显示设置,把字体大小改为最大")
+bot.close()
+driver.quit()
+```
+
+CLI 传 `--appium-url` 即选择 Appium 引擎:
+`qirabot android "..." --appium-url http://localhost:4723`。
+
+## 平台说明
+
+- `press_key("Back")` / `"Home"` / `"Menu"` 映射为 adb keyevent;
+  `go_back` 发送 `keyevent BACK`。
+- `long_press` 可用(触屏平台);`hover` 为空操作,`right_click` 降级为
+  点按。
+- 纯 adb 下 `clear_text` 是尽力而为(光标移到末尾 + 连续删除)——刻意不做
+  元素模型。
+- 从 Airtest 1.x 迁移?`connect_device("Android:///emu-5554")` 改为
+  `AdbDevice("emu-5554")`,其余 `bind()` 代码不变。

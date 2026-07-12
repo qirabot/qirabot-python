@@ -1,0 +1,81 @@
+---
+title: 自定义 Adapter 与框架挂载
+description: 把 Qirabot 挂载到任意自动化栈——Playwright、Selenium、Appium、pyautogui;或用 7 个原语实现 DeviceAdapter,驱动云真机平台和自定义引擎。含 Airtest 迁移指南。
+---
+
+# 自定义 Adapter 与挂载
+
+Qirabot 的设计是**加入你已有的技术栈**,而不是替换它。每个动作的第一个
+参数就是框架对象(`page` / `driver` / 设备 / 模块)——传你的进来,AI 步骤
+和现有代码自由混合:
+
+| 你在用 | 传入 | 说明 |
+|---|---|---|
+| Playwright | `page` | 保持显式写法——点击可能返回新标签页 |
+| Selenium | `driver` | `pip install qirabot selenium` |
+| Appium | `driver` | `qirabot[appium]`;Android 和 iOS |
+| pyautogui | `pyautogui` 模块 | `qirabot[desktop]` |
+| 内置设备 | `AdbDevice` / `WdaClient` / `Window` | 无需 extras |
+
+## bind() —— 省去重复的第一个参数
+
+整个会话只驱动一个稳定目标时,`bind()` 一次即可:
+
+```python
+bot = Qirabot().bind(driver)     # Selenium/Appium driver、pyautogui、AdbDevice/WdaClient/Window
+bot.click("登录")
+bot.type_text("邮箱", "a@b.com")
+
+with Qirabot().bind(driver) as bot:   # 也可作为上下文管理器
+    ...
+```
+
+`bind()` 推荐用于设备后端、pyautogui、Appium、Selenium。Playwright 请保持
+`page = bot.click(page, ...)` 的显式写法,让新标签页切换可见;用了绑定
+代理时,当前活动页面可通过 `bot.current_page()` 获取。
+
+## 编写自定义 Adapter
+
+qirabot 没有内置的后端——云真机 SDK、自定义引擎桥、VNC 会话——都可以通过
+继承 `qirabot.DeviceAdapter` 接入。必需的原语只有:
+
+```
+screenshot · click · double_click · type_text · press_key · scroll · device_info
+```
+
+然后要么直接把实例传给 `bind()`:
+
+```python
+bot = Qirabot().bind(MyAdapter(handle))
+```
+
+要么实现 `accepts()` 并注册一次,让 `bind()` 认识你框架的原生对象:
+
+```python
+from qirabot import register_adapter
+
+register_adapter(MyAdapter)          # 优先于内置 adapter 检查
+bot = Qirabot().bind(native_object)
+```
+
+[examples/airtest/adapter.py](https://github.com/qirabot/qirabot-python/blob/main/examples/airtest/adapter.py)
+是一份完整的参考实现。
+
+## 从 Airtest 迁移(qirabot 1.x)
+
+qirabot 2.0 移除了 airtest 集成——连同与现代环境冲突的 `numpy<2` /
+`opencv-contrib` 版本锁。内置后端即插即用:
+
+```python
+# 1.x                                          # 2.0
+connect_device("Android:///emu-5554")          AdbDevice("emu-5554")
+connect_device("iOS:///http://...:8100")       WdaClient("http://...:8100")
+connect_device("Windows:///132456")            Window(hwnd=132456)
+```
+
+想保留 airtest 脚本?把上面的参考 adapter 复制进你的项目(airtest 是
+*你的*依赖,不再是 qirabot 的),`register_adapter` 注册一次,1.x 的
+`bind(connect_device(...))` 调用原样运行。1.x 系列在
+[`1.x` 分支](https://github.com/qirabot/qirabot-python/tree/1.x)维护
+(只修 bug 和安全问题);`pip install "qirabot<2"` 始终解析到最新的
+1.9.x 补丁版。

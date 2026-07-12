@@ -6,6 +6,90 @@ import { defineConfig } from 'vitepress'
 // URLs keep the .html suffix (cleanUrls: false, the default) because the S3
 // REST origin serves exact keys; directory URLs (/docs/, /docs/guide/) are
 // rewritten to index.html by the qirabot-website-dir-index CloudFront function.
+//
+// i18n: English is the root locale (/docs/...), Chinese lives under /docs/zh/.
+// Every page must exist in both trees — add new pages to BOTH sidebars below.
+
+const enSidebar = [
+  {
+    text: 'Getting Started',
+    items: [
+      { text: 'Installation', link: '/guide/installation' },
+      { text: 'Quick Start', link: '/guide/quickstart' },
+      { text: 'CLI Reference', link: '/guide/cli' },
+    ],
+  },
+  {
+    text: 'Platform Backends',
+    items: [
+      { text: 'Browser (Playwright)', link: '/backends/browser' },
+      { text: 'Android — direct over adb', link: '/backends/android' },
+      { text: 'iOS — WDA, no Appium', link: '/backends/ios' },
+      { text: 'Windows & Games', link: '/backends/windows-games' },
+      { text: 'Desktop (pyautogui)', link: '/backends/desktop' },
+      { text: 'Custom Adapters', link: '/backends/custom-adapters' },
+    ],
+  },
+  {
+    text: 'Bolt onto Your Framework',
+    items: [
+      { text: 'Playwright', link: '/frameworks/playwright' },
+      { text: 'Selenium', link: '/frameworks/selenium' },
+      { text: 'Appium', link: '/frameworks/appium' },
+      { text: 'pytest', link: '/frameworks/pytest' },
+    ],
+  },
+  {
+    text: 'Advanced',
+    items: [
+      { text: 'AI Tasks & Custom Tools', link: '/advanced/ai-tasks' },
+      { text: 'Reports & Recording', link: '/advanced/reports' },
+      { text: 'Configuration', link: '/advanced/configuration' },
+      { text: 'Error Handling', link: '/advanced/error-handling' },
+    ],
+  },
+]
+
+const zhSidebar = [
+  {
+    text: '快速上手',
+    items: [
+      { text: '安装', link: '/zh/guide/installation' },
+      { text: '快速开始', link: '/zh/guide/quickstart' },
+      { text: 'CLI 参考', link: '/zh/guide/cli' },
+    ],
+  },
+  {
+    text: '平台后端',
+    items: [
+      { text: '浏览器（Playwright）', link: '/zh/backends/browser' },
+      { text: 'Android — adb 直连', link: '/zh/backends/android' },
+      { text: 'iOS — WDA 直连，免 Appium', link: '/zh/backends/ios' },
+      { text: 'Windows 窗口与游戏', link: '/zh/backends/windows-games' },
+      { text: '桌面（pyautogui）', link: '/zh/backends/desktop' },
+      { text: '自定义 Adapter', link: '/zh/backends/custom-adapters' },
+    ],
+  },
+  {
+    text: '挂载现有框架',
+    items: [
+      { text: 'Playwright', link: '/zh/frameworks/playwright' },
+      { text: 'Selenium', link: '/zh/frameworks/selenium' },
+      { text: 'Appium', link: '/zh/frameworks/appium' },
+      { text: 'pytest', link: '/zh/frameworks/pytest' },
+    ],
+  },
+  {
+    text: '进阶',
+    items: [
+      { text: 'AI 任务与自定义工具', link: '/zh/advanced/ai-tasks' },
+      { text: '报告与录屏', link: '/zh/advanced/reports' },
+      { text: '配置', link: '/zh/advanced/configuration' },
+      { text: '错误处理', link: '/zh/advanced/error-handling' },
+    ],
+  },
+]
+
 export default defineConfig({
   base: '/docs/',
   title: 'Qirabot Docs',
@@ -25,43 +109,78 @@ export default defineConfig({
   sitemap: {
     hostname: 'https://qirabot.com/docs/',
   },
-  themeConfig: {
-    nav: [
-      { text: 'Guide', link: '/guide/quickstart' },
-      { text: 'Backends', link: '/backends/browser' },
-      { text: 'Dashboard', link: 'https://app.qirabot.com' },
-      { text: 'qirabot.com', link: 'https://qirabot.com' },
-    ],
-    sidebar: [
-      {
-        text: 'Getting Started',
-        items: [
-          { text: 'Installation', link: '/guide/installation' },
-          { text: 'Quick Start', link: '/guide/quickstart' },
-          { text: 'CLI Reference', link: '/guide/cli' },
+  locales: {
+    root: {
+      label: 'English',
+      lang: 'en',
+      themeConfig: {
+        nav: [
+          { text: 'Guide', link: '/guide/quickstart' },
+          { text: 'Backends', link: '/backends/browser' },
+          { text: 'Dashboard', link: 'https://app.qirabot.com' },
+          { text: 'qirabot.com', link: 'https://qirabot.com' },
         ],
+        sidebar: enSidebar,
+        editLink: {
+          pattern: 'https://github.com/qirabot/qirabot-python/edit/main/docs/:path',
+          text: 'Edit this page on GitHub',
+        },
+        footer: {
+          message: 'Released under the MIT License.',
+          copyright: '© Qirabot Platform',
+        },
       },
-      {
-        text: 'Platform Backends',
-        items: [
-          { text: 'Browser (Playwright)', link: '/backends/browser' },
-          { text: 'Android — direct over adb', link: '/backends/android' },
-          { text: 'iOS — WDA, no Appium', link: '/backends/ios' },
-          { text: 'Windows & Games', link: '/backends/windows-games' },
-          { text: 'Desktop (pyautogui)', link: '/backends/desktop' },
-          { text: 'Custom Adapters', link: '/backends/custom-adapters' },
-        ],
-      },
-    ],
-    socialLinks: [{ icon: 'github', link: 'https://github.com/qirabot/qirabot-python' }],
-    editLink: {
-      pattern: 'https://github.com/qirabot/qirabot-python/edit/main/docs/:path',
-      text: 'Edit this page on GitHub',
     },
-    search: { provider: 'local' },
-    footer: {
-      message: 'Released under the MIT License.',
-      copyright: '© Qirabot Platform',
+    zh: {
+      label: '简体中文',
+      lang: 'zh-CN',
+      title: 'Qirabot 文档',
+      description:
+        'AI 视觉驱动的跨端 GUI 自动化——浏览器、Android、iOS、桌面与游戏。无需 DOM、无需选择器。Python SDK 与 CLI。',
+      themeConfig: {
+        nav: [
+          { text: '指南', link: '/zh/guide/quickstart' },
+          { text: '平台后端', link: '/zh/backends/browser' },
+          { text: '控制台', link: 'https://app.qirabot.com' },
+          { text: 'qirabot.com', link: 'https://qirabot.com' },
+        ],
+        sidebar: zhSidebar,
+        editLink: {
+          pattern: 'https://github.com/qirabot/qirabot-python/edit/main/docs/:path',
+          text: '在 GitHub 上编辑此页',
+        },
+        footer: {
+          message: '基于 MIT 许可证发布。',
+          copyright: '© Qirabot Platform',
+        },
+        outline: { label: '本页目录' },
+        docFooter: { prev: '上一页', next: '下一页' },
+        darkModeSwitchLabel: '外观',
+        sidebarMenuLabel: '菜单',
+        returnToTopLabel: '返回顶部',
+        langMenuLabel: '切换语言',
+        lastUpdated: { text: '最后更新' },
+      },
+    },
+  },
+  themeConfig: {
+    socialLinks: [{ icon: 'github', link: 'https://github.com/qirabot/qirabot-python' }],
+    search: {
+      provider: 'local',
+      options: {
+        locales: {
+          zh: {
+            translations: {
+              button: { buttonText: '搜索文档', buttonAriaLabel: '搜索文档' },
+              modal: {
+                noResultsText: '没有找到结果',
+                resetButtonTitle: '清除搜索条件',
+                footer: { selectText: '选择', navigateText: '切换', closeText: '关闭' },
+              },
+            },
+          },
+        },
+      },
     },
   },
 })
