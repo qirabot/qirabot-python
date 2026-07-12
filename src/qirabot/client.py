@@ -415,7 +415,9 @@ class Qirabot:
         # True while a recording is still owed: claimed (set False) right before a
         # recorder starts, which also guards against re-entrancy through
         # _get_adapter when window-following resolves the target.
-        self._record_pending = self._record and self._report
+        self._record_pending = (
+            self._record or self._record_device or bool(self._record_mjpeg_url)
+        ) and self._report
         atexit.register(self.close)
         self._maybe_start_recording()
 

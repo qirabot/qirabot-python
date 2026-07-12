@@ -931,14 +931,17 @@ class TestClientMjpegRecordingWiring:
         assert len(_FakeMjpegRecorder.instances) == 1
         assert _FakeMjpegRecorder.instances[0].url == "http://10.0.0.5:9100"
 
-    def test_mjpeg_url_without_record_does_not_record(self, monkeypatch, tmp_path):
+    def test_mjpeg_url_alone_implies_recording(self, monkeypatch, tmp_path):
+        # Passing a recording source is the opt-in; record=True is not
+        # required on top of it.
         self._use_fakes(monkeypatch)
         Qirabot(
             api_key="k", task_id="t",
             record_mjpeg_url="http://127.0.0.1:9100", report_dir=str(tmp_path),
         )
-        assert _FakeMjpegRecorder.instances == []
         assert _FakeRecorder.instances == []
+        assert len(_FakeMjpegRecorder.instances) == 1
+        assert _FakeMjpegRecorder.instances[0].started is True
 
     def test_mjpeg_ignores_record_window_deferral(self, monkeypatch, tmp_path):
         # record_window defers until an action supplies a window target; the
