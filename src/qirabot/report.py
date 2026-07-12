@@ -64,7 +64,8 @@ section > h2 { font-size: 15px; margin: 0; padding: 12px 16px; background: #fafb
             transition: transform .08s ease; }
 .shot a { display: block; cursor: zoom-in; }
 .shot a:hover img { transform: scale(1.02); }
-video { max-width: 100%; border-radius: 8px; margin-bottom: 18px; }
+video { max-width: 100%; max-height: 70vh; display: block; border-radius: 8px;
+        margin-bottom: 18px; }
 /* Lightbox */
 .lightbox { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.88);
             display: none; }
@@ -91,6 +92,13 @@ video { max-width: 100%; border-radius: 8px; margin-bottom: 18px; }
               white-space: pre-wrap; word-break: break-word; max-height: 22vh; overflow: auto; }
 .lb-caption:empty { display: none; }
 .lb-caption .out { color: #a9c7ff; }
+/* Narrow screens: shrink the fixed columns and let the step table scroll
+   sideways instead of overflowing the page. */
+@media (max-width: 720px) {
+  body { padding: 12px; }
+  .steps { overflow-x: auto;
+           grid-template-columns: 36px 84px 96px minmax(180px, 1fr) 140px; }
+}
 @media (prefers-color-scheme: dark) {
   body { background: #16181c; color: #e8e8e8; }
   section { background: #1e2126; border-color: #2c3036; }
@@ -150,7 +158,9 @@ def _summarize_params(params: dict[str, Any]) -> str:
 
     # Everything else: generic fallback so nothing silently vanishes.
     for key, val in params.items():
-        if key in rendered or val in (None, "", False):
+        # Explicit checks, not `val in (None, "", False)`: 0 == False in
+        # Python, so a membership test would silently drop numeric zeros.
+        if key in rendered or val is None or val == "" or val is False:
             continue
         parts.append(f"{key}={val}")
 
@@ -201,13 +211,16 @@ def _fmt_offset(secs: float) -> str:
 
 
 def _fmt_ms(ms: int) -> str:
-    """Human duration from milliseconds: ``820ms`` / ``23.4s`` / ``2m03s``."""
+    """Human duration from milliseconds: ``820ms`` / ``23.4s`` / ``2m03s`` / ``1h05m``."""
     if ms < 1000:
         return f"{ms}ms"
     secs = ms / 1000
     if secs < 60:
         return f"{secs:.1f}s"
-    return f"{int(secs // 60)}m{int(secs % 60):02d}s"
+    mins = int(secs // 60)
+    if mins < 60:
+        return f"{mins}m{int(secs % 60):02d}s"
+    return f"{mins // 60}h{mins % 60:02d}m"
 
 
 def _render_stats(stats: dict[str, int], model: str) -> str:
@@ -372,7 +385,14 @@ def write_html(
     parts.append(f"<title>{html.escape(title or 'Qirabot report')}</title>")
     parts.append(f"<style>{_CSS}</style></head><body>")
     parts.append(f"<h1>{html.escape(title or 'Qirabot run report')}</h1>")
-    meta = time.strftime("%Y-%m-%d %H:%M:%S")
+    # Header timestamp: the run's first stamped step, so a report regenerated
+    # from an old log still shows when the run happened. Falls back to "now"
+    # for logs predating the "ts" field.
+    first_ts = next((e["ts"] for e in log if e.get("ts")), 0.0)
+    meta = time.strftime(
+        "%Y-%m-%d %H:%M:%S",
+        time.localtime(first_ts) if first_ts else time.localtime(),
+    )
     if task_id:
         meta += f" · task {html.escape(task_id)}"
     parts.append(f"<div class='meta'>{meta}</div>")
@@ -416,7 +436,6 @@ def write_html(
     # Step offsets are measured from the recording start when the video is
     # seekable, else from the first stamped step (≈ run start). Entries from
     # runs predating the "ts" field just leave the time cell empty.
-    first_ts = next((e["ts"] for e in log if e.get("ts")), 0.0)
     seekable = bool(recording) and recording_start > 0
     offset_base = recording_start if seekable else first_ts
 
