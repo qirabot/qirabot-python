@@ -76,9 +76,18 @@ def dpi_awareness() -> Iterator[None]:
     user32 = _user32()
     try:
         try:
-            prev = user32.SetThreadDpiAwarenessContext(
-                DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
-            )
+            fn = user32.SetThreadDpiAwarenessContext
+            try:
+                # DPI_AWARENESS_CONTEXT is a pointer-sized HANDLE. Without
+                # explicit types ctypes passes -4 as a 32-bit int, the call
+                # fails with ERROR_INVALID_PARAMETER and returns NULL — the
+                # guard silently no-ops and every rect comes back
+                # DPI-virtualized (wrong-region crops on >100% displays).
+                fn.restype = ctypes.c_void_p
+                fn.argtypes = [ctypes.c_void_p]
+            except Exception:
+                pass  # test fakes: bound methods reject attribute assignment
+            prev = fn(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
         except Exception:
             prev = None
         yield
