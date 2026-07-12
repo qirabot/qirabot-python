@@ -31,6 +31,7 @@ framework you bring:
 - [ios/](ios/) — iOS direct via WebDriverAgent (built in, zero dependencies)
 - [windows/](windows/) — one Windows window, game-readable scancode input (built in)
 - [desktop/](desktop/) — native apps via pyautogui
+- [airtest/](airtest/) — airtest devices (Android/iOS/Windows) via a copy-in adapter (`register_adapter`)
 
 ## 4. Run desktop scripts on a dedicated machine
 
@@ -46,4 +47,5 @@ your local mouse. Write/test locally, then POST the script to the remote runner.
 export QIRA_API_KEY="qk_..."
 ```
 
-Each subdirectory's README lists the extras to install for that style.
+Install instructions are at the top of each script; the larger subdirectories
+also have a README with setup details.

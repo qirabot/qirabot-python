@@ -928,6 +928,113 @@ class TestBind:
             )
 
 
+class TestCustomAdapterHooks:
+    """Third-party backend hooks: detect() passthrough for adapter instances,
+    and register_adapter() for auto-detection of custom targets."""
+
+    @pytest.fixture(autouse=True)
+    def isolated_registry(self, monkeypatch):
+        """Run each test against a copy of the adapter registry so
+        register_adapter() calls can't leak into other tests."""
+        from qirabot.adapters import auto
+
+        monkeypatch.setattr(auto, "_ADAPTER_CLASSES", list(auto._ADAPTER_CLASSES))
+
+    def test_adapter_instance_passes_through_detect(self):
+        from qirabot.adapters.auto import detect
+
+        a = FakeAdapter()
+        assert detect(a) is a
+
+    def test_current_target_defaults_to_self(self):
+        # _result() reads current_target after every action; the base default
+        # must not raise for adapters passed straight to bind().
+        a = FakeAdapter()
+        assert a.current_target is a
+
+    def test_base_accepts_defaults_to_false(self):
+        assert DeviceAdapter.accepts(object()) is False
+
+    def _sentinel_pair(self):
+        class SentinelTarget:
+            pass
+
+        class SentinelAdapter(FakeAdapter):
+            def __init__(self, target):
+                super().__init__()
+                self.target = target
+
+            @classmethod
+            def accepts(cls, target):
+                return isinstance(target, SentinelTarget)
+
+        return SentinelTarget, SentinelAdapter
+
+    def test_registered_adapter_is_detected(self):
+        from qirabot.adapters.auto import detect, register_adapter
+
+        SentinelTarget, SentinelAdapter = self._sentinel_pair()
+        register_adapter(SentinelAdapter)
+        target = SentinelTarget()
+        adapter = detect(target)
+        assert isinstance(adapter, SentinelAdapter)
+        assert adapter.target is target
+
+    def test_registered_adapter_checked_before_builtins(self):
+        from qirabot.adapters import auto
+
+        _, SentinelAdapter = self._sentinel_pair()
+        auto.register_adapter(SentinelAdapter)
+        assert auto._ADAPTER_CLASSES[0] is SentinelAdapter
+
+    def test_duplicate_registration_is_noop(self):
+        from qirabot.adapters import auto
+
+        _, SentinelAdapter = self._sentinel_pair()
+        auto.register_adapter(SentinelAdapter)
+        auto.register_adapter(SentinelAdapter)
+        assert auto._ADAPTER_CLASSES.count(SentinelAdapter) == 1
+
+    @pytest.mark.parametrize("bad", [object, "adapter", None])
+    def test_non_adapter_class_raises(self, bad):
+        from qirabot.adapters.auto import register_adapter
+
+        with pytest.raises(TypeError, match="DeviceAdapter subclass"):
+            register_adapter(bad)
+
+    def test_adapter_instance_raises_not_registered(self):
+        from qirabot.adapters.auto import register_adapter
+
+        with pytest.raises(TypeError, match="DeviceAdapter subclass"):
+            register_adapter(FakeAdapter())
+
+    def test_registered_airtest_adapter_shadows_tombstone(self):
+        # The whole point of the escape hatch: a user-supplied airtest adapter
+        # must win over the removal error for airtest targets.
+        from qirabot.adapters.auto import detect, register_adapter
+
+        class AirtestLikeAdapter(FakeAdapter):
+            def __init__(self, target):
+                super().__init__()
+
+            @classmethod
+            def accepts(cls, target):
+                return type(target).__module__.startswith("airtest.")
+
+        class FakeDevice:
+            pass
+
+        FakeDevice.__module__ = "airtest.core.device"
+        register_adapter(AirtestLikeAdapter)
+        assert isinstance(detect(FakeDevice()), AirtestLikeAdapter)
+
+    def test_exported_from_package_root(self):
+        import qirabot
+
+        assert qirabot.register_adapter is not None
+        assert "register_adapter" in qirabot.__all__
+
+
 class TestAirtestTombstone:
     """2.0 removed airtest; detect() must recognize its targets by module-name
     strings (zero imports) and answer with the migration guidance."""

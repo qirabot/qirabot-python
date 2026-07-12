@@ -425,6 +425,37 @@ Whole-desktop Windows automation (1.x `desktop --engine airtest` with no window
 flags) is now served by the pyautogui backend — bind to a window, or drop the
 flags.
 
+**Staying on airtest** — if your project keeps its airtest scripts, you don't
+have to migrate the target at all: copy
+[examples/airtest/adapter.py](examples/airtest/adapter.py) into your project
+(airtest stays *your* dependency, not qirabot's) and register it once — your
+1.x `bind(connect_device(...))` calls then run unchanged:
+
+```python
+from qirabot import register_adapter
+from .adapter import AirtestAdapter   # the copied file
+
+register_adapter(AirtestAdapter)
+bot = Qirabot().bind(connect_device("Android:///emulator-5554"))
+```
+
+## Custom adapters
+
+The same two hooks work for any backend qirabot doesn't ship (cloud-device
+SDKs, custom engine bridges, …): subclass
+`qirabot.DeviceAdapter` — the required primitives are just `screenshot` /
+`click` / `double_click` / `type_text` / `press_key` / `scroll` /
+`device_info` — then either pass an instance straight to `bind()`:
+
+```python
+bot = Qirabot().bind(MyAdapter(handle))
+```
+
+or implement `accepts()` and `register_adapter(MyAdapter)` once so `bind()`
+recognizes your framework's native objects. Registered adapters are checked
+before the built-ins. [examples/airtest/adapter.py](examples/airtest/adapter.py)
+is a complete reference implementation.
+
 ## Bind a target (optional)
 
 Every action takes the framework object (`page` / `driver` / device / module) as
@@ -895,26 +926,32 @@ demand. Use `bot.screenshot(target)` for a one-off frame (saved under
 
 ## Configuration
 
-```bash
-export QIRA_API_KEY="qk_your_api_key"
-```
+If you ran `qirabot login`, you're already configured — the SDK reads the same
+saved key:
 
 ```python
 from qirabot import Qirabot
 
-bot = Qirabot()  # reads QIRA_API_KEY from environment
+bot = Qirabot()  # api_key= param > QIRA_API_KEY env var > `qirabot login` config
+```
+
+An environment variable always wins over the login config (so CI and one-off
+overrides behave as expected):
+
+```bash
+export QIRA_API_KEY="qk_your_api_key"
 ```
 
 Settings can also live in a project `.env` file. Scripts opt in explicitly —
 `from qirabot import load_dotenv; load_dotenv()` — which reads `$QIRA_DOTENV` or
 `./.env` and never overrides exported variables; the `qirabot` CLI loads it
-automatically.
+automatically (the SDK never reads `.env` on its own).
 
 Constructor options:
 
 | Parameter | Env Variable | Default | Description |
 |---|---|---|---|
-| `api_key` | `QIRA_API_KEY` | — | API key for authentication |
+| `api_key` | `QIRA_API_KEY` | `qirabot login` config | API key for authentication |
 | `base_url` | `QIRA_BASE_URL` | `https://app.qirabot.com` | API server URL |
 | `timeout` | — | `120.0` | HTTP request timeout (seconds) |
 | `verify_ssl` | — | `True` | Verify the server's TLS certificate (set `False` for self-hosted / self-signed) |

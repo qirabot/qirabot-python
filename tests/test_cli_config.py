@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from click.testing import CliRunner
 
-from qirabot.cli import config as user_config
+from qirabot import _userconfig as user_config
 
 
 @pytest.fixture

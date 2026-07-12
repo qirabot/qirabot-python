@@ -8,14 +8,22 @@ Run:
     pytest examples/playwright/test_form_validation.py
 """
 
-from qirabot import Qirabot
+import pytest
 
-bot = Qirabot(task_name="test-form")
+from qirabot import Qirabot
 
 URL = "https://demoqa.com/automation-practice-form"
 
 
-def test_empty_submit_shows_errors(page):
+@pytest.fixture(scope="session")
+def bot():
+    # One shared Qirabot task for the whole run; closed (status reported)
+    # after the last test.
+    with Qirabot(task_name="test-form") as bot:
+        yield bot
+
+
+def test_empty_submit_shows_errors(page, bot):
     page.goto(URL)
 
     # Your existing code
@@ -25,7 +33,7 @@ def test_empty_submit_shows_errors(page):
     assert bot.verify(page, "Required fields are highlighted in red")
 
 
-def test_fill_and_submit(page):
+def test_fill_and_submit(page, bot):
     page.goto(URL)
 
     # Your existing code
@@ -39,7 +47,7 @@ def test_fill_and_submit(page):
     assert bot.verify(page, "A success confirmation is displayed")
 
 
-def test_date_picker(page):
+def test_date_picker(page, bot):
     """Date pickers are hard to automate — let AI handle it."""
     page.goto(URL)
 

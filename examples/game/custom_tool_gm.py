@@ -12,7 +12,7 @@ Run:
 
 import requests
 
-from qirabot import Qirabot
+from qirabot import AdbDevice, Qirabot
 
 GM_URL = "http://internal-gm.example.com/exec"
 GM_TOKEN = "replace-me"
@@ -27,7 +27,9 @@ def gm_command(command: str) -> str:
 
 
 bot = Qirabot(task_name="daily-quest-gm")
-device = bot.open("android://")  # or a Playwright page / desktop target
+# First adb device; several devices -> AdbDevice(serial="emulator-5554"). A web
+# or PC game works the same way — pass a Playwright page or desktop target instead.
+device = AdbDevice()
 
 result = bot.ai(
     device,

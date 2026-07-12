@@ -302,6 +302,27 @@ class TestQirabotInit:
         assert bot._transport._api_key == "env_key"
         bot.close()
 
+    def test_login_config_api_key_fallback(self, monkeypatch):
+        """`qirabot login` is a one-time step for the SDK too: with no param
+        and no env var, the client reads the saved config file (conftest points
+        the config dir at a per-test temp path)."""
+        from qirabot import _userconfig
+
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        _userconfig.save_api_key("config_key")
+        bot = Qirabot(task_id="t")
+        assert bot._transport._api_key == "config_key"
+        bot.close()
+
+    def test_env_api_key_beats_login_config(self, monkeypatch):
+        from qirabot import _userconfig
+
+        _userconfig.save_api_key("config_key")
+        monkeypatch.setenv("QIRA_API_KEY", "env_key")
+        bot = Qirabot(task_id="t")
+        assert bot._transport._api_key == "env_key"
+        bot.close()
+
     def test_env_base_url(self, monkeypatch):
         monkeypatch.setenv("QIRA_BASE_URL", "http://env-host:9090")
         bot = Qirabot(api_key="k", task_id="t")

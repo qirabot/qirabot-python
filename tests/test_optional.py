@@ -39,3 +39,46 @@ def test_explicit_extra_still_wins(missing_everything):
     with pytest.raises(MissingDependencyError) as ei:
         _optional.require("some_backend.api", "appium")
     assert 'python -m pip install "qirabot[appium]"' in str(ei.value)
+
+
+@pytest.fixture
+def uv_tool_env(monkeypatch):
+    """Pretend qirabot was installed with `uv tool install` (the one-line
+    installer's default), where a pip hint would target the wrong Python."""
+    monkeypatch.setattr(_optional, "_uv_tool_env", lambda: True)
+    monkeypatch.setattr(_optional, "_version_pin", lambda: "==2.0.0")
+
+
+def test_uv_env_hints_uv_tool_install(missing_everything, uv_tool_env, monkeypatch):
+    monkeypatch.setattr(_optional, "_installed_extras", lambda: set())
+    with pytest.raises(MissingDependencyError) as ei:
+        _optional.require("pyautogui")
+    msg = str(ei.value)
+    assert 'uv tool install --force "qirabot[desktop]==2.0.0"' in msg
+    assert "pip" not in msg
+
+
+def test_uv_env_hint_keeps_installed_extras(missing_everything, uv_tool_env, monkeypatch):
+    # `uv tool install` replaces the environment wholesale — the hint must
+    # carry the extras already present or it would uninstall them.
+    monkeypatch.setattr(_optional, "_installed_extras", lambda: {"browser"})
+    with pytest.raises(MissingDependencyError) as ei:
+        _optional.require("pyautogui")
+    assert 'uv tool install --force "qirabot[browser,desktop]==2.0.0"' in str(ei.value)
+
+
+def test_uv_env_selenium_hint_uses_with(missing_everything, uv_tool_env, monkeypatch):
+    monkeypatch.setattr(_optional, "_installed_extras", lambda: {"browser"})
+    with pytest.raises(MissingDependencyError) as ei:
+        _optional.require("selenium.webdriver")
+    assert (
+        'uv tool install --force --with selenium "qirabot[browser]==2.0.0"'
+        in str(ei.value)
+    )
+
+
+def test_uv_env_selenium_hint_without_extras(missing_everything, uv_tool_env, monkeypatch):
+    monkeypatch.setattr(_optional, "_installed_extras", lambda: set())
+    with pytest.raises(MissingDependencyError) as ei:
+        _optional.require("selenium.webdriver")
+    assert 'uv tool install --force --with selenium "qirabot==2.0.0"' in str(ei.value)

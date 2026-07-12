@@ -5,13 +5,18 @@ dependencies]`` extra. Rather than importing those modules eagerly — or lettin
 missing one surface as a raw ``ModuleNotFoundError`` traceback — call :func:`require`
 at the point of use. It returns the imported module on success, or raises a
 :class:`~qirabot.exceptions.MissingDependencyError` whose message tells the user the
-exact ``python -m pip install "qirabot[<extra>]"`` command to run.
+exact install command to run — a ``uv tool install`` when qirabot itself lives in a
+uv tool environment (the one-line installer's default), otherwise
+``python -m pip install "qirabot[<extra>]"``.
 """
 
 from __future__ import annotations
 
 import importlib
+import importlib.util
+import sys
 import warnings
+from pathlib import Path
 from types import ModuleType
 
 from qirabot.exceptions import MissingDependencyError
@@ -27,9 +32,69 @@ _EXTRA_FOR_PACKAGE = {
 }
 
 # Packages that are deliberately NOT qirabot extras (bring-your-own-driver): the
-# hint must be a plain `python -m pip install <package>`, not a nonexistent
-# qirabot[<extra>].
+# hint must install the bare package, not a nonexistent qirabot[<extra>].
 _NOT_AN_EXTRA = frozenset({"selenium"})
+
+
+def _uv_tool_env() -> bool:
+    """True when qirabot runs from a ``uv tool install`` environment.
+
+    That's what the one-line installers set up. In it, ``python -m pip install``
+    targets whatever Python is on PATH — never this environment — so a pip hint
+    would send the user in a circle. uv marks each tool environment with a
+    ``uv-receipt.toml`` at its root; plain venv/pip setups have none.
+    """
+    return (Path(sys.prefix) / "uv-receipt.toml").is_file()
+
+
+def _installed_extras() -> set[str]:
+    """The qirabot extras whose packages are importable right now.
+
+    ``uv tool install`` replaces the environment with exactly the requested
+    requirements, so a hint that names only the missing extra would silently
+    uninstall the ones the user already has (the installer's ``[browser]``,
+    typically). Fold the present ones back in.
+    """
+    extras = set()
+    for package, extra in _EXTRA_FOR_PACKAGE.items():
+        try:
+            if importlib.util.find_spec(package) is not None:
+                extras.add(extra)
+        except (ImportError, ValueError):
+            pass
+    return extras
+
+
+def _version_pin() -> str:
+    """``==<running version>``, or empty when the version can't be determined.
+
+    Without the pin, a fresh ``uv tool install`` re-resolves from PyPI and won't
+    pick a pre-release — a user on 2.0.0rc2 asking for the desktop extra would be
+    silently downgraded to the latest stable.
+    """
+    try:
+        from importlib.metadata import version
+
+        return f"=={version('qirabot')}"
+    except Exception:
+        return ""
+
+
+def extra_install_hint(extra: str) -> str:
+    """Shell command that adds qirabot's ``<extra>`` to *this* environment."""
+    if _uv_tool_env():
+        extras = ",".join(sorted(_installed_extras() | {extra}))
+        return f'uv tool install --force "qirabot[{extras}]{_version_pin()}"'
+    return f'python -m pip install "qirabot[{extra}]"'
+
+
+def package_install_hint(package: str) -> str:
+    """Shell command that adds a bare (non-extra) package to *this* environment."""
+    if _uv_tool_env():
+        extras = ",".join(sorted(_installed_extras()))
+        base = f"qirabot[{extras}]" if extras else "qirabot"
+        return f'uv tool install --force --with {package} "{base}{_version_pin()}"'
+    return f"python -m pip install {package}"
 
 
 def require(module: str, extra: str | None = None) -> ModuleType:
@@ -57,10 +122,10 @@ def require(module: str, extra: str | None = None) -> ModuleType:
     except ImportError as e:
         package = module.split(".")[0]
         if package in _NOT_AN_EXTRA:
-            hint = f"python -m pip install {package}"
+            hint = package_install_hint(package)
         else:
             which = extra or _EXTRA_FOR_PACKAGE.get(package, package)
-            hint = f'python -m pip install "qirabot[{which}]"'
+            hint = extra_install_hint(which)
         raise MissingDependencyError(
             f"'{package}' is required for this feature but is not installed. "
             f"Install it with:  {hint}"

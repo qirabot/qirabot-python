@@ -11,7 +11,7 @@ import click
 from click.core import ParameterSource
 
 from qirabot._dotenv import load_dotenv
-from qirabot._optional import require
+from qirabot._optional import extra_install_hint, package_install_hint, require
 from qirabot._transport import Transport
 from qirabot.exceptions import QirabotError
 
@@ -250,7 +250,7 @@ def cli(ctx: click.Context, api_key: str, base_url: str, timeout: float, verify_
         else:
             source = ".env" if _KEY_FROM_DOTENV else "env"
     else:
-        from qirabot.cli.config import load_api_key
+        from qirabot._userconfig import load_api_key
 
         stored = load_api_key()
         if stored:
@@ -374,7 +374,7 @@ def login(ctx: click.Context, status: bool) -> None:
     variables and ./.env keep working and always take precedence; `login` just
     removes the need to export anything per shell.
     """
-    from qirabot.cli import config as user_config
+    from qirabot import _userconfig as user_config
 
     if status:
         key: str = ctx.obj["api_key"]
@@ -563,23 +563,23 @@ def doctor(ctx: click.Context) -> None:
     # though the import succeeds.
     chromium = _chromium_status()
     chromium_hints = {
-        "no-browser": "playwright install chromium",
+        # Not `playwright install chromium`: isolated installs (uv tool) don't
+        # put Playwright's own command on PATH, and the wrapper works everywhere.
+        "no-browser": "qirabot install-browser",
         "no-libs": "sudo playwright install-deps chromium  "
         "(Chromium is downloaded but system libraries are missing)",
     }
+    browser_hint = extra_install_hint("browser") + " && qirabot install-browser"
     backends = [
         (
             "browser (Playwright — default path, powers bot.open())",
             chromium == "ready",
-            chromium_hints.get(
-                chromium or "",
-                'python -m pip install "qirabot[browser]" && playwright install chromium',
-            ),
+            chromium_hints.get(chromium or "", browser_hint),
         ),
         (
             "desktop (pyautogui)",
             _has_module("pyautogui"),
-            'python -m pip install "qirabot[desktop]"',
+            extra_install_hint("desktop"),
         ),
         (
             "android direct (adb — built in, needs the adb binary)",
@@ -590,12 +590,12 @@ def doctor(ctx: click.Context) -> None:
         (
             "android/ios via server (Appium)",
             _has_module("appium"),
-            'python -m pip install "qirabot[appium]"',
+            extra_install_hint("appium"),
         ),
         (
             "selenium (bring-your-own driver)",
             _has_module("selenium"),
-            "python -m pip install selenium",
+            package_install_hint("selenium"),
         ),
     ]
 
@@ -619,8 +619,7 @@ def doctor(ctx: click.Context) -> None:
 
     if not any(ready for _, ready, _ in backends):
         console.print(
-            f"\n{bad} No backend installed. Quickest start: "
-            + escape('python -m pip install "qirabot[browser]" && playwright install chromium')
+            f"\n{bad} No backend installed. Quickest start: " + escape(browser_hint)
         )
         problems += 1
 

@@ -75,6 +75,7 @@ Utility commands help on both paths: `qirabot doctor` (env check),
 | iOS — Appium XCUITest (simulators, auto WDA build/sign) | `templates/ios_appium.py` | `qirabot[appium]` + running Appium server |
 | Any Selenium driver / other Appium targets (`bind()` your driver) | `templates/bolt_on.py` | `qirabot` + your framework |
 | Desktop — Windows & macOS | `templates/bolt_on.py` | `qirabot[desktop]` (whole screen, any OS) · core `qirabot.Window` (Windows, one window) |
+| Anything else — airtest, cloud-device SDKs, your own backend | custom `DeviceAdapter` — see "Custom adapters" in `references/REFERENCE.md` | core `qirabot` + your framework |
 
 Copy the template, fill in the `TODO`s, run it with the preflight-echoed
 interpreter. iOS has two starters: default to `ios_wda.py` when the user

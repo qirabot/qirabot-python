@@ -1,10 +1,11 @@
 # Qirabot CLI reference (condensed)
 
 The `qirabot` command ships with the package (any install/extra). Same auth as
-the SDK: `QIRA_API_KEY` from the environment or `./.env` (the CLI loads `.env`
-automatically). One run command = one server task = one `ai()` run — there is
-no CLI equivalent of `extract`/`verify`/`wait_for` or of chaining several
-`ai()` calls in one session; those need the SDK.
+the SDK: `QIRA_API_KEY` from the environment, `./.env` (the CLI loads `.env`
+automatically; the SDK doesn't), or the `qirabot login` config file. One run
+command = one server task = one `ai()` run — there is no CLI equivalent of
+`extract`/`verify`/`wait_for` or of chaining several `ai()` calls in one
+session; those need the SDK.
 
 ## Global options — go BEFORE the subcommand
 

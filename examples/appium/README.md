@@ -55,20 +55,29 @@ export IOS_DEVICE="iPhone 16"                # default (simulator device type na
 ## How it works
 
 ```python
+import pytest
 from appium import webdriver
 from appium.options.android import UiAutomator2Options
 from qirabot import Qirabot
 
-options = UiAutomator2Options()
-options.platform_name = "Android"
-options.device_name = "emulator-5554"
-options.app_package = "com.example.myapp"
-options.app_activity = ".MainActivity"
+@pytest.fixture(scope="session")
+def driver():
+    options = UiAutomator2Options()
+    options.platform_name = "Android"
+    options.device_name = "emulator-5554"
+    options.app_package = "com.example.myapp"
+    options.app_activity = ".MainActivity"
+    driver = webdriver.Remote("http://localhost:4723", options=options)
+    yield driver
+    driver.quit()
 
-driver = webdriver.Remote("http://localhost:4723", options=options)
-bot = Qirabot(task_name="my-test").bind(driver)   # bind once; driver is stable
+@pytest.fixture(scope="session")
+def bot(driver):
+    # bind once; the driver is stable across the session. Closed after the last test.
+    with Qirabot(task_name="my-test").bind(driver) as bot:
+        yield bot
 
-def test_login():
+def test_login(driver, bot):
     # Your existing Appium code (native driver calls unchanged)
     driver.find_element("id", "com.example.myapp:id/login_btn").click()
 

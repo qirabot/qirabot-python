@@ -21,14 +21,24 @@ pytest examples/selenium/
 Your existing Selenium code stays as-is. Add Qirabot where you need AI:
 
 ```python
+import pytest
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from qirabot import Qirabot
 
-driver = webdriver.Chrome()
-bot = Qirabot(task_name="my-test").bind(driver)   # bind once; driver is stable
+@pytest.fixture(scope="session")
+def driver():
+    driver = webdriver.Chrome()
+    yield driver
+    driver.quit()
 
-def test_search():
+@pytest.fixture(scope="session")
+def bot(driver):
+    # bind once; the driver is stable across the session. Closed after the last test.
+    with Qirabot(task_name="my-test").bind(driver) as bot:
+        yield bot
+
+def test_search(driver, bot):
     driver.get("https://myapp.com")
 
     # Your existing Selenium code

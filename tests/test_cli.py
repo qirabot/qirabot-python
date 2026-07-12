@@ -932,7 +932,7 @@ class TestDoctor:
         out = self._flat(result)
         assert result.exit_code == 1
         assert "API key not set" in out
-        assert 'python -m pip install "qirabot[browser]" && playwright install chromium' in out
+        assert 'python -m pip install "qirabot[browser]" && qirabot install-browser' in out
         # Selenium is not an extra — the hint must be a plain pip install.
         assert "python -m pip install selenium" in out
         assert "qirabot[selenium]" not in out
@@ -940,12 +940,14 @@ class TestDoctor:
 
     def test_playwright_without_chromium_is_not_ready(self, monkeypatch):
         """An importable playwright with no browser download can't run bot.open();
-        doctor must point at the missing `playwright install chromium` step."""
+        doctor must point at the missing Chromium download step (via the
+        `qirabot install-browser` wrapper — Playwright's own command isn't on
+        PATH in isolated installs)."""
         result = self._run(monkeypatch, has={"playwright"}, chromium="no-browser")
 
         out = self._flat(result)
         assert result.exit_code == 1
-        assert "playwright install chromium" in out
+        assert "qirabot install-browser" in out
 
     def test_no_display_notes_headless_fallback_but_stays_ready(self, monkeypatch):
         """A display-less Linux box is still a working browser environment

@@ -21,11 +21,16 @@ pytest examples/desktop/test_native_app.py
 
 ```python
 import pyautogui
+import pytest
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="my-test").bind(pyautogui)   # bind once; the target is fixed
+@pytest.fixture(scope="session")
+def bot():
+    # bind once; the target is fixed. Closed after the last test.
+    with Qirabot(task_name="my-test").bind(pyautogui) as bot:
+        yield bot
 
-def test_open_app():
+def test_open_app(bot):
     # Open the app first — pyautogui can't launch apps, so use launch_app
     # (macOS: app name/bundle id, Windows: exe/name/AUMID, Linux: executable).
     bot.launch_app("Google Chrome", wait=2)

@@ -15,7 +15,7 @@ Run:
 
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="quickstart", model_alias="fast",screenshot_annotate=True)
+bot = Qirabot(task_name="quickstart", model_alias="fast")
 
 # Qirabot launches the browser and returns a Playwright page.
 page = bot.open("https://www.wikipedia.org", headless=False, user_data_dir=".automation")

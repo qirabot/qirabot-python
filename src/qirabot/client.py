@@ -22,6 +22,7 @@ from qirabot._heartbeat import Heartbeat
 from qirabot._optional import require
 from qirabot._tools import build_tool_defs
 from qirabot._transport import Transport
+from qirabot._userconfig import load_api_key as _load_saved_api_key
 from qirabot.recording import MjpegStreamRecorder, Recorder, ScreenRecorder, device_recorder
 from qirabot.adapters import auto
 from qirabot.adapters.base import DeviceAdapter, ScreenshotConfig
@@ -252,14 +253,19 @@ class Qirabot:
         heartbeat: bool = True,
         sync_local_steps: bool = True,
     ):
-        api_key = api_key or os.environ.get("QIRA_API_KEY", "")
+        # Same last-resort fallback as the CLI: the `qirabot login` config file.
+        # Explicit param and env var stay ahead of it, so nothing changes for
+        # existing setups — and CI boxes have no config file, so they still
+        # fail fast on a forgotten env var.
+        api_key = api_key or os.environ.get("QIRA_API_KEY", "") or _load_saved_api_key()
         # Fail fast on a missing key: it's a local config error, so surface an
         # actionable message here instead of letting an empty key reach the
         # server and bounce back as an opaque 401 after a wasted round-trip.
         if not api_key:
             raise AuthenticationError(
-                "No API key provided. Set the QIRA_API_KEY environment variable "
-                "or pass api_key=... to Qirabot().",
+                "No API key provided. Run `qirabot login` once, set the "
+                "QIRA_API_KEY environment variable, or pass api_key=... to "
+                "Qirabot().",
                 code="auth.api_key_missing",
             )
         base_url = base_url or os.environ.get("QIRA_BASE_URL", "https://app.qirabot.com")

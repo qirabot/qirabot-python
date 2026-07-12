@@ -9,12 +9,20 @@ Run:
     pytest examples/playwright/test_ecommerce.py --headed
 """
 
+import pytest
+
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="test-ecommerce")
+
+@pytest.fixture(scope="session")
+def bot():
+    # One shared Qirabot task for the whole run; closed (status reported)
+    # after the last test.
+    with Qirabot(task_name="test-ecommerce") as bot:
+        yield bot
 
 
-def test_login(page):
+def test_login(page, bot):
     page.goto("https://www.saucedemo.com")
 
     # Your existing Playwright code
@@ -26,7 +34,7 @@ def test_login(page):
     assert bot.verify(page, "Product listing page is displayed")
 
 
-def test_login_error(page):
+def test_login_error(page, bot):
     page.goto("https://www.saucedemo.com")
     page.fill("#user-name", "bad_user")
     page.fill("#password", "bad_pass")
@@ -36,7 +44,7 @@ def test_login_error(page):
     assert bot.verify(page, "An error message is shown")
 
 
-def test_add_to_cart(page):
+def test_add_to_cart(page, bot):
     page.goto("https://www.saucedemo.com")
     page.fill("#user-name", "standard_user")
     page.fill("#password", "secret_sauce")
@@ -53,7 +61,7 @@ def test_add_to_cart(page):
     assert "Backpack" in name
 
 
-def test_checkout(page):
+def test_checkout(page, bot):
     page.goto("https://www.saucedemo.com")
     page.fill("#user-name", "standard_user")
     page.fill("#password", "secret_sauce")

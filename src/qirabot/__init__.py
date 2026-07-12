@@ -4,6 +4,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from qirabot._applaunch import launch_app
 from qirabot._dotenv import load_dotenv
+from qirabot.adapters.auto import register_adapter
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
 from qirabot.adb import AdbDevice
 from qirabot.wda import WdaClient
@@ -71,5 +72,6 @@ __all__ = [
     "launch_app",
     "load_dotenv",
     "record",
+    "register_adapter",
     "window_region",
 ]

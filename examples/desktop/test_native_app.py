@@ -14,22 +14,26 @@ from qirabot import Qirabot
 if sys.platform != "darwin":
     pytest.skip("macOS only", allow_module_level=True)
 
-# bind(pyautogui) once: desktop has a single fixed target (the pyautogui module),
-# so calls below drop the repeated first argument. launch_app still works on the
-# bound proxy (it delegates to the underlying Qirabot).
-bot = Qirabot(task_name="test-calculator").bind(pyautogui)
 
-# Open Calculator before tests. bot.launch_app is cross-platform: on Windows use
-# "calc", and it handles the launch + a short wait for the window to appear.
-bot.launch_app("Calculator", wait=2)
+@pytest.fixture(scope="session")
+def bot():
+    # bind(pyautogui) once: desktop has a single fixed target (the pyautogui
+    # module), so tests drop the repeated first argument. The with-block closes
+    # the Qirabot task after the last test.
+    with Qirabot(task_name="test-calculator").bind(pyautogui) as bot:
+        # Open Calculator before tests. launch_app works on the bound proxy and
+        # is cross-platform: on Windows use "calc"; it handles the launch + a
+        # short wait for the window to appear.
+        bot.launch_app("Calculator", wait=2)
+        yield bot
 
 
-def test_basic_calculation():
+def test_basic_calculation(bot):
     result = bot.ai("Type 42 + 58 = in Calculator, tell me the result", max_steps=8)
     assert result.success
     assert "100" in result.output
 
 
-def test_extract_display():
+def test_extract_display(bot):
     value = bot.extract("What number is shown in the Calculator?")
     assert value

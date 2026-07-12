@@ -6,6 +6,7 @@ Run:
     pytest examples/selenium/test_ecommerce.py
 """
 
+import pytest
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
@@ -13,14 +14,25 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from qirabot import Qirabot
 
-driver = webdriver.Chrome()
-# bind(driver) once so AI calls drop the repeated first argument.
-bot = Qirabot(
-    task_name="test-ecommerce-selenium", model_alias="fast"
-).bind(driver)
+
+@pytest.fixture(scope="session")
+def driver():
+    driver = webdriver.Chrome()
+    yield driver
+    driver.quit()
 
 
-def login():
+@pytest.fixture(scope="session")
+def bot(driver):
+    # bind(driver) once so AI calls drop the repeated first argument; the
+    # with-block closes the Qirabot task after the last test.
+    with Qirabot(task_name="test-ecommerce-selenium", model_alias="fast").bind(
+        driver
+    ) as bot:
+        yield bot
+
+
+def login(driver):
     """Log in and wait for the inventory page to finish loading.
 
     Retries once: the login submit occasionally doesn't navigate in time,
@@ -39,15 +51,15 @@ def login():
                 raise
 
 
-def test_login():
-    login()
+def test_login(driver, bot):
+    login(driver)
 
     # Bolt-on: AI visual check
     assert bot.verify("Product listing is displayed")
 
 
-def test_extract_products():
-    login()
+def test_extract_products(driver, bot):
+    login(driver)
 
     # Your existing code
     items = driver.find_elements(By.CLASS_NAME, "inventory_item")
@@ -58,8 +70,8 @@ def test_extract_products():
     assert "Sauce Labs" in info
 
 
-def test_checkout():
-    login()
+def test_checkout(driver, bot):
+    login(driver)
 
     # Your existing code
     driver.find_element(By.CSS_SELECTOR, '[data-test="add-to-cart-sauce-labs-backpack"]').click()

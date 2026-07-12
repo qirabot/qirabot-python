@@ -6,19 +6,30 @@ Run:
     pytest examples/selenium/test_search_engine.py
 """
 
+import pytest
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from qirabot import Qirabot
 
-driver = webdriver.Chrome()
 
-# bind(driver) once: the Selenium driver is stable across the session (tab/window
-# focus moves via switch_to, the object stays the same), so calls drop the target.
-bot = Qirabot(task_name="test-wikipedia-selenium").bind(driver)
+@pytest.fixture(scope="session")
+def driver():
+    driver = webdriver.Chrome()
+    yield driver
+    driver.quit()
 
 
-def test_search_and_extract():
+@pytest.fixture(scope="session")
+def bot(driver):
+    # bind(driver) once: the Selenium driver is stable across the session (tab/
+    # window focus moves via switch_to, the object stays the same), so calls drop
+    # the target. The with-block closes the Qirabot task after the last test.
+    with Qirabot(task_name="test-wikipedia-selenium").bind(driver) as bot:
+        yield bot
+
+
+def test_search_and_extract(driver, bot):
     driver.get("https://www.wikipedia.org")
 
     # Your existing Selenium code
@@ -31,7 +42,7 @@ def test_search_and_extract():
     assert "Python" in summary
 
 
-def test_verify_page_layout():
+def test_verify_page_layout(driver, bot):
     driver.get("https://en.wikipedia.org/wiki/Python_(programming_language)")
 
     # Bolt-on: AI checks page structure visually
@@ -39,7 +50,7 @@ def test_verify_page_layout():
     assert bot.verify("Page has an infobox with language details")
 
 
-def test_navigate_sections():
+def test_navigate_sections(driver, bot):
     driver.get("https://en.wikipedia.org/wiki/Python_(programming_language)")
 
     # Bolt-on: AI clicks section link — no fragile selectors needed

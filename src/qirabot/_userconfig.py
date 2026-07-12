@@ -1,4 +1,4 @@
-"""User-level CLI configuration (``qirabot login``).
+"""User-level configuration (``qirabot login``), shared by the CLI and the SDK.
 
 One JSON file holding the API key, so ``qirabot login`` is a one-time step
 instead of exporting ``QIRA_API_KEY`` in every shell:
@@ -8,8 +8,13 @@ instead of exporting ``QIRA_API_KEY`` in every shell:
 * Windows: ``%APPDATA%\\qirabot\\config.json``.
 
 Deliberately stdlib-only (json, no keyring/tomli-w) and read as the LAST
-resolution layer: ``--api-key`` flag > ``QIRA_API_KEY`` env var > ``./.env`` >
-this file. Existing env/.env setups keep working untouched.
+resolution layer everywhere — CLI: ``--api-key`` flag > ``QIRA_API_KEY`` env
+var > ``./.env`` > this file; SDK: ``api_key=`` param > ``QIRA_API_KEY`` env
+var > this file (no implicit ``./.env`` in the SDK — a library's import-time
+cwd carries no meaning). Existing env/.env setups keep working untouched.
+
+Lives in the core package, not ``qirabot.cli``: the SDK client falls back to
+it, and the SDK must not import CLI modules.
 """
 
 from __future__ import annotations

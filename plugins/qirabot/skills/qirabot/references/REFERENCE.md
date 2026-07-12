@@ -7,7 +7,7 @@ mirrors the parts an agent needs to write a script. Keep in sync with the SDK.
 
 ```python
 from qirabot import Qirabot
-bot = Qirabot()                       # reads QIRA_API_KEY from env
+bot = Qirabot()                       # QIRA_API_KEY env, else `qirabot login` config
 ```
 
 Common constructor options (all keyword):
@@ -91,7 +91,8 @@ Every action's first argument is the framework object (`page`/`driver`/device).
 For a single stable target, `bind()` once:
 
 ```python
-bot = Qirabot().bind(driver)   # Selenium/Appium driver, pyautogui, AdbDevice/WdaClient/Window
+bot = Qirabot().bind(driver)   # Selenium/Appium driver, pyautogui, AdbDevice/WdaClient/Window,
+                               # or a custom DeviceAdapter instance (see "Custom adapters")
 bot.ai("complete the task")    # no target arg
 bot.click("Login")
 bot.current_page()             # reach the live page from a bound proxy
@@ -232,6 +233,28 @@ actions vary:
 - `right_click`/`hover`: full on browser/desktop; mobile taps / no-ops.
 
 Unsupported actions raise `NotImplementedError`.
+
+## Custom adapters (any framework qirabot doesn't ship)
+
+For a backend outside the built-in list — airtest, cloud-device SDKs, a
+custom engine bridge — subclass `qirabot.DeviceAdapter`. Required primitives:
+`screenshot` / `click` / `double_click` / `type_text` / `press_key` /
+`scroll` / `device_info`; everything else has sensible defaults. Two ways in:
+
+```python
+# A) pass an instance straight to bind() — no registration needed
+bot = Qirabot().bind(MyAdapter(handle))
+
+# B) register once; bind() then accepts the framework's native objects
+from qirabot import register_adapter
+register_adapter(MyAdapter)          # MyAdapter.accepts(target) decides matches
+bot = Qirabot().bind(native_object)  # custom adapters are checked before built-ins
+```
+
+A complete reference implementation (airtest — all three 1.x target shapes,
+cv2 screenshot encoding, Android keyevent mapping) lives at
+`examples/airtest/adapter.py` in the qirabot-python repo: copy it into your
+project; airtest stays your project's dependency, not qirabot's.
 
 ## Lifecycle
 

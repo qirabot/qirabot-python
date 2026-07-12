@@ -106,9 +106,15 @@ class DeviceAdapter(ABC):
         ...
 
     @classmethod
-    @abstractmethod
     def accepts(cls, target: Any) -> bool:
-        ...
+        """Return True if this adapter can wrap ``target``.
+
+        Consulted by :func:`qirabot.adapters.auto.detect` for auto-detection.
+        Third-party adapters only need this when registered via
+        ``register_adapter()``; adapters passed as instances to ``bind()``
+        never go through detection, so the default of ``False`` is fine.
+        """
+        return False
 
     @abstractmethod
     def screenshot(self, config: ScreenshotConfig | None = None) -> bytes:
@@ -273,8 +279,14 @@ class DeviceAdapter(ABC):
 
     @property
     def current_target(self) -> Any:
-        """Return the current underlying target (may change after new-tab switches)."""
-        raise NotImplementedError
+        """Return the current underlying target (may change after new-tab switches).
+
+        Action methods return this via ``Qirabot._result()``, so it must not
+        raise. The default of ``self`` keeps the adapter-cache round trip
+        consistent for third-party adapters passed straight to ``bind()``;
+        adapters wrapping a framework object should return that object instead.
+        """
+        return self
 
     @abstractmethod
     def device_info(self) -> DeviceInfo:

@@ -24,11 +24,16 @@ pytest examples/playwright/ --headed
 Your existing Playwright code stays as-is. Add Qirabot where you need AI:
 
 ```python
+import pytest
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="my-test")
+@pytest.fixture(scope="session")
+def bot():
+    # One shared Qirabot task for the run; closed after the last test.
+    with Qirabot(task_name="my-test") as bot:
+        yield bot
 
-def test_login(page):
+def test_login(page, bot):
     # Your existing Playwright code
     page.goto("https://myapp.com")
     page.fill("#user", "admin")

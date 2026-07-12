@@ -27,6 +27,30 @@ _ADAPTER_CLASSES: list[type[DeviceAdapter]] = [
 ]
 
 
+def register_adapter(cls: type[DeviceAdapter]) -> None:
+    """Register a third-party :class:`DeviceAdapter` for target auto-detection.
+
+    After registration, ``bind()`` and every action method accept whatever
+    targets ``cls.accepts()`` recognizes — this is how backends qirabot does
+    not ship (airtest, cloud-device SDKs, custom engine bridges) plug in::
+
+        from qirabot import register_adapter
+        register_adapter(AirtestAdapter)   # once, at import/startup time
+        bot = Qirabot().bind(connect_device("Android:///emu-5554"))
+
+    Custom adapters are checked BEFORE the built-ins so a broad built-in
+    ``accepts()`` cannot shadow them. Registering the same class twice is a
+    no-op. Alternatively, skip registration entirely and pass an adapter
+    instance straight to ``bind()`` — :func:`detect` uses it as-is.
+    """
+    if not (isinstance(cls, type) and issubclass(cls, DeviceAdapter)):
+        raise TypeError(
+            f"register_adapter() expects a DeviceAdapter subclass, got {cls!r}"
+        )
+    if cls not in _ADAPTER_CLASSES:
+        _ADAPTER_CLASSES.insert(0, cls)
+
+
 def _is_airtest_target(target: Any) -> bool:
     """Tombstone check: recognize the airtest targets 1.x accepted, by module
     name strings only (zero imports — airtest is no longer a dependency)."""
@@ -40,7 +64,14 @@ def _is_airtest_target(target: Any) -> bool:
 
 
 def detect(target: Any) -> DeviceAdapter:
-    """Detect the appropriate adapter for a target object."""
+    """Detect the appropriate adapter for a target object.
+
+    A ready-made :class:`DeviceAdapter` instance is used as-is, so custom
+    backends work without touching the registry:
+    ``Qirabot().bind(MyAdapter(...))``.
+    """
+    if isinstance(target, DeviceAdapter):
+        return target
     for cls in _ADAPTER_CLASSES:
         if cls.accepts(target):
             return cls(target)
@@ -49,8 +80,10 @@ def detect(target: Any) -> DeviceAdapter:
             "airtest support was removed in qirabot 2.0. Migrate the target: "
             "Android -> qirabot.AdbDevice (direct adb, zero dependencies), "
             "Windows -> qirabot.Window(hwnd=/title_re=), "
-            "iOS -> qirabot.WdaClient(wda_url) — or pin qirabot<2.0 to stay "
-            "on airtest. See the 2.0 migration guide in the README."
+            "iOS -> qirabot.WdaClient(wda_url). To keep driving airtest, copy "
+            "examples/airtest/adapter.py into your project and "
+            "register_adapter(AirtestAdapter) — or pin qirabot<2.0. "
+            "See the 2.0 migration guide in the README."
         )
     raise TypeError(
         f"Unsupported target type: {type(target).__name__}. "
