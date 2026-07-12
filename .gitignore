@@ -23,3 +23,6 @@ venv/
 .venv/
 .ci-venv/
 env/
+
+# uv-generated lockfile: this is a published library, deps stay unpinned
+uv.lock
