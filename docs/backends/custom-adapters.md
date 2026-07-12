@@ -1,0 +1,86 @@
+---
+title: Custom Adapters & Bolt-On Integration
+description: Bolt Qirabot onto any automation stack — Playwright, Selenium, Appium, pyautogui — or write a DeviceAdapter with 7 primitives to drive cloud device farms and custom engines.
+---
+
+# Custom Adapters & Bolt-On
+
+Qirabot is designed to **join the stack you already have**, not replace it.
+Every action takes the framework object (`page` / `driver` / device / module)
+as its first argument — pass yours and mix AI steps with your existing code:
+
+| You run | You pass | Notes |
+|---|---|---|
+| Playwright | `page` | keep the explicit form — clicks can return a new tab |
+| Selenium | `driver` | `pip install qirabot selenium` |
+| Appium | `driver` | `qirabot[appium]`; Android and iOS |
+| pyautogui | the `pyautogui` module | `qirabot[desktop]` |
+| Built-in devices | `AdbDevice` / `WdaClient` / `Window` | no extras |
+
+## bind() — drop the repeated argument
+
+When you drive a single, stable target for the whole session, `bind()` once:
+
+```python
+bot = Qirabot().bind(driver)     # Selenium/Appium driver, pyautogui, AdbDevice/WdaClient/Window
+bot.click("Login")
+bot.type_text("Email", "a@b.com")
+
+with Qirabot().bind(driver) as bot:   # works as a context manager too
+    ...
+```
+
+`bind()` is recommended for the device backends, pyautogui, Appium, and
+Selenium. For Playwright keep `page = bot.click(page, ...)` so new-tab
+follows stay visible; with a bound proxy, reach the live page via
+`bot.current_page()`.
+
+## Writing a custom adapter
+
+Anything qirabot doesn't ship — cloud-device SDKs, custom engine bridges, a
+VNC session — plugs in by subclassing `qirabot.DeviceAdapter`. The required
+primitives are just:
+
+```
+screenshot · click · double_click · type_text · press_key · scroll · device_info
+```
+
+Then either pass an instance straight to `bind()`:
+
+```python
+bot = Qirabot().bind(MyAdapter(handle))
+```
+
+or implement `accepts()` and register once so `bind()` recognizes your
+framework's native objects:
+
+```python
+from qirabot import register_adapter
+
+register_adapter(MyAdapter)          # checked before the built-ins
+bot = Qirabot().bind(native_object)
+```
+
+[examples/airtest/adapter.py](https://github.com/qirabot/qirabot-python/blob/main/examples/airtest/adapter.py)
+is a complete reference implementation.
+
+## Migrating from Airtest (qirabot 1.x)
+
+qirabot 2.0 removed the airtest integration — and with it the `numpy<2` /
+`opencv-contrib` pins that collided with modern environments. The built-in
+backends are drop-in replacements:
+
+```python
+# 1.x                                          # 2.0
+connect_device("Android:///emu-5554")          AdbDevice("emu-5554")
+connect_device("iOS:///http://...:8100")       WdaClient("http://...:8100")
+connect_device("Windows:///132456")            Window(hwnd=132456)
+```
+
+Keeping your airtest scripts? Copy the reference adapter above into your
+project (airtest stays *your* dependency, not qirabot's), `register_adapter`
+it once, and your 1.x `bind(connect_device(...))` calls run unchanged. The
+1.x series lives on the
+[`1.x` branch](https://github.com/qirabot/qirabot-python/tree/1.x) in
+maintenance mode; `pip install "qirabot<2"` always resolves to the newest
+1.9.x patch.

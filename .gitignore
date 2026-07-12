@@ -26,3 +26,7 @@ env/
 
 # uv-generated lockfile: this is a published library, deps stay unpinned
 uv.lock
+
+# docs site (VitePress) — dist/ is already ignored globally above
+docs/node_modules/
+docs/.vitepress/cache/
