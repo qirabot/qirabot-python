@@ -28,7 +28,12 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 # --- 2. qirabot (isolated tool environment) -----------------------------------
 Say 'installing qirabot: uv tool install "qirabot[browser]"'
 uv tool install --upgrade "qirabot[browser]"
-uv tool update-shell 2>$null | Out-Null
+# uv prints "already in PATH" to stderr; under EAP=Stop, Windows PowerShell 5.1
+# turns redirected native stderr into a terminating NativeCommandError — relax
+# EAP around the call so an informational line can't abort the install.
+$eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+uv tool update-shell 2>&1 | Out-Null
+$ErrorActionPreference = $eap
 
 $qirabot = Join-Path "$env:USERPROFILE\.local\bin" "qirabot.exe"
 if (-not (Test-Path $qirabot)) { $qirabot = "qirabot" }
