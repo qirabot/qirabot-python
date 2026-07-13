@@ -15,12 +15,15 @@ SendKeys fallback — is native here.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 from qirabot import windows as win
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig, split_combo
 from qirabot.windows import Window
+
+logger = logging.getLogger("qirabot")
 
 # ---------------------------------------------------------------------------
 # Key tables (US layout — non-US layouts get the KEYEVENTF_UNICODE path)
@@ -218,9 +221,29 @@ class WindowsAdapter(DeviceAdapter):
 
     # ---- pointer ------------------------------------------------------------
 
+    def _reassert_held_keys(self) -> None:
+        """Re-press every key held via key_down, right after an ensure_foreground.
+
+        Two failure modes make a held modifier silently vanish before a click
+        lands: key_down's own ensure_foreground may have failed (its down event
+        went to whichever window really had focus), and ensure_foreground's
+        ALT-tap unlock releases a held ALT. Re-sending the down events now that
+        the target window IS foreground repairs both; a duplicate down on an
+        already-held key is just autorepeat to the app.
+        """
+        if not self._held_keys:
+            return
+        win.send_inputs(
+            [win.key_scancode_event(code, ext, False) for code, ext in self._held_keys]
+        )
+        # Frame-polling apps need to sample the modifiers as held before the
+        # button event arrives.
+        time.sleep(KEY_HOLD)
+
     def _button_click(self, x: float, y: float, down: int, up: int) -> None:
         with win.dpi_awareness():
             win.ensure_foreground(self._window.hwnd)
+            self._reassert_held_keys()
             # Hardening: approach moves before the press so hit-testing apps
             # see WM_MOUSEMOVE, then a real hold instead of a ~0ms blip.
             for ox, oy in ((-CLICK_OFFSET, -CLICK_OFFSET), (CLICK_OFFSET, CLICK_OFFSET), (0, 0)):
@@ -248,6 +271,7 @@ class WindowsAdapter(DeviceAdapter):
     def mouse_down(self, x: float, y: float) -> None:
         with win.dpi_awareness():
             win.ensure_foreground(self._window.hwnd)
+            self._reassert_held_keys()
             self._move_to(x, y)
             win.send_inputs([win.mouse_event(win.MOUSEEVENTF_LEFTDOWN)])
         self._mouse_held = True
@@ -262,6 +286,7 @@ class WindowsAdapter(DeviceAdapter):
     def drag(self, from_x: float, from_y: float, to_x: float, to_y: float) -> None:
         with win.dpi_awareness():
             win.ensure_foreground(self._window.hwnd)
+            self._reassert_held_keys()
             self._move_to(from_x, from_y)
             win.send_inputs([win.mouse_event(win.MOUSEEVENTF_LEFTDOWN)])
             time.sleep(0.05)
@@ -336,7 +361,15 @@ class WindowsAdapter(DeviceAdapter):
         sc = self._scancode_for(key)
         if sc is None:
             raise NotImplementedError(f"no scancode for key {key!r}")
-        win.ensure_foreground(self._window.hwnd)
+        if not win.ensure_foreground(self._window.hwnd):
+            # Keyboard input follows focus, not coordinates: this down event is
+            # about to land in whatever window IS focused. Surface it — the
+            # symptom otherwise is "clicks work but the modifier doesn't".
+            logger.warning(
+                "key_down(%r): could not bring window %r to the foreground; "
+                "the key press may go to another window",
+                key, self._window.hwnd,
+            )
         win.send_inputs([win.key_scancode_event(sc[0], sc[1], False)])
         self._held_keys.append(sc)
 

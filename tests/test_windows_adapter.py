@@ -202,6 +202,62 @@ class TestMouse:
         flags = [e.mi.dwFlags for e in mouse_events(fake_env["sent"])]
         assert win.MOUSEEVENTF_LEFTDOWN in flags and win.MOUSEEVENTF_LEFTUP in flags
 
+    def test_click_reasserts_held_modifiers_before_press(self, fake_env):
+        # A modifier held via key_down can be lost before the click lands
+        # (key_down's ensure_foreground failed, or ensure_foreground's ALT-tap
+        # unlock released it). The click must re-press held keys after its own
+        # ensure_foreground, BEFORE the button goes down.
+        adapter = WindowsAdapter(Window(hwnd=42))
+        adapter.key_down("alt")
+        del fake_env["sent"][:]
+        adapter.click(10, 10)
+        sent = fake_env["sent"]
+        keys = key_events(sent)
+        assert [(e.ki.wScan, bool(e.ki.dwFlags & win.KEYEVENTF_KEYUP)) for e in keys] == [
+            (SCANCODES["LALT"][0], False),
+        ]
+        first_down = next(
+            i for i, e in enumerate(sent)
+            if e.type == win.INPUT_MOUSE and e.mi.dwFlags == win.MOUSEEVENTF_LEFTDOWN
+        )
+        assert sent.index(keys[0]) < first_down
+        # paced so frame-polling apps sample the modifier before the button
+        assert KEY_HOLD in fake_env["sleeps"]
+
+    def test_click_without_held_keys_injects_no_key_events(self, fake_env):
+        WindowsAdapter(Window(hwnd=42)).click(10, 10)
+        assert key_events(fake_env["sent"]) == []
+
+    def test_modifier_click_dispatch_full_sequence(self, fake_env):
+        # execute("click", modifier=...) end to end: alt down (key_down), alt
+        # re-assert, button press/release, alt up — with the release AFTER the
+        # button comes back up.
+        adapter = WindowsAdapter(Window(hwnd=42))
+        adapter._dispatch("click", {"x": 10, "y": 20, "modifier": "alt"})
+        sent = fake_env["sent"]
+        alt = SCANCODES["LALT"][0]
+        keys = [(e.ki.wScan, bool(e.ki.dwFlags & win.KEYEVENTF_KEYUP)) for e in key_events(sent)]
+        assert keys == [(alt, False), (alt, False), (alt, True)]
+        last_up = max(
+            i for i, e in enumerate(sent)
+            if e.type == win.INPUT_MOUSE and e.mi.dwFlags == win.MOUSEEVENTF_LEFTUP
+        )
+        alt_release = next(
+            i for i, e in enumerate(sent)
+            if e.type == win.INPUT_KEYBOARD and e.ki.dwFlags & win.KEYEVENTF_KEYUP
+        )
+        assert last_up < alt_release
+
+    def test_mouse_down_reasserts_held_modifiers(self, fake_env):
+        adapter = WindowsAdapter(Window(hwnd=42))
+        adapter.key_down("shift")
+        del fake_env["sent"][:]
+        adapter.mouse_down(10, 10)
+        keys = key_events(fake_env["sent"])
+        assert [(e.ki.wScan, bool(e.ki.dwFlags & win.KEYEVENTF_KEYUP)) for e in keys] == [
+            (SCANCODES["LSHIFT"][0], False),
+        ]
+
     def test_release_all_inputs_sweeps(self, fake_env):
         adapter = WindowsAdapter(Window(hwnd=42))
         adapter.key_down("shift")
@@ -286,6 +342,17 @@ class TestKeyboard:
     def test_unmappable_named_key_raises(self, fake_env):
         with pytest.raises(NotImplementedError):
             WindowsAdapter(Window(hwnd=42)).press_key("VolumeMute")
+
+    def test_key_down_warns_when_foreground_fails(self, fake_env, monkeypatch, caplog):
+        # Keyboard input follows focus: if the window can't be fronted the
+        # press lands elsewhere, so the failure must at least be surfaced.
+        monkeypatch.setattr(win, "ensure_foreground", lambda hwnd: False)
+        adapter = WindowsAdapter(Window(hwnd=42))
+        with caplog.at_level("WARNING", logger="qirabot"):
+            adapter.key_down("alt")
+        assert any("foreground" in r.message for r in caplog.records)
+        # the key is still injected (best effort) and tracked for release
+        assert adapter._held_keys == [SCANCODES["LALT"]]
 
     def test_key_down_before_side_effect_invariant(self, fake_env):
         # key_down on an unmappable key must raise BEFORE injecting anything
