@@ -16,7 +16,8 @@ qira_runs/
 plans/
 
 # local reference material (e.g. vendored third-party source for lookup)
-reference/
+# (anchored to the repo root — docs/reference/ is real content)
+/reference/
 
 # virtualenvs
 venv/
