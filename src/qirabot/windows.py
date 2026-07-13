@@ -493,6 +493,21 @@ def send_inputs(events: list[INPUT]) -> None:
 _SW_RESTORE = 9
 
 
+def _same_hwnd(a: Any, b: Any) -> bool:
+    """Compare HWNDs across ctypes representations.
+
+    Window handles are 32-bit values that 64-bit Windows sign-extends, so the
+    SAME handle surfaces as 0x80001234 (raw), -2147479020 (default c_int
+    restype, e.g. GetForegroundWindow here) or 0xFFFFFFFF80001234
+    (``int(c_void_p)``, e.g. the EnumWindows callback that resolves
+    ``Window.hwnd``) depending on which API path produced it. Naive ``==``
+    then reports a foreground window as "not foreground" forever — and
+    ensure_foreground fires its ALT-tap unlock on every action, releasing any
+    modifier key held around a click. Compare the low 32 bits.
+    """
+    return (int(a or 0) & 0xFFFFFFFF) == (int(b or 0) & 0xFFFFFFFF)
+
+
 def ensure_foreground(hwnd: int) -> bool:
     """Bring ``hwnd`` to the foreground (best-effort; returns success).
 
@@ -502,15 +517,15 @@ def ensure_foreground(hwnd: int) -> bool:
     SW_RESTORE before it can take focus.
     """
     user32 = _user32()
-    if user32.GetForegroundWindow() == hwnd:
+    if _same_hwnd(user32.GetForegroundWindow(), hwnd):
         return True
     user32.ShowWindow(ctypes.c_void_p(hwnd), _SW_RESTORE)
     user32.SetForegroundWindow(ctypes.c_void_p(hwnd))
-    if user32.GetForegroundWindow() == hwnd:
+    if _same_hwnd(user32.GetForegroundWindow(), hwnd):
         return True
     # ALT tap unlocks SetForegroundWindow for this process, then retry.
     alt = 0x38  # LALT scancode
     send_inputs([key_scancode_event(alt, False, False), key_scancode_event(alt, False, True)])
     user32.SetForegroundWindow(ctypes.c_void_p(hwnd))
     time.sleep(0.05)
-    return bool(user32.GetForegroundWindow() == hwnd)
+    return bool(_same_hwnd(user32.GetForegroundWindow(), hwnd))

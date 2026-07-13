@@ -436,6 +436,24 @@ class TestForeground:
         WindowsAdapter(Window(hwnd=42)).click(1, 1)
         assert calls == [42]
 
+    def test_hwnd_representation_mismatch_is_still_foreground(self, monkeypatch):
+        # 64-bit Windows sign-extends 32-bit HWNDs, so the same handle arrives
+        # as a negative int (default c_int restype on GetForegroundWindow) and
+        # as a sign-extended unsigned (int(c_void_p) in the EnumWindows
+        # callback). A naive == treats the window as never-foreground and
+        # fires the ALT-tap unlock on EVERY action — which releases a modifier
+        # held around a click.
+        raw = 0x80001234
+        negative = raw - (1 << 32)            # GetForegroundWindow's view
+        sign_extended = (1 << 64) + negative  # Window.hwnd's view
+        user32 = FakeUser32(foreground=negative)
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        sent = []
+        monkeypatch.setattr(win, "send_inputs", lambda evs: sent.extend(evs))
+
+        assert win.ensure_foreground(sign_extended) is True
+        assert sent == []  # already foreground: no ALT tap injected
+
     def test_ensure_foreground_alt_unlock_retry(self, monkeypatch):
         # Not foreground, SetForegroundWindow initially refused: the ALT tap
         # unlock must be injected, then the retry succeeds.
