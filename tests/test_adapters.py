@@ -352,7 +352,22 @@ class TestClickWithModifiers:
         ]
         # Guard sleeps before and after the click so frame-polling apps
         # sample the modifier as held through the whole button press.
-        assert sleeps == [0.05, 0.05]
+        assert sleeps == [FakeAdapter._MODIFIER_LEAD, FakeAdapter._MODIFIER_TAIL]
+
+    def test_env_overrides_modifier_pacing(self, sleeps, monkeypatch):
+        # Games differ in how long their modifier "mode" transition takes;
+        # the env knobs let users tune the hold without a code change.
+        monkeypatch.setenv("QIRA_MODIFIER_LEAD", "0.8")
+        monkeypatch.setenv("QIRA_MODIFIER_TAIL", "0.3")
+        a = FakeAdapter()
+        a.execute("click", {"x": 10, "y": 20, "modifier": "alt"})
+        assert sleeps == [0.8, 0.3]
+
+    def test_bad_env_value_falls_back_to_default(self, sleeps, monkeypatch):
+        monkeypatch.setenv("QIRA_MODIFIER_LEAD", "not-a-number")
+        a = FakeAdapter()
+        a.execute("click", {"x": 10, "y": 20, "modifier": "alt"})
+        assert sleeps == [FakeAdapter._MODIFIER_LEAD, FakeAdapter._MODIFIER_TAIL]
 
     def test_combo_modifiers_release_in_reverse(self, sleeps):
         a = FakeAdapter()

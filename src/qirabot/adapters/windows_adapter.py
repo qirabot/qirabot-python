@@ -141,6 +141,14 @@ class WindowsAdapter(DeviceAdapter):
     # Desktop UI (window transitions, scroll inertia) needs a generous floor.
     _SETTLE_SECONDS = 1.0
 
+    # Games animate into their modifier "mode" (alt unlocking the cursor,
+    # overlays fading in) over several frames; a click that arrives before the
+    # transition finishes is processed as an unmodified click. Hold the
+    # modifier well before the button goes down and keep it held after the
+    # release so the frame that processes the click still samples it as down.
+    _MODIFIER_LEAD = 0.35
+    _MODIFIER_TAIL = 0.15
+
     def __init__(self, target: Any) -> None:
         self._window: Window = target
         self._last_size: tuple[int, int] | None = None

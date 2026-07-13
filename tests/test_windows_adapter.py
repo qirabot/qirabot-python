@@ -247,6 +247,11 @@ class TestMouse:
             if e.type == win.INPUT_KEYBOARD and e.ki.dwFlags & win.KEYEVENTF_KEYUP
         )
         assert last_up < alt_release
+        # game-tuned pacing: a long lead before the click (games animate into
+        # their modifier mode) and a tail after the button release
+        assert WindowsAdapter._MODIFIER_LEAD in fake_env["sleeps"]
+        assert WindowsAdapter._MODIFIER_TAIL in fake_env["sleeps"]
+        assert WindowsAdapter._MODIFIER_LEAD >= 0.3
 
     def test_mouse_down_reasserts_held_modifiers(self, fake_env):
         adapter = WindowsAdapter(Window(hwnd=42))

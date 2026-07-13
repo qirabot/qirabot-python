@@ -188,6 +188,27 @@ class DeviceAdapter(ABC):
                 # rather than leave a key stuck until the next run.
                 self.release_all_inputs()
 
+    # How long modifier key(s) stay held before the click goes down (lead) and
+    # after the button comes back up (tail). 50ms suits ordinary desktop apps;
+    # games need far more lead — many animate into their modifier "mode"
+    # (cursor unlock, overlay) over several frames and process a click that
+    # arrives mid-transition as unmodified. Tunable per run via the
+    # QIRA_MODIFIER_LEAD / QIRA_MODIFIER_TAIL env vars (seconds).
+    _MODIFIER_LEAD: float = 0.05
+    _MODIFIER_TAIL: float = 0.05
+
+    @staticmethod
+    def _env_seconds(name: str, default: float) -> float:
+        import os
+
+        raw = os.environ.get(name)
+        if raw:
+            try:
+                return float(raw)
+            except ValueError:
+                pass
+        return default
+
     def _click_with_modifiers(self, x: float, y: float, modifier: str) -> None:
         """Hold modifier key(s) (``+``-joined) around a click, then release.
 
@@ -203,11 +224,12 @@ class DeviceAdapter(ABC):
             for k in keys:
                 self.key_down(k)  # registers in _held_keys on desktop adapters
                 pressed.append(k)
-            # Frame-polling apps (games at 60fps) need the modifier sampled as
-            # held BEFORE the click lands and THROUGH the button release.
-            time.sleep(0.05)
+            # The modifier must be sampled as held BEFORE the click lands and
+            # THROUGH the button release — and apps that transition into a
+            # modifier mode need the whole lead to finish that transition.
+            time.sleep(self._env_seconds("QIRA_MODIFIER_LEAD", self._MODIFIER_LEAD))
             self.click(x, y)
-            time.sleep(0.05)
+            time.sleep(self._env_seconds("QIRA_MODIFIER_TAIL", self._MODIFIER_TAIL))
         except NotImplementedError:
             self.click(x, y)  # web/touch: degrade to a plain click
             return
