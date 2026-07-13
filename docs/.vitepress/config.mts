@@ -18,6 +18,7 @@ const enSidebar = [
       { text: 'Installation', link: '/guide/installation' },
       { text: 'Quick Start', link: '/guide/quickstart' },
       { text: 'CLI Reference', link: '/guide/cli' },
+      { text: 'Use with AI Agents', link: '/guide/agents' },
     ],
   },
   {
@@ -67,6 +68,7 @@ const zhSidebar = [
       { text: '安装', link: '/zh/guide/installation' },
       { text: '快速开始', link: '/zh/guide/quickstart' },
       { text: 'CLI 参考', link: '/zh/guide/cli' },
+      { text: '配合 AI Agent 使用', link: '/zh/guide/agents' },
     ],
   },
   {
