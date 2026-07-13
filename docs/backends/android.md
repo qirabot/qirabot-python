@@ -14,6 +14,16 @@ Because element location is AI vision on the screenshot, there are no
 UiAutomator selectors and no accessibility-tree dependency: native apps,
 WebViews, Flutter, React Native, and games all look the same to it.
 
+The core package is enough — no extras (see
+[Installation](/guide/installation)). The quickest check is the CLI:
+
+```bash
+qirabot android "Open settings and turn on airplane mode"
+qirabot android "..." -d emulator-5554 --app-package com.android.settings
+```
+
+The same thing in Python:
+
 ```python
 from qirabot import AdbDevice, Qirabot
 
@@ -29,14 +39,6 @@ bot.close()
 `bind(device)` fixes the target once, so every later call drops the first
 argument (`bot.click("...")` instead of `bot.click(device, "...")`) — see
 [Custom Adapters & Bolt-On](/backends/custom-adapters) for the details.
-
-The core package is enough — no extras:
-
-```bash
-uv tool install qirabot
-qirabot android "Open settings and turn on airplane mode"
-qirabot android "..." -d emulator-5554 --app-package com.android.settings
-```
 
 ## Non-ASCII typing (Chinese, emoji)
 

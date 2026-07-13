@@ -13,6 +13,15 @@ ctypes;内置在核心包,无需 extras。
 配合 AI 视觉定位,它能驱动任何基于 DOM/无障碍树的框架都无能为力的目标:
 Unity 和 Unreal 游戏、自定义启动器、遗留原生应用。
 
+最快的验证方式是 CLI——内置能力,无需 extras:
+
+```bash
+qirabot desktop "打开背包并列出所有物品" --window-title "Genshin"
+qirabot desktop "..." --hwnd 132456
+```
+
+同样的事在 Python 里:
+
 ```python
 from qirabot import Qirabot, Window
 
@@ -21,13 +30,6 @@ bot = Qirabot().bind(window)
 
 result = bot.ai("打开背包并列出所有物品")
 bot.close()
-```
-
-CLI 写法:
-
-```bash
-qirabot desktop "打开背包并列出所有物品" --window-title "Genshin"
-qirabot desktop "..." --hwnd 132456
 ```
 
 ## 游戏级输入

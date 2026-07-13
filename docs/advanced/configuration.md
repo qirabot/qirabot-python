@@ -76,8 +76,33 @@ bot = Qirabot(model_alias="high_quality")        # applies to all actions
 bot.click(page, "Login", model_alias="fast")     # or override per call
 ```
 
-Check your [dashboard](https://app.qirabot.com) for the live list your
-account can use; leave it empty for the server default.
+The models are hosted server-side — there is no API key or endpoint to
+configure, and the concrete model behind each alias is managed (and
+upgraded) by the platform. `qirabot models` lists the aliases your account
+can use; leave the alias empty for the server default.
+
+**Which alias when?** Rules of thumb:
+
+- **Leave it unset** until you have a reason not to — the server default is
+  tuned for general use.
+- **`fast`** — clean, high-contrast UIs with unambiguous targets: form
+  filling, standard web flows, big buttons. Cheapest and lowest latency.
+- **`high_quality`** — dense or low-contrast screens: small text, crowded
+  dashboards, game UIs, subtle visual assertions ("the icon is greyed out").
+- **Mix per call** — the pattern that keeps cost down without giving up
+  accuracy: default the bot to a cheap alias and raise only the hard calls:
+
+```python
+bot = Qirabot(model_alias="fast")
+bot.click(page, "the Search button")                        # easy → fast
+data = bot.extract(page, "all prices in the results table",
+                   model_alias="high_quality")              # hard → upgrade
+```
+
+**Watching cost:** `extract()` / `verify()` results and each `StepResult`
+from `ai()` carry `input_tokens` / `output_tokens` fields — a call's spend
+is their sum. See the
+[Method Reference](/reference/methods#result-objects).
 
 `language` sets the language of AI responses (extracted text, reasoning) —
 a short tag like `"zh"` or `"en"`:

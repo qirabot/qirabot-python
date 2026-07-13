@@ -71,7 +71,8 @@ qirabot doctor
 ```
 
 `doctor` 会报告已安装、缺失(附修复命令)的组件,以及 API key 是否能连通
-服务器。
+服务器。还没保存 key?这一项会提示未设置——[快速开始](/zh/guide/quickstart)
+的第一条命令(`qirabot login`)就是修复方式。
 
 ## 常见问题
 

@@ -5,6 +5,10 @@ description: Every Qirabot action - AI-located clicks and typing, extract/verify
 
 # API Reference
 
+This page is the working overview — what each call does and how it maps per
+platform. Full signatures, every keyword parameter, and the result objects
+are in the [Method Reference](/reference/methods).
+
 ## Simple actions (AI-located)
 
 Lightweight vision-based element location — fast and low-cost:

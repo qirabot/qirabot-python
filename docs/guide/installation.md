@@ -74,7 +74,9 @@ qirabot doctor
 ```
 
 `doctor` reports what is installed, what is missing (with the exact command to
-fix it), and whether your API key reaches the server.
+fix it), and whether your API key reaches the server. Haven't saved a key yet?
+That check will flag it — the [Quick Start](/guide/quickstart)'s first command
+(`qirabot login`) is the fix.
 
 ## Troubleshooting
 

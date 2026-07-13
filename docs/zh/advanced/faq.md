@@ -1,0 +1,74 @@
+---
+title: 常见问题 FAQ —— Qirabot
+description: 是否需要自备模型 API key、哪些调用计费、录屏黑屏怎么办、headless 自动降级、步骤间长时间等待等常见问题。
+---
+
+# 常见问题
+
+## 需要自备模型 API key(OpenAI、Anthropic 等)吗?
+
+不需要。视觉模型托管在 Qirabot 服务端——`qirabot login` 一次即可运行,
+不用配置模型端点或一堆环境变量;质量档位通过
+[模型别名](/zh/advanced/configuration#模型与语言)按调用或按实例选择
+(`fast` · `balanced` · `balanced_pro` · `high_quality`)。
+
+## 哪些调用计费,哪些免费?
+
+走 AI 的调用计费:`ai()`、`extract`、`verify`、`wait_for`,以及 AI 定位
+的动作(带元素描述的 `click`、`type_text`、`double_click`)。不经过 AI
+的直接动作免费:`navigate`、`go_back`、`close_tab`、`scroll`、
+`press_key`、`screenshot`、`launch_app`、空 locate 的 `type_text`、不带
+locate 的 `mouse_up`。[API 参考](/zh/reference/api)中标注了"无 AI、不
+计费"。余额见[控制台](https://app.qirabot.com);余额耗尽会抛出
+`InsufficientBalanceError`。
+
+## 哪些数据会离开我的机器?
+
+截图、指令文本和步骤元数据——仅此而已。代码、cookie、凭据都留在本地;
+动作在你的机器上执行。详见[数据与隐私](/zh/reference/privacy)。
+
+## 录屏为什么是黑的?
+
+- **Windows 且 `record_window=True`**:`gdigrab` 对最小化或 GPU 合成
+  (独占全屏游戏)的窗口会录出黑帧——保持窗口可见,游戏建议录全屏。
+- **macOS**:给终端/IDE 授予"屏幕录制"权限。
+
+录屏是尽力而为:缺 ffmpeg 或权限被拒只警告、不会让任务失败——查看运行
+目录里的 `recording.ffmpeg.log`。详见[报告与录屏](/zh/advanced/reports)。
+
+## 浏览器为什么自动变成 headless 了?
+
+在没有显示器的机器上(无 `DISPLAY`),`bot.open()` 和 CLI 会自动降级为
+headless 并给出警告。显式传 `--headless` 可以让它无条件生效。
+
+## 遇到 `MissingDependencyError` 怎么办?
+
+某个可选后端依赖未安装。错误消息里给出了要执行的确切
+`pip install "qirabot[<extra>]"` 命令;extras 清单见
+[安装](/zh/guide/installation)。
+
+## 脚本在步骤之间长时间等待,任务会超时吗?
+
+不会。进程存活期间 SDK 会在后台发送心跳,`bot.*` 调用之间等多久都安全。
+只有进程悄然死掉时,服务端孤儿清理器才会在约 5 分钟后回收任务。详见
+[配置](/zh/advanced/configuration#任务生命周期)。
+
+## Android 上能输入中文和 emoji 吗?
+
+能——`bot.type_text(...)` 开箱即用。超出 ASCII 的输入通过内置的
+ADBKeyboard 输入法完成,按需安装、用完自动切回。见
+[Android](/zh/backends/android)。
+
+## 必须重写我现有的 Playwright / Selenium / Appium 套件吗?
+
+不用。把你现有的 `page` 或 `driver` 作为目标传入,只在选择器难搞的地方
+加 AI 步骤——见 [Playwright](/zh/frameworks/playwright)、
+[Selenium](/zh/frameworks/selenium)、[Appium](/zh/frameworks/appium)、
+[pytest](/zh/frameworks/pytest) 各集成指南。
+
+## 我从 Airtest / qirabot 1.x 迁移过来
+
+内置设备后端是即插即用的替代
+(`connect_device(...)` → `AdbDevice` / `WdaClient` / `Window`),参考
+adapter 能让老脚本原样运行。见
+[从 Airtest 迁移](/zh/backends/custom-adapters#从-airtest-迁移-qirabot-1-x)。

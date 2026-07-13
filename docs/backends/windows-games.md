@@ -15,6 +15,15 @@ Combined with AI vision for element location, this drives what no
 DOM/accessibility-based framework can: Unity and Unreal games, custom
 launchers, legacy native apps.
 
+The quickest check is the CLI — built in, no extras:
+
+```bash
+qirabot desktop "Open the inventory and list all items" --window-title "Genshin"
+qirabot desktop "..." --hwnd 132456
+```
+
+The same thing in Python:
+
 ```python
 from qirabot import Qirabot, Window
 
@@ -23,13 +32,6 @@ bot = Qirabot().bind(window)
 
 result = bot.ai("Open the inventory and list all items")
 bot.close()
-```
-
-From the CLI:
-
-```bash
-qirabot desktop "Open the inventory and list all items" --window-title "Genshin"
-qirabot desktop "..." --hwnd 132456
 ```
 
 ## Game-grade input

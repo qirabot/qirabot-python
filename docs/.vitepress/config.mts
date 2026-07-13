@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitepress'
+import llmstxt from 'vitepress-plugin-llms'
 
 // Docs site for qirabot.com/docs. Deployed by .github/workflows/docs-deploy.yml
 // to the website S3 bucket under the docs/ prefix; the marketing site's
@@ -20,18 +21,18 @@ const enSidebar = [
     ],
   },
   {
-    text: 'Platform Backends',
+    text: 'Platforms',
     items: [
-      { text: 'Browser (Playwright)', link: '/backends/browser' },
-      { text: 'Android — direct over adb', link: '/backends/android' },
-      { text: 'iOS — WDA, no Appium', link: '/backends/ios' },
+      { text: 'Browser', link: '/backends/browser' },
+      { text: 'Android', link: '/backends/android' },
+      { text: 'iOS', link: '/backends/ios' },
       { text: 'Windows & Games', link: '/backends/windows-games' },
-      { text: 'Desktop (pyautogui)', link: '/backends/desktop' },
+      { text: 'Desktop', link: '/backends/desktop' },
       { text: 'Custom Adapters', link: '/backends/custom-adapters' },
     ],
   },
   {
-    text: 'Bolt onto Your Framework',
+    text: 'Integrations',
     items: [
       { text: 'Playwright', link: '/frameworks/playwright' },
       { text: 'Selenium', link: '/frameworks/selenium' },
@@ -46,11 +47,16 @@ const enSidebar = [
       { text: 'Reports & Recording', link: '/advanced/reports' },
       { text: 'Configuration', link: '/advanced/configuration' },
       { text: 'Error Handling', link: '/advanced/error-handling' },
+      { text: 'FAQ', link: '/advanced/faq' },
     ],
   },
   {
     text: 'Reference',
-    items: [{ text: 'API — Actions & Platforms', link: '/reference/api' }],
+    items: [
+      { text: 'API — Actions & Platforms', link: '/reference/api' },
+      { text: 'Methods — Signatures & Returns', link: '/reference/methods' },
+      { text: 'Data & Privacy', link: '/reference/privacy' },
+    ],
   },
 ]
 
@@ -64,18 +70,18 @@ const zhSidebar = [
     ],
   },
   {
-    text: '平台后端',
+    text: '支持平台',
     items: [
-      { text: '浏览器（Playwright）', link: '/zh/backends/browser' },
-      { text: 'Android — adb 直连', link: '/zh/backends/android' },
-      { text: 'iOS — WDA 直连，免 Appium', link: '/zh/backends/ios' },
-      { text: 'Windows 窗口与游戏', link: '/zh/backends/windows-games' },
-      { text: '桌面（pyautogui）', link: '/zh/backends/desktop' },
+      { text: '浏览器', link: '/zh/backends/browser' },
+      { text: 'Android', link: '/zh/backends/android' },
+      { text: 'iOS', link: '/zh/backends/ios' },
+      { text: 'Windows 与游戏', link: '/zh/backends/windows-games' },
+      { text: '桌面', link: '/zh/backends/desktop' },
       { text: '自定义 Adapter', link: '/zh/backends/custom-adapters' },
     ],
   },
   {
-    text: '挂载现有框架',
+    text: '框架集成',
     items: [
       { text: 'Playwright', link: '/zh/frameworks/playwright' },
       { text: 'Selenium', link: '/zh/frameworks/selenium' },
@@ -90,11 +96,16 @@ const zhSidebar = [
       { text: '报告与录屏', link: '/zh/advanced/reports' },
       { text: '配置', link: '/zh/advanced/configuration' },
       { text: '错误处理', link: '/zh/advanced/error-handling' },
+      { text: '常见问题 FAQ', link: '/zh/advanced/faq' },
     ],
   },
   {
     text: '参考',
-    items: [{ text: 'API——动作与平台', link: '/zh/reference/api' }],
+    items: [
+      { text: 'API——动作与平台', link: '/zh/reference/api' },
+      { text: '方法参考——签名与返回值', link: '/zh/reference/methods' },
+      { text: '数据与隐私', link: '/zh/reference/privacy' },
+    ],
   },
 ]
 
@@ -117,6 +128,18 @@ export default defineConfig({
   sitemap: {
     hostname: 'https://qirabot.com/docs/',
   },
+  vite: {
+    plugins: [
+      // llms.txt + llms-full.txt for AI tools (Cursor @Docs, Claude, etc.).
+      // English pages only — LLM consumers read English; halves the token cost.
+      llmstxt({
+        domain: 'https://qirabot.com',
+        ignoreFiles: ['zh/**/*'],
+        description:
+          'AI vision-driven GUI automation for browsers, Android, iOS, desktops, and games — no DOM, no selectors. Python SDK and CLI.',
+      }),
+    ],
+  },
   locales: {
     root: {
       label: 'English',
@@ -124,7 +147,7 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: 'Guide', link: '/guide/quickstart' },
-          { text: 'Backends', link: '/backends/browser' },
+          { text: 'Platforms', link: '/backends/browser' },
           { text: 'Dashboard', link: 'https://app.qirabot.com' },
           { text: 'qirabot.com', link: 'https://qirabot.com' },
         ],
@@ -148,7 +171,7 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: '指南', link: '/zh/guide/quickstart' },
-          { text: '平台后端', link: '/zh/backends/browser' },
+          { text: '支持平台', link: '/zh/backends/browser' },
           { text: '控制台', link: 'https://app.qirabot.com' },
           { text: 'qirabot.com', link: 'https://qirabot.com' },
         ],

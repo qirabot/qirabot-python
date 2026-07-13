@@ -12,6 +12,14 @@ lands there.
 
 Requires the `desktop` extra: `pip install "qirabot[desktop]"`.
 
+The quickest check is the CLI:
+
+```bash
+qirabot desktop "Create a new note titled Groceries" --app Notes
+```
+
+The same thing in Python:
+
 ```python
 import pyautogui
 from qirabot import Qirabot
@@ -28,12 +36,6 @@ no page or driver object, so passing the module is how you say "drive the
 whole screen". (Every call takes a target this way; see
 [Custom Adapters & Bolt-On](/backends/custom-adapters) for the full list of
 accepted target types, and `bind()` to stop repeating it.)
-
-From the CLI:
-
-```bash
-qirabot desktop "Create a new note titled Groceries" --app Notes
-```
 
 ## Launching apps
 

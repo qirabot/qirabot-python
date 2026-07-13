@@ -12,6 +12,14 @@ description: 通过 HTTP 直连 WebDriverAgent,用 AI 视觉自动化 iPhone 真
 元素定位是对截图做 AI 视觉识别,因此没有 XCUITest 元素查询要维护;抗拒
 无障碍检查的应用(游戏、自绘 UI)和原生应用一样能自动化。
 
+最快的验证方式是 CLI(WDA 需已在运行——配置见下文):
+
+```bash
+qirabot ios "在微信里给 Alice 发一句 hi" --bundle-id com.tencent.xin
+```
+
+同样的事在 Python 里:
+
 ```python
 from qirabot import Qirabot, WdaClient
 
@@ -22,12 +30,6 @@ bot = Qirabot().bind(client)
 result = bot.ai("打开 通用 > 关于本机,报告 iOS 版本号")
 print(f"Success: {result.success}")
 bot.close()
-```
-
-CLI 写法:
-
-```bash
-qirabot ios "在微信里给 Alice 发一句 hi" --bundle-id com.tencent.xin
 ```
 
 ## 真机配置(3 步)

@@ -14,6 +14,14 @@ Element location is AI vision on the screenshot, so there are no XCUITest
 element queries to maintain, and apps that resist accessibility inspection
 (games, custom-rendered UIs) work the same as native ones.
 
+The quickest check is the CLI (WDA must be running — setup below):
+
+```bash
+qirabot ios "Send hi to Alice on WeChat" --bundle-id com.tencent.xin
+```
+
+The same thing in Python:
+
 ```python
 from qirabot import Qirabot, WdaClient
 
@@ -24,12 +32,6 @@ bot = Qirabot().bind(client)
 result = bot.ai("Open General > About and report the iOS version")
 print(f"Success: {result.success}")
 bot.close()
-```
-
-From the CLI:
-
-```bash
-qirabot ios "Send hi to Alice on WeChat" --bundle-id com.tencent.xin
 ```
 
 ## Real-device setup (3 steps)

@@ -5,6 +5,11 @@ description: Run your first AI-driven GUI automation in two commands, then the s
 
 # Quick Start
 
+Two ways in, both on this page: the **CLI** — a natural-language task as a
+shell command, no code — and the **Python SDK**. Start with the CLI even if
+you came for the SDK: it proves your setup in one line. (No model API keys
+to configure — the vision models are hosted server-side.)
+
 Two commands — save your API key once (get it from your
 [dashboard](https://app.qirabot.com)), then hand the AI a task:
 

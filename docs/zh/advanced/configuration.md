@@ -73,8 +73,30 @@ bot = Qirabot(model_alias="high_quality")        # 全局生效
 bot.click(page, "登录", model_alias="fast")      # 或按调用覆盖
 ```
 
-账号实际可用的档位列表见[控制台](https://app.qirabot.com);留空使用服务
-器默认。
+模型托管在服务端——没有 API key 或 endpoint 需要配置,各档位背后的具体
+模型由平台管理(并持续升级)。`qirabot models` 列出你的账号可用的档位;
+档位留空则使用服务器默认。
+
+**什么时候选哪个档位?**经验法则:
+
+- **先不设置**,除非有明确理由——服务器默认档位已为通用场景调优。
+- **`fast`**——干净、高对比度、目标明确的界面:表单填写、标准 web
+  流程、大按钮。最便宜、延迟最低。
+- **`high_quality`**——密集或低对比度的画面:小字号、拥挤的仪表盘、
+  游戏 UI、细微的视觉断言(“图标是置灰的”)。
+- **按调用混用**——既压低成本又不牺牲准确率的模式:bot 默认用便宜
+  档位,只给难的调用升档:
+
+```python
+bot = Qirabot(model_alias="fast")
+bot.click(page, "搜索按钮")                                 # 简单 → fast
+data = bot.extract(page, "结果表格里的所有价格",
+                   model_alias="high_quality")              # 难 → 升档
+```
+
+**关注成本:**`extract()` / `verify()` 的结果和 `ai()` 的每个
+`StepResult` 都带有 `input_tokens` / `output_tokens` 字段——一次调用的
+花费就是两者之和。见[方法参考](/zh/reference/methods#结果对象)。
 
 `language` 设定 AI 响应(提取文本、推理)的语言——短语言标签如 `"zh"` /
 `"en"`:

@@ -5,6 +5,9 @@ description: Qirabot 全部动作——AI 定位的点击与输入、extract/ver
 
 # API 参考
 
+本页是工作总览——每个调用做什么、在各平台如何映射。完整签名、每个
+关键字参数以及结果对象见[方法参考](/zh/reference/methods)。
+
 ## 简单动作(AI 定位)
 
 轻量的视觉元素定位——快且低成本:

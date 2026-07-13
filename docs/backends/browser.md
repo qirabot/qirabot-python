@@ -15,8 +15,22 @@ Selenium session you already have.
 
 ## Managed browser
 
-`bot.open()` launches Chromium (Playwright under the hood) — you never write
-framework code:
+Requires the `browser` extra: `pip install "qirabot[browser]"` then
+`qirabot install-browser`.
+
+The quickest way to see it run is the CLI — one command, no code:
+
+```bash
+qirabot browser "Open the top story and summarize the discussion" --url news.ycombinator.com
+qirabot browser "..." --headless --viewport 1920x1080
+qirabot browser "..." --user-data-dir ~/.qira-profile --channel chrome   # logins survive runs
+qirabot browser "..." --cdp-url http://localhost:9222                    # attach to running Chrome
+```
+
+`--cdp-url` also works with remote pools like browserless.
+
+The same run through the SDK — `bot.open()` launches Chromium (Playwright
+under the hood), you never write framework code:
 
 ```python
 from qirabot import Qirabot
@@ -29,20 +43,6 @@ print(result.output)
 
 bot.close()
 ```
-
-Requires the `browser` extra: `pip install "qirabot[browser]"` then
-`qirabot install-browser`.
-
-From the CLI, the same run is one command:
-
-```bash
-qirabot browser "Open the top story and summarize the discussion" --url news.ycombinator.com
-qirabot browser "..." --headless --viewport 1920x1080
-qirabot browser "..." --user-data-dir ~/.qira-profile --channel chrome   # logins survive runs
-qirabot browser "..." --cdp-url http://localhost:9222                    # attach to running Chrome
-```
-
-`--cdp-url` also works with remote pools like browserless.
 
 ## Bolt onto the session you already have
 
