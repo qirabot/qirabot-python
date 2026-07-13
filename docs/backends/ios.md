@@ -34,12 +34,16 @@ qirabot ios "Send hi to Alice on WeChat" --bundle-id com.tencent.xin
 
 ## Real-device setup (3 steps)
 
-1. **Run WebDriverAgent on the phone** and keep it running — in Xcode, run
-   the `WebDriverAgentRunner` scheme against the device with your own signing
-   team (or `xcodebuild ... -destination 'id=<udid>' -allowProvisioningUpdates test`).
+1. **Run WebDriverAgent on the phone** and keep it running. WebDriverAgent
+   is Appium's open-source iOS agent — clone
+   [appium/WebDriverAgent](https://github.com/appium/WebDriverAgent), open it
+   in Xcode, and run the `WebDriverAgentRunner` scheme against the device
+   with your own signing team (or
+   `xcodebuild ... -destination 'id=<udid>' -allowProvisioningUpdates test`).
+   You only need the agent itself — no Appium server.
 2. **Forward the port over USB:** `iproxy 8100 8100` (from
-   `libimobiledevice`). Sanity check: `curl http://127.0.0.1:8100/status`
-   returns JSON.
+   `libimobiledevice` — `brew install libimobiledevice` on macOS). Sanity
+   check: `curl http://127.0.0.1:8100/status` returns JSON.
 3. **Run your task** — the default `--wda-url` (`http://127.0.0.1:8100`) now
    reaches the phone.
 
@@ -58,7 +62,9 @@ qirabot ios "..." --device "iPhone 15"
 ```
 
 Note: the Appium engine currently targets simulators only (there is no
-`--udid` option) — real devices go through the WDA-direct path above.
+`--udid` option) — real devices go through the WDA-direct path above. If
+you already run Appium (or a device cloud), see
+[Appium + Qirabot](/frameworks/appium).
 
 ## Device screen recording
 
@@ -73,6 +79,8 @@ bot = Qirabot(record_mjpeg_url="http://127.0.0.1:9100")
 
 From the CLI, `qirabot ios "..." --record` does this automatically and checks
 the stream is reachable before starting; `--mjpeg-url` overrides the default.
+Report layout and all recording knobs:
+[Reports & Recording](/advanced/reports).
 
 ## Platform notes
 
@@ -84,3 +92,5 @@ the stream is reachable before starting; `--mjpeg-url` overrides the default.
 - Coming from Airtest 1.x? `connect_device("iOS:///http://...:8100")` becomes
   `WdaClient("http://...:8100")`, and `dev.driver.app_launch(...)` becomes
   `client.app_launch(...)`.
+- Full per-action behavior:
+  [platform support matrix](/reference/api#platform-support-matrix).

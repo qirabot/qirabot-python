@@ -78,7 +78,9 @@ value back as the observation for the next step.
   `ERROR: ...` so the model can react instead of the run dying.
 - **`exclude_tools`** removes built-in tools by name (e.g. `"scroll"`,
   `"long_press"`) for this call — keeps the model from wandering into
-  actions the task never needs. `done` cannot be excluded.
+  actions the task never needs. `done` cannot be excluded. Tool names are
+  the action names in the
+  [platform support matrix](/reference/api#platform-support-matrix).
 - Both parameters are per-`ai()`-call and also work on a bound bot.
 
 ### Human-in-the-loop
@@ -106,5 +108,7 @@ bot = Qirabot(model_alias="high_quality", language="zh")   # defaults for all ca
 bot.click(page, "Login", model_alias="fast")               # override per call
 ```
 
-Aliases trade cost for quality: `fast` · `balanced` · `balanced_pro`
-(default) · `high_quality`. See [Configuration](/advanced/configuration).
+Aliases trade cost for quality: `fast` · `balanced` · `balanced_pro` ·
+`high_quality`; leave unset for the server default. See
+[Configuration](/advanced/configuration). Deterministic single-step calls
+are covered in the [API reference](/reference/api).

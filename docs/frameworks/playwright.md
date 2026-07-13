@@ -60,9 +60,9 @@ for i in range(4):
     page = bot.go_back(page)   # smart: closes the history-less new tab, back to the list
 ```
 
-`ctrl+t` / `ctrl+w` via `bot.press_key` also switch the active tab — same
-rule, reassign. If you do use a bound bot, the live page is available as
-`bot.current_page()`.
+Closing a tab with `bot.press_key(page, "ctrl+w")` switches the active tab
+too — same rule, reassign. If you do use a bound bot, the live page is
+available as `bot.current_page()`.
 
 ## Auto-wait
 

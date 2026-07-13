@@ -56,8 +56,9 @@ for i in range(4):
     page = bot.go_back(page)   # 智能:关闭无历史的新标签页,回到列表
 ```
 
-`bot.press_key` 的 `ctrl+t` / `ctrl+w` 也会切换活动标签页——同样重新赋值。
-如果确实用了绑定代理,当前活动页面可通过 `bot.current_page()` 获取。
+用 `bot.press_key(page, "ctrl+w")` 关闭标签页同样会切换活动标签页——同一
+条规则,重新赋值。如果确实用了绑定代理,当前活动页面可通过
+`bot.current_page()` 获取。
 
 ## 自动等待
 

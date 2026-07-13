@@ -14,7 +14,8 @@ HTML report with per-step screenshots for every run — including failures.
 ```python
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="test-checkout")
+bot = Qirabot(task_name="test-checkout")   # module-level for brevity; prefer
+                                           # the fixture below, which close()s
 
 def test_checkout(page):          # your existing pytest-playwright fixture
     page.goto("https://shop.example.com")
@@ -54,7 +55,9 @@ def test_search(bot, page):
 ```
 
 `close()` is also covered by `atexit` if a test hard-crashes, and the server
-times out orphaned tasks after 30 minutes.
+times out orphaned tasks after ~5 minutes of silence (the SDK sends a
+background heartbeat while your process is alive, so long waits between
+steps are safe — see [Configuration](/advanced/configuration)).
 
 ## Assertion patterns
 
@@ -65,9 +68,9 @@ assert bot.verify(page, "the error banner is NOT visible")
 # Gate — raises QirabotTimeoutError on timeout, poll until true
 bot.wait_for(page, "the spinner is gone", timeout=15.0)
 
-# Value assertions via extraction
+# Value assertions via extraction — extract() returns a string subclass
 count = bot.extract(page, "the number on the cart badge as an integer")
-assert count == 1
+assert int(count) == 1
 ```
 
 Prefer `wait_for` over sleeps: it returns as soon as the condition holds.

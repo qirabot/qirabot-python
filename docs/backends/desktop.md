@@ -14,7 +14,7 @@ Requires the `desktop` extra: `pip install "qirabot[desktop]"`.
 
 ```python
 import pyautogui
-from qirabot import Qirabot, launch_app
+from qirabot import Qirabot
 
 bot = Qirabot(task_name="wechat")
 
@@ -22,6 +22,12 @@ bot.launch_app("WeChat")              # macOS app name (or bundle id)
 bot.ai(pyautogui, "Send 'hello' to honey in WeChat")
 bot.close()
 ```
+
+The target here is the **`pyautogui` module itself** — on the desktop there is
+no page or driver object, so passing the module is how you say "drive the
+whole screen". (Every call takes a target this way; see
+[Custom Adapters & Bolt-On](/backends/custom-adapters) for the full list of
+accepted target types, and `bind()` to stop repeating it.)
 
 From the CLI:
 
@@ -40,9 +46,8 @@ bot.launch_app("WeChat")             # macOS: app name or bundle id
 # launch_app("/path/to/app", wait=3) # wait for the window to appear (default 2s)
 ```
 
-On macOS it uses `open -a`/`open -b` (activating an already-running app), on
-Windows `os.startfile`/`start`/`explorer.exe shell:AppsFolder`, on Linux the
-executable directly.
+Per-OS launch mechanics are in the
+[API reference](/reference/api#launch-a-desktop-app-no-ai).
 
 ## Desktop-only input primitives
 
@@ -59,6 +64,8 @@ bot.mouse_up(pyautogui)                               # release at current curso
 ```
 
 Held inputs are auto-released at the end of an `ai()` run and on `close()`.
+Exact semantics of each primitive are in the
+[platform support matrix](/reference/api#platform-support-matrix).
 
 ## Screen recording
 

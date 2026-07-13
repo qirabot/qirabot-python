@@ -11,11 +11,14 @@ as its first argument — pass yours and mix AI steps with your existing code:
 
 | You run | You pass | Notes |
 |---|---|---|
-| Playwright | `page` | keep the explicit form — clicks can return a new tab |
-| Selenium | `driver` | `pip install qirabot selenium` |
-| Appium | `driver` | `qirabot[appium]`; Android and iOS |
-| pyautogui | the `pyautogui` module | `qirabot[desktop]` |
+| [Playwright](/frameworks/playwright) | `page` | keep the explicit form — clicks can return a new tab |
+| [Selenium](/frameworks/selenium) | `driver` | `pip install qirabot selenium` |
+| [Appium](/frameworks/appium) | `driver` | `qirabot[appium]`; Android and iOS |
+| pyautogui | the `pyautogui` module | `qirabot[desktop]` — see [Desktop](/backends/desktop) |
 | Built-in devices | `AdbDevice` / `WdaClient` / `Window` | no extras |
+
+Running inside [pytest](/frameworks/pytest)? Same story — the fixture holds
+the bot, your tests pass their own `page`/`driver`.
 
 ## bind() — drop the repeated argument
 
@@ -44,6 +47,10 @@ primitives are just:
 ```
 screenshot · click · double_click · type_text · press_key · scroll · device_info
 ```
+
+(These are the same actions listed in the
+[platform support matrix](/reference/api#platform-support-matrix) — your
+adapter defines how each maps to your engine; everything else is derived.)
 
 Then either pass an instance straight to `bind()`:
 
@@ -82,5 +89,5 @@ project (airtest stays *your* dependency, not qirabot's), `register_adapter`
 it once, and your 1.x `bind(connect_device(...))` calls run unchanged. The
 1.x series lives on the
 [`1.x` branch](https://github.com/qirabot/qirabot-python/tree/1.x) in
-maintenance mode; `pip install "qirabot<2"` always resolves to the newest
-1.9.x patch.
+maintenance mode (bug and security fixes only); `pip install "qirabot<2"`
+always resolves to the newest 1.9.x patch.

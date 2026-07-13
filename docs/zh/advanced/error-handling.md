@@ -17,9 +17,11 @@ from qirabot import (
 )
 
 try:
-    bot = Qirabot()
-    page = bot.open("https://example.com")
-    bot.click(page, "登录按钮")
+    # 构造函数本身就可能抛异常:它会校验 API key 并向服务器注册任务。
+    # `with` 保证 close() 在——且仅在——构造成功时执行。
+    with Qirabot() as bot:
+        page = bot.open("https://example.com")
+        bot.click(page, "登录按钮")
 except AuthenticationError:
     print("API key 无效。")
 except InsufficientBalanceError:
@@ -28,12 +30,26 @@ except QirabotTimeoutError:
     print("操作超时。")
 except QirabotError as e:
     print(f"错误: {e}")
-finally:
-    bot.close()
 ```
 
-`verify()` 是"失败即抛异常"的刻意例外:它返回 `True`/`False`、从不抛异常
-——最适合 `assert`。
+完整体系——所有异常都派生自 `QirabotError`,所以单独一个
+`except QirabotError` 永远是安全的兜底:
+
+| 异常 | 时机 |
+|---|---|
+| `AuthenticationError` | API key 缺失或无效(401)。不重试。 |
+| `InsufficientBalanceError` | 积分余额耗尽(402)。不重试。 |
+| `RateLimitError` | 请求过多(429)。SDK 内部会退避并重试;捕获它可加自己的退避策略。 |
+| `QirabotTimeoutError` | 客户端等待超时(`wait_for`、自动等待)。 |
+| `QirabotConnectionError` | 服务器不可达(DNS 解析失败、连接被拒)——请求根本没有完成,而不是慢。 |
+| `TaskTerminatedError` | 脚本还在运行时任务被服务端终止(控制台停止、孤儿清理器、最长时长上限)。`.task_status` 携带终态。不重试。 |
+| `ActionError` | AI 动作在服务端执行失败。 |
+| `MissingDependencyError` | 某个可选后端依赖(playwright、pyautogui 等)未安装——消息里给出要执行的确切 `pip install "qirabot[<extra>]"`。同时也是 `ImportError`。 |
+
+`verify()` 是"失败即抛异常"语义的刻意例外:**断言不成立**不抛异常——
+返回 falsy 结果(`VerifyResult`,其 `.reason` 说明原因),可直接用于
+`assert` 或 `if`。传输和服务器错误(连接丢失、鉴权、终止)仍像其他调用
+一样抛出。
 
 瞬时的动作失败会自动重试(默认 `retry=1`、`retry_delay=1.0`——见
 [配置](/zh/advanced/configuration))。

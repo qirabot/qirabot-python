@@ -71,6 +71,7 @@ result = bot.ai(
   抛出的异常以 `ERROR: ...` 回报给模型,让它能应对而不是整个运行挂掉。
 - **`exclude_tools`** 按名字移除本次调用的内置工具(如 `"scroll"`、
   `"long_press"`)——防止模型误入任务不需要的动作。`done` 不可移除。
+  工具名即[平台支持矩阵](/zh/reference/api#平台支持矩阵)中的动作名。
 - 两个参数都是按 `ai()` 调用生效,绑定代理上同样可用。
 
 ### 人工介入(human-in-the-loop)
@@ -96,5 +97,7 @@ bot = Qirabot(model_alias="high_quality", language="zh")   # 全局默认
 bot.click(page, "登录", model_alias="fast")                # 或按调用覆盖
 ```
 
-档位按成本换质量:`fast` · `balanced` · `balanced_pro`(默认)·
-`high_quality`。详见[配置](/zh/advanced/configuration)。
+档位按成本换质量:`fast` · `balanced` · `balanced_pro` ·
+`high_quality`;留空使用服务器默认。详见
+[配置](/zh/advanced/configuration)。确定性的单步调用见
+[API 参考](/zh/reference/api)。

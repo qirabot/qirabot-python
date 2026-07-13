@@ -79,6 +79,10 @@ bot = Qirabot(record_mjpeg_url="http://127.0.0.1:9100")
 If you quit an Appium driver yourself, call `bot.stop_recording()` first —
 the video lives in the session.
 
+The CLI's `--record` flag maps onto these switches per target — see the
+[CLI Reference](/guide/cli). Every `record*` constructor knob and its env
+var is listed in [Configuration](/advanced/configuration).
+
 ## Windows: per-window capture + system audio
 
 ```python

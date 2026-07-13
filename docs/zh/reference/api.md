@@ -28,7 +28,8 @@ bot.type_text(page, "邮箱输入框", "user@example.com")
 # 从屏幕提取数据
 text = bot.extract(page, "提取主标题")
 
-# 视觉断言(返回 True/False,从不抛异常)
+# 视觉断言——断言不成立不抛异常,而是返回 falsy 的
+# VerifyResult(带 .reason);断言成立时为 truthy
 ok = bot.verify(page, "成功提示可见")
 
 # 等待条件成立(卡点):成立即返回,否则抛 QirabotTimeoutError。
@@ -69,7 +70,7 @@ bot.scroll(page, "up", distance=5, x=640, y=400)  # 在指定点滚动
 bot.press_key(page, "Enter")        # 单个按键
 bot.press_key(page, "ctrl+c")       # 组合键(用 "+" 连接)
 bot.press_key(target, "w", duration_seconds=2)  # 按住 2 秒(仅桌面)
-page = bot.press_key(page, "ctrl+t")  # ctrl+t/ctrl+w 切换活动标签页——重新赋值
+page = bot.press_key(page, "ctrl+w")  # 关闭当前标签页,切到另一个——重新赋值
 bot.type_text(page, "", "hello", press_enter=True)  # 空 locate:直接输入到
                                     # 当前焦点元素(无 AI、不计费)
 ```
@@ -86,8 +87,8 @@ bot.type_text(page, "", "hello", press_enter=True)  # 空 locate:直接输入到
 | 单键 | `Enter` `Escape` `Tab` `Backspace` `Delete` `Space` | |
 | 方向/翻页 | `ArrowUp/Down/Left/Right` `PageUp` `PageDown` `Home` `End` | |
 | 组合键(桌面/浏览器) | `ctrl+c` `ctrl+a` `alt+tab` `ctrl+shift+t` | 修饰键 `ctrl` `alt` `shift` `cmd`(= meta/win);用 `+` 连接 |
-| 移动端(Android/iOS) | `Back` `Home` `Menu` `Enter` | 仅单键,无组合 |
-| 按住(桌面) | `duration_seconds=2`(浮点,0.1–10) | 按住指定时长再释放——定量的游戏内移动(`w`、`shift+w`)。仅 pyautogui + Windows 窗口后端;web/移动端忽略并瞬时点按 |
+| 移动端(Android/iOS) | `Back` `Home` `Menu` `Enter` | 仅单键,无组合。`Back`/`Menu` 仅限 Android;iOS(WDA)支持 `Home`、`Enter`、音量键和锁屏键,其余抛 `NotImplementedError` |
+| 按住(桌面) | `duration_seconds=2`(浮点 > 0,上限 10) | 按住指定时长再释放——定量的游戏内移动(`w`、`shift+w`)。仅 pyautogui + Windows 窗口后端;web/移动端忽略并瞬时点按 |
 
 因此 `bot.press_key(t, "Enter")` 在 Android 上自动变成 adb keycode,在
 Windows 窗口后端自动变成 DirectInput 扫描码。
@@ -98,9 +99,9 @@ Windows 窗口后端自动变成 DirectInput 扫描码。
 
 ```python
 for i in range(4):
-    page = bot.click(page, locate=f"打开第 {i + 1} 个视频")  # 打开新标签页
+    page = bot.click(page, f"打开第 {i + 1} 个视频")  # 打开新标签页
     bot.screenshot(page)
-    page = bot.go_back(page)                                  # 关闭它,回到列表
+    page = bot.go_back(page)                          # 关闭它,回到列表
 ```
 
 想无视历史强制关闭当前标签页,直接用 `close_tab`。
@@ -183,7 +184,13 @@ with Qirabot(task_name="my automation") as bot:
 # 自动调用 bot.close()
 ```
 
-忘了 `close()` 有 `atexit` 兜底,服务端也会在 30 分钟后清理孤儿任务。
+忘了 `close()` 有 `atexit` 兜底,在脚本退出时清理。进程存活期间,后台
+**心跳**会让服务端任务保持在线(步骤之间长时间休眠也安全);进程悄然死掉
+后,服务端的孤儿清理器约 5 分钟后将任务超时回收。
+
+需要以“completed”之外的终态结束任务时,还有两个生命周期调用:
+`bot.fail("哪里出了问题")` 把任务报告为失败,`bot.cancel("原因")` 把任务
+报告为取消——都用在 `close()` 默认记录的“成功完成”之前,或代替它。
 
 另见:[配置](/zh/advanced/configuration)(构造参数、模型档位、settle
 延迟) · [错误处理](/zh/advanced/error-handling) ·

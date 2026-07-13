@@ -14,7 +14,8 @@ HTML 报告——失败时也有。
 ```python
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="test-checkout")
+bot = Qirabot(task_name="test-checkout")   # 为简洁放在模块级;更推荐
+                                           # 下面会 close() 的 fixture
 
 def test_checkout(page):          # 你现有的 pytest-playwright fixture
     page.goto("https://shop.example.com")
@@ -53,8 +54,9 @@ def test_search(bot, page):
     assert bot.verify(page, "SpaceX 词条已显示")
 ```
 
-测试进程硬崩时还有 `atexit` 兜底调用 `close()`,服务端也会在 30 分钟后
-清理孤儿任务。
+测试进程硬崩时还有 `atexit` 兜底调用 `close()`;服务端会在约 5 分钟无
+声息后清理孤儿任务(进程存活期间 SDK 发送后台心跳,步骤之间的长时间
+等待是安全的——见[配置](/zh/advanced/configuration))。
 
 ## 断言模式
 
@@ -65,9 +67,9 @@ assert bot.verify(page, "错误横幅【不】可见")
 # 卡点——超时抛 QirabotTimeoutError,轮询直到成立
 bot.wait_for(page, "加载动画已消失", timeout=15.0)
 
-# 数值断言走提取
+# 数值断言走提取——extract() 返回字符串子类
 count = bot.extract(page, "购物车角标上的数字,返回整数")
-assert count == 1
+assert int(count) == 1
 ```
 
 优先用 `wait_for` 而不是 sleep:条件一成立立即返回。

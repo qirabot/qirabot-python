@@ -28,7 +28,8 @@ bot.type_text(page, "Email input", "user@example.com")
 # Extract data from the screen
 text = bot.extract(page, "Get the main heading")
 
-# Verify a visual assertion (returns True/False, never raises)
+# Verify a visual assertion — a failed check doesn't raise, it returns a
+# falsy VerifyResult (with a .reason); truthy when the check passes
 ok = bot.verify(page, "The success message is visible")
 
 # Wait for a condition (acts as a gate): returns when met, else raises
@@ -70,7 +71,7 @@ bot.scroll(page, "up", distance=5, x=640, y=400)  # scroll at a point
 bot.press_key(page, "Enter")        # a single key
 bot.press_key(page, "ctrl+c")       # a combo (join with "+")
 bot.press_key(target, "w", duration_seconds=2)  # hold for 2s (desktop only)
-page = bot.press_key(page, "ctrl+t")  # ctrl+t/ctrl+w switch the active tab — reassign
+page = bot.press_key(page, "ctrl+w")  # closes the tab, switches to another — reassign
 bot.type_text(page, "", "hello", press_enter=True)  # empty locate: type into the
                                     # focused element directly (no AI, no billing)
 ```
@@ -89,8 +90,8 @@ maps it to its own vocabulary:
 | Single keys | `Enter` `Escape` `Tab` `Backspace` `Delete` `Space` | |
 | Arrows / paging | `ArrowUp/Down/Left/Right` `PageUp` `PageDown` `Home` `End` | |
 | Combos (desktop/browser) | `ctrl+c` `ctrl+a` `alt+tab` `ctrl+shift+t` | modifiers `ctrl` `alt` `shift` `cmd` (= meta/win); join with `+` |
-| Mobile (Android/iOS) | `Back` `Home` `Menu` `Enter` | single keys only, no combos |
-| Hold (desktop) | `duration_seconds=2` (float, 0.1–10) | holds the key(s) that long before releasing — quantified in-game movement (`w`, `shift+w`). pyautogui + Windows window backend only; web/mobile ignore it and tap |
+| Mobile (Android/iOS) | `Back` `Home` `Menu` `Enter` | single keys only, no combos. `Back`/`Menu` are Android-only; iOS (WDA) supports `Home`, `Enter`, volume and lock keys and raises `NotImplementedError` for the rest |
+| Hold (desktop) | `duration_seconds=2` (float > 0, capped at 10) | holds the key(s) that long before releasing — quantified in-game movement (`w`, `shift+w`). pyautogui + Windows window backend only; web/mobile ignore it and tap |
 
 So `bot.press_key(t, "Enter")` becomes an adb keycode on Android and a
 DirectInput scancode on the Windows window backend automatically.
@@ -102,9 +103,9 @@ current tab and returns to the previous one:
 
 ```python
 for i in range(4):
-    page = bot.click(page, locate=f"open video {i + 1}")  # opens a new tab
+    page = bot.click(page, f"open video {i + 1}")  # opens a new tab
     bot.screenshot(page)
-    page = bot.go_back(page)                               # closes it, back to the list
+    page = bot.go_back(page)                       # closes it, back to the list
 ```
 
 Reach for `close_tab` to force-close the current tab regardless of history.
@@ -189,8 +190,15 @@ with Qirabot(task_name="my automation") as bot:
 # bot.close() is called automatically
 ```
 
-If `close()` is never called, `atexit` cleans up on script exit, and the
-server times out orphaned SDK tasks after 30 minutes.
+If `close()` is never called, `atexit` cleans up on script exit. While the
+process is alive, a background **heartbeat** keeps the server task marked
+live (so sleeping between steps is safe); once the process dies silently,
+the server's orphan cleaner times the task out after ~5 minutes.
+
+Two more lifecycle calls when you need a terminal status other than
+"completed": `bot.fail("what went wrong")` reports the task as failed, and
+`bot.cancel("why")` reports it as cancelled — both before/instead of the
+success-complete that `close()` records by default.
 
 See also: [Configuration](/advanced/configuration) (constructor options,
 model aliases, settle delay) ·

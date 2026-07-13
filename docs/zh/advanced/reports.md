@@ -75,6 +75,10 @@ bot = Qirabot(record_mjpeg_url="http://127.0.0.1:9100")
 `adb screenrecord` 超过 3 分钟上限的分段会用 ffmpeg 合并。如果你自己
 `driver.quit()` Appium,请先调 `bot.stop_recording()`——视频存在会话里。
 
+CLI 的 `--record` 参数按目标映射到这些开关——见
+[CLI 参考](/zh/guide/cli)。每个 `record*` 构造参数及其环境变量的完整清单
+在[配置](/zh/advanced/configuration)。
+
 ## Windows:单窗口录制 + 系统声音
 
 ```python

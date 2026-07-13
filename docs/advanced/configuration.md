@@ -29,9 +29,11 @@ own.
 | `base_url` | `QIRA_BASE_URL` | `https://app.qirabot.com` | API server URL |
 | `timeout` | — | `120.0` | HTTP request timeout (seconds) |
 | `verify_ssl` | — | `True` | TLS verification (set `False` for self-hosted / self-signed) |
-| `model_alias` | — | `balanced_pro` | Model alias for all operations; `""` = server default |
+| `model_alias` | — | `""` | Model alias for all operations; empty = the server picks its default |
 | `language` | — | server default | Response language, e.g. `"zh"` / `"en"` |
 | `task_name` | — | `""` | Task name (visible in dashboard) |
+| `task_id` | — | `""` | Attach to an existing server task instead of creating one |
+| `source` | — | `"sdk"` | Task source tag shown in the dashboard |
 | `report` | — | `True` | Write an HTML run report on close |
 | `report_dir` | `QIRA_REPORT_DIR` | `./qira_runs/...` | Report output root |
 | `record` | `QIRA_RECORD` | `False` | Record the screen (ffmpeg) |
@@ -44,9 +46,19 @@ own.
 | `screenshot_annotate` | — | `True` | Red crosshair at click/type coordinates |
 | `screenshot_format` | — | `"jpeg"` | `"jpeg"` or `"png"` |
 | `screenshot_quality` | — | `80` | JPEG quality, 1–100 |
-| `retry` | — | `1` | Retries per action on transient failures |
+| `retry` | — | `1` | Retries per action on transient failures (also a per-call kwarg: `bot.click(..., retry=3)`) |
 | `retry_delay` | — | `1.0` | Seconds between retries |
 | `settle_seconds` | `QIRA_SETTLE_SECONDS` | per-platform | Pause after each action before the next screenshot |
+| `heartbeat` | `QIRA_HEARTBEAT` | `True` | Background liveness ping so long-sleeping scripts aren't reclaimed as orphans; `QIRA_HEARTBEAT=0` is the kill switch |
+| `sync_local_steps` | — | `True` | Upload locally-executed steps to the server task timeline |
+
+What the `record*` knobs actually produce (formats, per-platform mechanics,
+where the file lands) is covered in [Reports & Recording](/advanced/reports).
+
+A few env-only overrides with no constructor equivalent: `QIRA_ADB_PATH`
+(explicit adb binary for the Android backend), `QIRA_SCREEN_INDEX` (which
+monitor to record on multi-display machines), `QIRA_AUDIO_DEVICE` (recording
+audio device), `QIRA_DOTENV` (path `load_dotenv()` reads instead of `./.env`).
 
 ## Model & language
 
@@ -56,7 +68,7 @@ own.
 |---|---|
 | `fast` | Cheapest, lowest latency |
 | `balanced` | Good cost/quality balance |
-| `balanced_pro` | The default — stronger than `balanced` |
+| `balanced_pro` | Stronger than `balanced` |
 | `high_quality` | Best quality, highest cost |
 
 ```python
@@ -80,7 +92,7 @@ text = bot.extract(page, "Get the main heading", language="zh")
 After every screen-changing action each adapter pauses briefly so the UI
 repaints before the next screenshot — without it the model can capture a
 mid-animation frame and wrongly conclude the action did nothing. Defaults
-are tuned per platform (desktop/Android `1.0`s, Appium/WDA `0.6`s;
+are tuned per platform (desktop/Android `1.0`s, Selenium/Appium/WDA `0.6`s;
 Playwright relies on its own auto-waiting and adds none).
 
 ```python
@@ -98,5 +110,8 @@ holds.
 Each `Qirabot` instance manages a server-side task: created on construction
 (pass an existing `task_id` to attach instead), every call recorded as a
 step, marked complete on `close()` / context-manager exit. If `close()` is
-never called, `atexit` cleans up, and the server times out orphaned SDK
-tasks after 30 minutes.
+never called, `atexit` cleans up; a background heartbeat keeps the task
+alive while your process runs, and a silently-dead process is reclaimed by
+the server's orphan cleaner after ~5 minutes. To end a task as failed or
+cancelled instead of completed, see `fail()` / `cancel()` in the
+[API reference](/reference/api#task-lifecycle).

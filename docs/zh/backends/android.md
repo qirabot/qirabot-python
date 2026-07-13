@@ -26,6 +26,10 @@ print(f"Success: {result.success}")
 bot.close()
 ```
 
+`bind(device)` 一次性固定目标,之后的每个调用都省去第一个参数
+(`bot.click("...")` 而不是 `bot.click(device, "...")`)——细节见
+[自定义 Adapter 与挂载](/zh/backends/custom-adapters)。
+
 核心包即可,无需 extras:
 
 ```bash
@@ -68,13 +72,15 @@ options.device_name = "emulator-5554"
 driver = webdriver.Remote("http://localhost:4723", options=options)
 bot = Qirabot().bind(driver)
 
-result = bot.ai("打开显示设置,把字体大小改为最大")
+result = bot.ai("打开显示设置,把字体大小改为“大”")
 bot.close()
 driver.quit()
 ```
 
 CLI 传 `--appium-url` 即选择 Appium 引擎:
-`qirabot android "..." --appium-url http://localhost:4723`。
+`qirabot android "..." --appium-url http://localhost:4723`。完整的 Appium
+工作流——云真机平台、录屏、以及 Appium 与内置后端的对比——见
+[Appium + Qirabot](/zh/frameworks/appium)。
 
 ## 平台说明
 
@@ -86,3 +92,5 @@ CLI 传 `--appium-url` 即选择 Appium 引擎:
   元素模型。
 - 从 Airtest 1.x 迁移?`connect_device("Android:///emu-5554")` 改为
   `AdbDevice("emu-5554")`,其余 `bind()` 代码不变。
+- 每个动作的完整行为见
+  [平台支持矩阵](/zh/reference/api#平台支持矩阵)。

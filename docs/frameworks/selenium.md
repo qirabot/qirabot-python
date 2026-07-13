@@ -20,8 +20,8 @@ bot = Qirabot().bind(driver)   # bind once; the driver is stable for the session
 summary = bot.extract("Get the first paragraph of the article")
 print(summary)
 
+bot.close()      # close the bot first (finishes recording/report), then the driver
 driver.quit()
-bot.close()
 ```
 
 Selenium is not an extra — bring your own driver:

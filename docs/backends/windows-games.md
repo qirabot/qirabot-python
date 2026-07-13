@@ -3,7 +3,7 @@ title: Automate Windows Apps & Games with AI — DirectInput Scancodes
 description: Bind one Windows window by title or HWND and drive it with AI vision. Input is DirectInput scancodes that Unity, Unreal, and native games actually read — where virtual-key automation fails.
 ---
 
-# Windows Windows & Games
+# Windows & Games — the Window backend
 
 `qirabot.Window` binds to a **single window** (by title regex or HWND):
 screenshots are its client area, clicks are window-relative, and keys are
@@ -18,7 +18,7 @@ launchers, legacy native apps.
 ```python
 from qirabot import Qirabot, Window
 
-window = Window(title_re="Genshin")   # or Window(hwnd=0x132456)
+window = Window(title_re="Genshin")   # or Window(hwnd=132456)
 bot = Qirabot().bind(window)
 
 result = bot.ai("Open the inventory and list all items")
@@ -69,7 +69,9 @@ items = bot.extract(window, "list the item names visible in the inventory")
 See the full walkthrough in
 [examples/game/](https://github.com/qirabot/qirabot-python/tree/main/examples/game),
 including a custom-tool example where the AI calls your GM backend mid-task
-(add energy on an out-of-energy popup, then continue the quest loop).
+(add energy on an out-of-energy popup, then continue the daily-quest loop) —
+how to register such tools is in
+[AI Tasks & Custom Tools](/advanced/ai-tasks).
 
 ## Recording the window
 

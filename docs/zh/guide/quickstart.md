@@ -17,6 +17,10 @@ qirabot browser "搜索 SpaceX 并提取词条的第一句话" --url wikipedia.o
 到终端。所有命令和选项见 [CLI 参考](/zh/guide/cli)。(想用环境变量?
 `QIRA_API_KEY` 和项目 `.env` 依然有效且优先级更高。)
 
+browser 命令假定你走的是一行安装脚本或 `pip install "qirabot[browser]"`
+路径——如果为设备后端只装了核心 `qirabot`,各 extra 见
+[安装](/zh/guide/installation)。
+
 ## 用 Python 实现同一任务
 
 `bot.ai()` 就是 CLI 命令底层的引擎:AI 看屏、决定下一步动作,循环执行直到
@@ -67,14 +71,19 @@ bot.close()
 | `bot.ai(target, task)` | 自主多步任务——看屏、决策、执行、循环直到完成 |
 | `bot.click(target, "描述")` | AI 定位的点击(另有 `double_click`、`type_text`) |
 | `bot.extract(target, "描述")` | 从屏幕提取结构化数据 |
-| `bot.verify(target, "断言")` | 视觉断言——返回 `True`/`False`,从不抛异常 |
+| `bot.verify(target, "断言")` | 视觉断言——结果为 truthy/falsy,断言不成立不抛异常 |
 | `bot.wait_for(target, "条件")` | 轮询直到视觉条件成立,超时抛异常 |
+
+`target` 就是你正在驱动的界面——`bot.open()` 返回的 page、你自己的
+Playwright/Selenium/Appium 对象,或桌面场景下的 `pyautogui` 模块。完整
+调用列表和各平台行为见 [API 参考](/zh/reference/api)。
 
 ## 任务如何结束
 
 `result.success` 是二值的通过/失败;`result.status` 说明原因:
 `"completed"`、`"goal_failed"`(登录墙、验证码)、`"max_steps"`(步数预算
-截断——加大预算重试)、`"error"`。
+截断——加大预算重试)、`"error"`。详情和异常体系见
+[错误处理](/zh/advanced/error-handling)。
 
 ```python
 result = bot.ai(page, "找到最便宜的航班并锁定")

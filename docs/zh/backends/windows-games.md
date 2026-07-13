@@ -3,7 +3,7 @@ title: 用 AI 自动化 Windows 应用与游戏——DirectInput 扫描码
 description: 按标题或 HWND 绑定单个 Windows 窗口,用 AI 视觉驱动。输入为 Unity、Unreal 和原生游戏真正读取的 DirectInput 扫描码——虚拟键自动化无法触达的层级。
 ---
 
-# Windows 窗口与游戏
+# Windows 与游戏——Window 后端
 
 `qirabot.Window` 绑定**单个窗口**(标题正则或 HWND):截图取其客户区,
 点击按窗口相对坐标,按键是 **DirectInput 扫描码**——游戏真正轮询的层级,
@@ -16,7 +16,7 @@ Unity 和 Unreal 游戏、自定义启动器、遗留原生应用。
 ```python
 from qirabot import Qirabot, Window
 
-window = Window(title_re="Genshin")   # 或 Window(hwnd=0x132456)
+window = Window(title_re="Genshin")   # 或 Window(hwnd=132456)
 bot = Qirabot().bind(window)
 
 result = bot.ai("打开背包并列出所有物品")
@@ -65,7 +65,8 @@ items = bot.extract(window, "列出背包中可见的物品名称")
 完整演练见
 [examples/game/](https://github.com/qirabot/qirabot-python/tree/main/examples/game),
 其中包含自定义工具示例:AI 在任务中途调用你的 GM 后端(体力不足弹窗时
-加体力,然后继续做日常任务)。
+加体力,然后继续日常任务循环)——如何注册这类工具见
+[AI 任务与自定义工具](/zh/advanced/ai-tasks)。
 
 ## 录制窗口
 
@@ -75,7 +76,7 @@ Windows 上可以只录被测窗口,并采集系统声音:
 bot = Qirabot(record=True, record_window=True, record_audio=True)
 ```
 
-保持窗口可见——`gdigrab` 对最小化、被遮挡或 GPU 合成(独占全屏游戏)的
+保持窗口可见——`gdigrab` 对最小化或 GPU 合成(独占全屏游戏)的
 窗口会录出黑帧;这类场景请改录全屏。
 
 ## 说明

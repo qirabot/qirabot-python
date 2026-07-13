@@ -24,7 +24,7 @@ driver = webdriver.Remote("http://localhost:4723", options=options)
 bot = Qirabot().bind(driver)
 
 bot.click("Wi-Fi 设置")
-result = bot.ai("打开显示设置,把字体大小改为最大")
+result = bot.ai("打开显示设置,把字体大小改为“大”")
 print(f"Success: {result.success}")
 bot.close()
 driver.quit()
@@ -58,7 +58,7 @@ qirabot ios "..." --device "iPhone 15"      # 模拟器设备类型(选择 Appiu
 都支持:
 
 ```python
-bot = Qirabot(record_device=True)
+bot = Qirabot(record_device=True).bind(driver)
 bot.ai("走完新手引导流程")
 bot.stop_recording()   # 在 driver.quit() 之前调用——视频存在会话里
 ```

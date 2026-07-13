@@ -17,9 +17,12 @@ from qirabot import (
 )
 
 try:
-    bot = Qirabot()
-    page = bot.open("https://example.com")
-    bot.click(page, "Login button")
+    # The constructor itself can raise: it validates the API key and
+    # registers the task with the server. `with` guarantees close() runs
+    # if — and only if — construction succeeded.
+    with Qirabot() as bot:
+        page = bot.open("https://example.com")
+        bot.click(page, "Login button")
 except AuthenticationError:
     print("Invalid API key.")
 except InsufficientBalanceError:
@@ -28,12 +31,27 @@ except QirabotTimeoutError:
     print("Operation timed out.")
 except QirabotError as e:
     print(f"Error: {e}")
-finally:
-    bot.close()
 ```
 
-`verify()` is the deliberate exception to raise-on-failure: it returns
-`True`/`False` and never raises — ideal for `assert`.
+The full hierarchy — everything derives from `QirabotError`, so a single
+`except QirabotError` is always a safe catch-all:
+
+| Exception | When |
+|---|---|
+| `AuthenticationError` | API key missing or invalid (401). Not retried. |
+| `InsufficientBalanceError` | Credit balance exhausted (402). Not retried. |
+| `RateLimitError` | Too many requests (429). The SDK backs off and retries internally; catch it to add your own backoff. |
+| `QirabotTimeoutError` | A client-side wait timed out (`wait_for`, auto-wait). |
+| `QirabotConnectionError` | The server was unreachable (DNS failure, refused connection) — the request never completed, as opposed to being slow. |
+| `TaskTerminatedError` | The task was terminated server-side (console stop, orphan cleaner, max-duration cap) while the script was still running. `.task_status` carries the terminal state. Not retried. |
+| `ActionError` | An AI action failed server-side. |
+| `MissingDependencyError` | An optional backend dependency (playwright, pyautogui, …) isn't installed — the message includes the exact `pip install "qirabot[<extra>]"` to run. Also an `ImportError`. |
+
+`verify()` is the deliberate exception to raise-on-failure semantics: a
+**failed check** doesn't raise — it returns a falsy result (a `VerifyResult`
+whose `.reason` says why), so it drops straight into `assert` or `if`.
+Transport and server errors (connection loss, auth, termination) still raise
+like any other call.
 
 Transient action failures are retried automatically (`retry=1`,
 `retry_delay=1.0` by default — see

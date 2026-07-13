@@ -26,6 +26,10 @@ print(f"Success: {result.success}")
 bot.close()
 ```
 
+`bind(device)` fixes the target once, so every later call drops the first
+argument (`bot.click("...")` instead of `bot.click(device, "...")`) — see
+[Custom Adapters & Bolt-On](/backends/custom-adapters) for the details.
+
 The core package is enough — no extras:
 
 ```bash
@@ -75,7 +79,10 @@ driver.quit()
 ```
 
 On the CLI, passing `--appium-url` selects the Appium engine:
-`qirabot android "..." --appium-url http://localhost:4723`.
+`qirabot android "..." --appium-url http://localhost:4723`. The full
+Appium workflow — device clouds, recording, and an
+Appium-vs-built-in comparison — is in
+[Appium + Qirabot](/frameworks/appium).
 
 ## Platform notes
 
@@ -87,3 +94,5 @@ On the CLI, passing `--appium-url` selects the Appium engine:
   there is no element model on purpose.
 - Coming from Airtest 1.x? `connect_device("Android:///emu-5554")` becomes
   `AdbDevice("emu-5554")` — the rest of your `bind()` code is unchanged.
+- Full per-action behavior:
+  [platform support matrix](/reference/api#platform-support-matrix).

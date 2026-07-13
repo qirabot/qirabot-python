@@ -32,10 +32,15 @@ qirabot ios "在微信里给 Alice 发一句 hi" --bundle-id com.tencent.xin
 
 ## 真机配置(3 步)
 
-1. **在手机上运行 WebDriverAgent** 并保持运行——在 Xcode 中用你自己的签名
-   团队对设备运行 `WebDriverAgentRunner` scheme(或
+1. **在手机上运行 WebDriverAgent** 并保持运行。WebDriverAgent 是 Appium
+   开源的 iOS agent——克隆
+   [appium/WebDriverAgent](https://github.com/appium/WebDriverAgent),在
+   Xcode 中打开,用你自己的签名团队对设备运行 `WebDriverAgentRunner`
+   scheme(或
    `xcodebuild ... -destination 'id=<udid>' -allowProvisioningUpdates test`)。
-2. **USB 端口转发:** `iproxy 8100 8100`(来自 `libimobiledevice`)。
+   你只需要 agent 本身——不需要 Appium 服务器。
+2. **USB 端口转发:** `iproxy 8100 8100`(来自 `libimobiledevice`——macOS
+   上 `brew install libimobiledevice`)。
    自检:`curl http://127.0.0.1:8100/status` 返回 JSON 即成功。
 3. **运行任务** —— 默认的 `--wda-url`(`http://127.0.0.1:8100`)现在已指向
    手机。
@@ -54,7 +59,8 @@ qirabot ios "..." --device "iPhone 15"
 ```
 
 注意:Appium 引擎目前只支持模拟器(没有 `--udid` 选项)——真机走上面的
-WDA 直连路径。
+WDA 直连路径。已经在跑 Appium(或云真机平台)?见
+[Appium + Qirabot](/zh/frameworks/appium)。
 
 ## 设备录屏
 
@@ -67,7 +73,8 @@ bot = Qirabot(record_mjpeg_url="http://127.0.0.1:9100")
 ```
 
 CLI 的 `qirabot ios "..." --record` 会自动做这件事,并在启动前检查流是否
-可达;`--mjpeg-url` 可覆盖默认地址。
+可达;`--mjpeg-url` 可覆盖默认地址。报告结构和全部录屏开关见
+[报告与录屏](/zh/advanced/reports)。
 
 ## 平台说明
 
@@ -77,3 +84,5 @@ CLI 的 `qirabot ios "..." --record` 会自动做这件事,并在启动前检查
 - 从 Airtest 1.x 迁移?`connect_device("iOS:///http://...:8100")` 改为
   `WdaClient("http://...:8100")`,`dev.driver.app_launch(...)` 改为
   `client.app_launch(...)`。
+- 每个动作的完整行为见
+  [平台支持矩阵](/zh/reference/api#平台支持矩阵)。

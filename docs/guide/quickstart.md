@@ -18,6 +18,10 @@ That's a complete run: the browser opens, the AI does the task, and the result
 the [CLI Reference](/guide/cli). (Prefer environment variables? `QIRA_API_KEY`
 and a project `.env` still work and take precedence.)
 
+The browser command assumes you took the one-line installer or
+`pip install "qirabot[browser]"` path — if you installed bare `qirabot` for a
+device backend, see [Installation](/guide/installation) for the extras.
+
 ## The same task in Python
 
 `bot.ai()` is the same engine the CLI command runs: the AI looks at the
@@ -70,14 +74,20 @@ The core calls:
 | `bot.ai(target, task)` | Autonomous multi-step task — see, decide, act, loop until done |
 | `bot.click(target, "desc")` | AI-located click (also `double_click`, `type_text`) |
 | `bot.extract(target, "desc")` | Pull structured data from the screen |
-| `bot.verify(target, "assertion")` | Visual assertion — returns `True`/`False`, never raises |
+| `bot.verify(target, "assertion")` | Visual assertion — truthy/falsy result, a failed check doesn't raise |
 | `bot.wait_for(target, "condition")` | Poll until a visual condition holds, else raise |
+
+`target` is whatever surface you're driving — the page returned by
+`bot.open()`, a Playwright/Selenium/Appium object of your own, or the
+`pyautogui` module for the desktop. The full call list and per-platform
+behavior is in the [API reference](/reference/api).
 
 ## How a run ends
 
 `result.success` is the pass/fail verdict; `result.status` says why:
 `"completed"`, `"goal_failed"` (login wall, captcha), `"max_steps"` (budget
-truncation — retry with more steps), or `"error"`.
+truncation — retry with more steps), or `"error"`. Details and the exception
+hierarchy are in [Error Handling](/advanced/error-handling).
 
 ```python
 result = bot.ai(page, "Find the cheapest flight and hold it")

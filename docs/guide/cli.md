@@ -51,10 +51,10 @@ qirabot models                    # list model aliases
 
 | Command | Purpose |
 |---|---|
-| `browser INSTRUCTION` | Run an AI task in a local browser (Playwright) |
-| `android INSTRUCTION` | Run an AI task on an Android device (adb direct, built in; `--appium-url` for Appium) |
-| `ios INSTRUCTION` | Run an AI task on an iOS device (WDA direct, built in; `--appium-url`/`--device` for Appium) |
-| `desktop INSTRUCTION` | Run an AI task on the desktop screen (pyautogui; `--window-title`/`--hwnd` binds one Windows window, built in) |
+| `browser INSTRUCTION` | Run an AI task in a local browser ([Browser backend](/backends/browser)) |
+| `android INSTRUCTION` | Run an AI task on an Android device ([adb direct](/backends/android), built in; `--appium-url` for Appium) |
+| `ios INSTRUCTION` | Run an AI task on an iOS device ([WDA direct](/backends/ios), built in; `--appium-url`/`--device` for Appium) |
+| `desktop INSTRUCTION` | Run an AI task on the [desktop screen](/backends/desktop) (pyautogui; `--window-title`/`--hwnd` binds [one Windows window](/backends/windows-games), built in) |
 | `login` | Save your API key once (`--status` shows the active key, masked) |
 | `install-browser` | One-time Chromium download for the browser backend |
 | `doctor` | Check Python, API key/server, and per-backend dependencies |
@@ -83,9 +83,66 @@ proceeds on success.
 
 ## Shared run options
 
-`browser` / `android` / `ios` / `desktop` all take: `-n/--name`, `-m/--model`,
-`-l/--language`, `--max-steps`, `--report/--no-report`, `--report-dir`,
-`--annotate/--no-annotate`, and `--record`.
+`browser` / `android` / `ios` / `desktop` all take:
+
+| Option | Default | What it does |
+|---|---|---|
+| `-n, --name` | derived from the instruction | Task name shown in the web UI |
+| `-m, --model` | server default | Model alias (see [Configuration](/advanced/configuration)) |
+| `-l, --language` | server default | Response language, e.g. `zh`, `en` |
+| `--max-steps` | `20` | Step budget for the AI task |
+| `--report / --no-report` | on | Write an HTML run report |
+| `--report-dir` | `./qira_runs/...` | Report output root (env `QIRA_REPORT_DIR`) |
+| `--annotate / --no-annotate` | on | Crosshair click/type coordinates on saved screenshots |
+| `--record` | off | Record the run to `recording.mp4` (see below) |
+
+## Per-command options
+
+**`browser`** — see the [Browser backend](/backends/browser):
+
+| Option | Default | What it does |
+|---|---|---|
+| `-u, --url` | — | URL to open (AI navigates if omitted) |
+| `--headless` | off | Headless mode (auto-on when there's no display) |
+| `--viewport` | `1280x800` | Viewport as `WIDTHxHEIGHT` |
+| `--channel` | bundled Chromium | Use an installed browser: `chrome`, `msedge`, … |
+| `--user-data-dir` | — | Persistent profile dir (cookies/logins survive runs) |
+| `--browser-arg` | — | Extra Chromium launch arg, repeatable |
+| `--cdp-url` | — | Attach to a running Chrome via CDP; mutually exclusive with the four options above |
+
+**`android`** — see the [Android backend](/backends/android):
+
+| Option | Default | What it does |
+|---|---|---|
+| `-d, --device` | the only connected device | adb serial from `adb devices` |
+| `--app-package` | — | App package to launch (e.g. `com.android.settings`) |
+| `--app-activity` | — | App activity to launch |
+| `--appium-url` | direct adb, no server | Passing it switches to the [Appium engine](/frameworks/appium) |
+| `--record` | off | Record the **device** screen (adb screenrecord / Appium API) |
+
+**`ios`** — see the [iOS backend](/backends/ios):
+
+| Option | Default | What it does |
+|---|---|---|
+| `--wda-url` | `http://127.0.0.1:8100` | WebDriverAgent URL — this selects the device (USB real device: `iproxy 8100 8100`) |
+| `--bundle-id` | — | App bundle id to launch (e.g. `com.tencent.xin`) |
+| `-d, --device` | — | Simulator device type from `xcrun simctl list devicetypes` — switches to the Appium engine, simulators only |
+| `--appium-url` | direct WDA, no server | Appium server URL (with `-d`) |
+| `--record` | off | Record the **device** screen (WDA MJPEG + ffmpeg / Appium API) |
+| `--mjpeg-url` | `--wda-url` host on port 9100 | MJPEG stream override for `--record` |
+
+**`desktop`** — see [Desktop](/backends/desktop) and
+[Windows & Games](/backends/windows-games):
+
+| Option | Default | What it does |
+|---|---|---|
+| `--app` | — | Launch/activate an app first (macOS: name or bundle id; Windows: exe/registered name/UWP id; Linux: executable) |
+| `--app-wait` | `2.0` | Seconds to wait for the window after `--app` |
+| `--window-title` | — | Bind to the window matching this title regex (Windows window backend) |
+| `--hwnd` | — | Bind to a window handle, decimal (Windows window backend) |
+
+**`screenshot TASK_ID`** — `-s/--step` (0 = latest), `-o/--output`,
+`-f/--force` (overwrite).
 
 `--record` saves `recording.mp4` into the run dir and embeds it in the HTML
 report. What gets recorded differs per target:
@@ -99,5 +156,7 @@ report. What gets recorded differs per target:
   (needs ffmpeg; USB real device also needs `iproxy 9100 9100`), or Appium's
   recording API on the Appium engine.
 
-Runs honor the same env vars as the SDK — `QIRA_REPORT_DIR`,
-`QIRA_SETTLE_SECONDS`, `QIRA_RECORD*`, etc.
+Recording mechanics, report layout, and audio capture are covered in
+[Reports & Recording](/advanced/reports). Runs honor the same env vars as
+the SDK — `QIRA_REPORT_DIR`, `QIRA_SETTLE_SECONDS`, `QIRA_RECORD*`, etc.;
+the full list is in [Configuration](/advanced/configuration).

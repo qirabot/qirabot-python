@@ -44,91 +44,31 @@ qirabot browser "..." --cdp-url http://localhost:9222                    # attac
 
 `--cdp-url` also works with remote pools like browserless.
 
-## Bolt onto Playwright
+## Bolt onto the session you already have
 
-Pass your existing `page` — mix your selectors with AI steps freely:
+Already running a browser through your own framework? Skip `bot.open()` and
+pass your own object as the target — or `bind()` it once to stop repeating it
+(`bind()` is covered in
+[Custom Adapters & Bolt-On](/backends/custom-adapters)):
 
-```python
-from playwright.sync_api import sync_playwright
-from qirabot import Qirabot
+- **Playwright** — pass your `page`; mix your selectors with AI steps freely.
+  Full guide: [Playwright + Qirabot](/frameworks/playwright).
+- **Selenium** — pass (or `bind()`) your `driver`; not an extra, bring your
+  own (`pip install qirabot selenium`). Full guide:
+  [Selenium + Qirabot](/frameworks/selenium).
+- **pytest** — AI assertions and AI steps inside your existing suite, with
+  fixtures and CI notes. Full guide: [pytest + Qirabot](/frameworks/pytest).
 
-bot = Qirabot()
-
-with sync_playwright() as p:
-    browser = p.chromium.launch()
-    page = browser.new_page()
-    page.goto("https://github.com/trending")
-
-    repos = bot.extract(page, "Get the top 5 trending repo names")
-    print(repos)
-
-    browser.close()
-bot.close()
-```
-
-For Playwright, keep the explicit form `page = bot.click(page, ...)` — a click
-can open a new tab, and the returned page is the one your native
-`page.fill(...)` calls should use. `bot.go_back()` is smart about this: if a
-click opened a link in a new tab (which starts with no history), it closes the
-tab and returns to the previous one, so the common "open item, go back to the
-list" loop just works:
-
-```python
-for i in range(4):
-    page = bot.click(page, locate=f"open video {i + 1}")  # opens a new tab
-    bot.screenshot(page)
-    page = bot.go_back(page)                               # closes it, back to the list
-```
-
-## Bolt onto Selenium
-
-```python
-from selenium import webdriver
-from qirabot import Qirabot
-
-driver = webdriver.Chrome()
-driver.get("https://www.wikipedia.org")
-bot = Qirabot().bind(driver)   # bind once; the driver is stable for the session
-
-summary = bot.extract("Get the first paragraph of the article")
-print(summary)
-
-driver.quit()
-bot.close()
-```
-
-Selenium is not an extra — bring your own driver
-(`pip install qirabot selenium`).
-
-## In a pytest suite
-
-Keep your existing selectors and driver code; swap in AI assertions and AI
-steps only where things break:
-
-```python
-from qirabot import Qirabot
-
-bot = Qirabot(task_name="test-checkout")
-
-def test_checkout(page):          # your existing pytest-playwright fixture
-    page.goto("https://shop.example.com")
-
-    page.fill("#username", "test_user")     # your selectors, as-is
-    page.fill("#password", "secret")
-    page.click("#login-btn")
-
-    # AI verifies without knowing exact text or selector
-    assert bot.verify(page, "Product listing page is displayed")
-
-    result = bot.ai(page, "Complete checkout, name John Doe zip 10001", max_steps=8)
-    assert result.success
-```
+One gotcha worth knowing up front: a click can open a **new tab**, and the
+returned page is the live one — keep the form `page = bot.click(page, ...)`.
+Details and the smart `go_back` behavior are in the
+[API reference](/reference/api#navigation-scrolling-keys-no-ai-no-billing).
 
 ## Notes
 
 - Headless detection: on a display-less box (no `DISPLAY`), `bot.open()` and
   the CLI automatically run headless, with a warning.
 - `close_tab` is Playwright-only; `navigate`, `go_back`, `press_key`
-  (including `ctrl+t`/`ctrl+w` tab switching — reassign the returned page),
+  (including `ctrl+w` to close the current tab — reassign the returned page),
   and `scroll` all work. See the full per-platform action matrix in the
   [API Reference](/reference/api#platform-support-matrix).

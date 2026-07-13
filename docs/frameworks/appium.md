@@ -60,7 +60,7 @@ by the [WDA-direct backend](/backends/ios) — no Appium at all.
 Android and iOS drivers:
 
 ```python
-bot = Qirabot(record_device=True)
+bot = Qirabot(record_device=True).bind(driver)
 bot.ai("run through the onboarding flow")
 bot.stop_recording()   # call before driver.quit() — the video lives in the session
 ```

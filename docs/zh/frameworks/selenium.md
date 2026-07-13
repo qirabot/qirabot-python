@@ -20,8 +20,8 @@ bot = Qirabot().bind(driver)   # bind 一次;driver 在整个会话中稳定
 summary = bot.extract("提取词条的第一段")
 print(summary)
 
+bot.close()      # 先关 bot(收尾录屏/报告),再退出 driver
 driver.quit()
-bot.close()
 ```
 
 Selenium 不是 extra——自带 driver 即可:
@@ -70,7 +70,8 @@ assert bot.verify("绿色的成功横幅可见")
 
 - 对渲染状态的断言(`verify`)——DOM 检查会说谎的地方:元素存在但不可见、
   被遮挡、在屏幕外。
-- 不受你控制的页面(支付 iframe、SSO 页面)——选择器随时可能变。
+- 不受你控制的页面(支付 iframe、SSO 页面、验证码前后的流程)——选择器
+  随时可能变。
 - 一次性数据提取(`extract`)——否则每个页面都要写一个解析函数。
 
 相关:[浏览器后端](/zh/backends/browser) ·

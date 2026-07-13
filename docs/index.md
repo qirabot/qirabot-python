@@ -63,8 +63,8 @@ bot.close()
 
 Two ways to drive it:
 
-- **Autonomous** — `bot.ai("do the whole task")`: the AI sees the screen,
-  decides the next action, and loops until the goal is met.
+- **Autonomous** — `bot.ai(page, "do the whole task")`: the AI sees the
+  screen, decides the next action, and loops until the goal is met.
 - **Deterministic** — `bot.click(page, "Login button")`,
   `bot.extract(...)`, `bot.verify(...)`: you own the control flow, AI vision
   locates each element. No XPath, no CSS selectors, nothing to break when the
