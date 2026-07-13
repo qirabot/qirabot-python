@@ -126,5 +126,4 @@ def test_checkout(page):          # 你现有的 pytest-playwright fixture
   切换 headless 并给出警告。
 - `close_tab` 仅 Playwright 支持;`navigate`、`go_back`、`press_key`(含
   `ctrl+t`/`ctrl+w` 切换标签页——记得重新赋值返回的 page)和 `scroll` 均可
-  用。完整的平台动作矩阵见
-  [README](https://github.com/qirabot/qirabot-python#api-reference)。
+  用。完整的平台动作矩阵见 [API 参考](/zh/reference/api#平台支持矩阵)。

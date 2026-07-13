@@ -131,4 +131,4 @@ def test_checkout(page):          # your existing pytest-playwright fixture
 - `close_tab` is Playwright-only; `navigate`, `go_back`, `press_key`
   (including `ctrl+t`/`ctrl+w` tab switching — reassign the returned page),
   and `scroll` all work. See the full per-platform action matrix in the
-  [README](https://github.com/qirabot/qirabot-python#api-reference).
+  [API Reference](/reference/api#platform-support-matrix).

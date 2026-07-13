@@ -36,7 +36,7 @@ qirabot = "qirabot.cli.main:main"
 
 [project.urls]
 Homepage = "https://qirabot.com"
-Documentation = "https://github.com/qirabot/qirabot-python#readme"
+Documentation = "https://qirabot.com/docs/"
 Repository = "https://github.com/qirabot/qirabot-python"
 Issues = "https://github.com/qirabot/qirabot-python/issues"
 

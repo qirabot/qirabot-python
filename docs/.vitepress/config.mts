@@ -48,6 +48,10 @@ const enSidebar = [
       { text: 'Error Handling', link: '/advanced/error-handling' },
     ],
   },
+  {
+    text: 'Reference',
+    items: [{ text: 'API — Actions & Platforms', link: '/reference/api' }],
+  },
 ]
 
 const zhSidebar = [
@@ -87,6 +91,10 @@ const zhSidebar = [
       { text: '配置', link: '/zh/advanced/configuration' },
       { text: '错误处理', link: '/zh/advanced/error-handling' },
     ],
+  },
+  {
+    text: '参考',
+    items: [{ text: 'API——动作与平台', link: '/zh/reference/api' }],
   },
 ]
 
