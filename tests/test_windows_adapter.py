@@ -202,13 +202,46 @@ class TestMouse:
         flags = [e.mi.dwFlags for e in mouse_events(fake_env["sent"])]
         assert win.MOUSEEVENTF_LEFTDOWN in flags and win.MOUSEEVENTF_LEFTUP in flags
 
-    def test_click_reasserts_held_modifiers_before_press(self, fake_env):
-        # A modifier held via key_down can be lost before the click lands
-        # (key_down's ensure_foreground failed, or ensure_foreground's ALT-tap
-        # unlock released it). The click must re-press held keys after its own
-        # ensure_foreground, BEFORE the button goes down.
+    def test_modifier_click_dispatch_single_down(self, fake_env):
+        # execute("click", modifier=...) end to end with the window already
+        # foreground: EXACTLY one alt down, button press/release, alt up.
+        # No duplicate down — games that toggle their modifier mode on every
+        # down (Raw Input has no repeat flag) would switch the mode back off.
         adapter = WindowsAdapter(Window(hwnd=42))
+        adapter._dispatch("click", {"x": 10, "y": 20, "modifier": "alt"})
+        sent = fake_env["sent"]
+        alt = SCANCODES["LALT"][0]
+        keys = [(e.ki.wScan, bool(e.ki.dwFlags & win.KEYEVENTF_KEYUP)) for e in key_events(sent)]
+        assert keys == [(alt, False), (alt, True)]
+        last_up = max(
+            i for i, e in enumerate(sent)
+            if e.type == win.INPUT_MOUSE and e.mi.dwFlags == win.MOUSEEVENTF_LEFTUP
+        )
+        alt_release = next(
+            i for i, e in enumerate(sent)
+            if e.type == win.INPUT_KEYBOARD and e.ki.dwFlags & win.KEYEVENTF_KEYUP
+        )
+        assert last_up < alt_release  # released only after the button came up
+        # game-tuned pacing: a long lead before the click (games animate into
+        # their modifier mode) and a tail after the button release
+        assert WindowsAdapter._MODIFIER_LEAD in fake_env["sleeps"]
+        assert WindowsAdapter._MODIFIER_TAIL in fake_env["sleeps"]
+        assert WindowsAdapter._MODIFIER_LEAD >= 0.3
+
+    def test_click_without_held_keys_injects_no_key_events(self, fake_env):
+        WindowsAdapter(Window(hwnd=42)).click(10, 10)
+        assert key_events(fake_env["sent"]) == []
+
+    def test_click_reasserts_when_key_down_was_undelivered(self, fake_env):
+        # key_down fired while another window had focus: the down went there.
+        # Once the target IS foreground, the next click must re-press the held
+        # key before the button goes down.
+        user32 = fake_env["user32"]
+        adapter = WindowsAdapter(Window(hwnd=42))
+        user32.foreground = 7  # someone else owns the foreground
         adapter.key_down("alt")
+        assert adapter._held_undelivered
+        user32.foreground = 42  # target window regains the foreground
         del fake_env["sent"][:]
         adapter.click(10, 10)
         sent = fake_env["sent"]
@@ -221,47 +254,38 @@ class TestMouse:
             if e.type == win.INPUT_MOUSE and e.mi.dwFlags == win.MOUSEEVENTF_LEFTDOWN
         )
         assert sent.index(keys[0]) < first_down
-        # paced so frame-polling apps sample the modifier before the button
-        assert KEY_HOLD in fake_env["sleeps"]
-
-    def test_click_without_held_keys_injects_no_key_events(self, fake_env):
-        WindowsAdapter(Window(hwnd=42)).click(10, 10)
+        assert not adapter._held_undelivered  # repaired
+        # a second click does NOT re-press again (single-repair, no flapping)
+        del fake_env["sent"][:]
+        adapter.click(10, 10)
         assert key_events(fake_env["sent"]) == []
 
-    def test_modifier_click_dispatch_full_sequence(self, fake_env):
-        # execute("click", modifier=...) end to end: alt down (key_down), alt
-        # re-assert, button press/release, alt up — with the release AFTER the
-        # button comes back up.
-        adapter = WindowsAdapter(Window(hwnd=42))
-        adapter._dispatch("click", {"x": 10, "y": 20, "modifier": "alt"})
-        sent = fake_env["sent"]
-        alt = SCANCODES["LALT"][0]
-        keys = [(e.ki.wScan, bool(e.ki.dwFlags & win.KEYEVENTF_KEYUP)) for e in key_events(sent)]
-        assert keys == [(alt, False), (alt, False), (alt, True)]
-        last_up = max(
-            i for i, e in enumerate(sent)
-            if e.type == win.INPUT_MOUSE and e.mi.dwFlags == win.MOUSEEVENTF_LEFTUP
-        )
-        alt_release = next(
-            i for i, e in enumerate(sent)
-            if e.type == win.INPUT_KEYBOARD and e.ki.dwFlags & win.KEYEVENTF_KEYUP
-        )
-        assert last_up < alt_release
-        # game-tuned pacing: a long lead before the click (games animate into
-        # their modifier mode) and a tail after the button release
-        assert WindowsAdapter._MODIFIER_LEAD in fake_env["sleeps"]
-        assert WindowsAdapter._MODIFIER_TAIL in fake_env["sleeps"]
-        assert WindowsAdapter._MODIFIER_LEAD >= 0.3
-
-    def test_mouse_down_reasserts_held_modifiers(self, fake_env):
+    def test_click_reasserts_after_foreground_recovery(self, fake_env):
+        # Window not foreground at click time: ensure_foreground runs (its
+        # ALT-tap unlock may have released a held ALT), so held keys must be
+        # re-pressed before the button goes down.
+        user32 = fake_env["user32"]
         adapter = WindowsAdapter(Window(hwnd=42))
         adapter.key_down("shift")
+        user32.foreground = 7  # focus stolen after key_down
         del fake_env["sent"][:]
-        adapter.mouse_down(10, 10)
+        adapter.click(10, 10)
         keys = key_events(fake_env["sent"])
-        assert [(e.ki.wScan, bool(e.ki.dwFlags & win.KEYEVENTF_KEYUP)) for e in keys] == [
-            (SCANCODES["LSHIFT"][0], False),
-        ]
+        # last key event is the shift re-press (ensure_foreground may emit its
+        # own ALT tap before it while the fake refuses to front the window)
+        assert (keys[-1].ki.wScan, bool(keys[-1].ki.dwFlags & win.KEYEVENTF_KEYUP)) == (
+            SCANCODES["LSHIFT"][0], False,
+        )
+        assert KEY_HOLD in fake_env["sleeps"]
+
+    def test_key_up_clears_undelivered_flag(self, fake_env):
+        user32 = fake_env["user32"]
+        adapter = WindowsAdapter(Window(hwnd=42))
+        user32.foreground = 7
+        adapter.key_down("alt")
+        assert adapter._held_undelivered
+        adapter.key_up("alt")
+        assert not adapter._held_undelivered  # nothing held, nothing to repair
 
     def test_release_all_inputs_sweeps(self, fake_env):
         adapter = WindowsAdapter(Window(hwnd=42))
@@ -433,11 +457,24 @@ class TestCharScancode:
 
 
 class TestForeground:
-    def test_input_skips_raise_when_already_foreground(self, fake_env, monkeypatch):
+    def test_click_skips_ensure_foreground_when_already_foreground(
+        self, fake_env, monkeypatch
+    ):
+        # Already foreground: no ensure_foreground call at all — its ALT-tap
+        # unlock must never get a chance to fire mid modifier-click.
         calls = []
         monkeypatch.setattr(
             win, "ensure_foreground", lambda hwnd: calls.append(hwnd) or True
         )
+        WindowsAdapter(Window(hwnd=42)).click(1, 1)
+        assert calls == []
+
+    def test_click_fronts_window_when_not_foreground(self, fake_env, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            win, "ensure_foreground", lambda hwnd: calls.append(hwnd) or True
+        )
+        fake_env["user32"].foreground = 7
         WindowsAdapter(Window(hwnd=42)).click(1, 1)
         assert calls == [42]
 

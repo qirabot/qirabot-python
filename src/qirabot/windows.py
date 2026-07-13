@@ -508,6 +508,11 @@ def _same_hwnd(a: Any, b: Any) -> bool:
     return (int(a or 0) & 0xFFFFFFFF) == (int(b or 0) & 0xFFFFFFFF)
 
 
+def is_foreground(hwnd: int) -> bool:
+    """True if ``hwnd`` is the current foreground window (side-effect free)."""
+    return _same_hwnd(_user32().GetForegroundWindow(), hwnd)
+
+
 def ensure_foreground(hwnd: int) -> bool:
     """Bring ``hwnd`` to the foreground (best-effort; returns success).
 
@@ -515,9 +520,14 @@ def ensure_foreground(hwnd: int) -> bool:
     refused unless our process owns the current foreground input; the standard
     unlock is injecting a no-op ALT tap first. A minimized window also needs
     SW_RESTORE before it can take focus.
+
+    NOTE: the ALT-tap unlock injects an ALT press+release — callers holding a
+    modifier around a click must repair it afterwards (see the Windows
+    adapter's ``_reassert_held_keys``). Check :func:`is_foreground` first when
+    input side effects would be unacceptable.
     """
     user32 = _user32()
-    if _same_hwnd(user32.GetForegroundWindow(), hwnd):
+    if is_foreground(hwnd):
         return True
     user32.ShowWindow(ctypes.c_void_p(hwnd), _SW_RESTORE)
     user32.SetForegroundWindow(ctypes.c_void_p(hwnd))

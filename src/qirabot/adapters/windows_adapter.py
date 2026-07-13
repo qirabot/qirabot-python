@@ -156,6 +156,10 @@ class WindowsAdapter(DeviceAdapter):
         # release (see DeviceAdapter.release_all_inputs).
         self._held_keys: list[tuple[int, bool]] = []
         self._mouse_held = False
+        # True when a key_down was injected while the window was NOT
+        # foreground: the down event went to whichever window had focus, so
+        # the next pointer action must re-press the held keys.
+        self._held_undelivered = False
 
     @classmethod
     def accepts(cls, target: Any) -> bool:
@@ -230,14 +234,15 @@ class WindowsAdapter(DeviceAdapter):
     # ---- pointer ------------------------------------------------------------
 
     def _reassert_held_keys(self) -> None:
-        """Re-press every key held via key_down, right after an ensure_foreground.
+        """Re-press every key held via key_down.
 
-        Two failure modes make a held modifier silently vanish before a click
-        lands: key_down's own ensure_foreground may have failed (its down event
-        went to whichever window really had focus), and ensure_foreground's
-        ALT-tap unlock releases a held ALT. Re-sending the down events now that
-        the target window IS foreground repairs both; a duplicate down on an
-        already-held key is just autorepeat to the app.
+        Repairs the two ways a held modifier silently vanishes before a click
+        lands: its key_down was injected while another window had focus (the
+        down event went there), or ensure_foreground's ALT-tap unlock released
+        a held ALT. Only call when delivery is actually in doubt — games that
+        TOGGLE their modifier mode on every down (Raw Input carries no repeat
+        flag to filter on) treat a duplicate down as "switch the mode back
+        off", turning the modifier click back into a plain click.
         """
         if not self._held_keys:
             return
@@ -247,11 +252,28 @@ class WindowsAdapter(DeviceAdapter):
         # Frame-polling apps need to sample the modifiers as held before the
         # button event arrives.
         time.sleep(KEY_HOLD)
+        self._held_undelivered = False
+
+    def _prepare_pointer_action(self) -> None:
+        """Front the window and repair held-key delivery — only when needed.
+
+        Foreground already ours and every held key delivered there: do
+        nothing, so the wire sequence stays modifier-down → click → up exactly
+        once (toggle-mode games break on duplicate downs, see
+        ``_reassert_held_keys``). Otherwise front the window (whose ALT-tap
+        unlock may release a held ALT) and re-press whatever is held.
+        """
+        if win.is_foreground(self._window.hwnd):
+            if self._held_undelivered:
+                self._reassert_held_keys()
+            return
+        win.ensure_foreground(self._window.hwnd)
+        if self._held_keys:
+            self._reassert_held_keys()
 
     def _button_click(self, x: float, y: float, down: int, up: int) -> None:
         with win.dpi_awareness():
-            win.ensure_foreground(self._window.hwnd)
-            self._reassert_held_keys()
+            self._prepare_pointer_action()
             # Hardening: approach moves before the press so hit-testing apps
             # see WM_MOUSEMOVE, then a real hold instead of a ~0ms blip.
             for ox, oy in ((-CLICK_OFFSET, -CLICK_OFFSET), (CLICK_OFFSET, CLICK_OFFSET), (0, 0)):
@@ -278,8 +300,7 @@ class WindowsAdapter(DeviceAdapter):
 
     def mouse_down(self, x: float, y: float) -> None:
         with win.dpi_awareness():
-            win.ensure_foreground(self._window.hwnd)
-            self._reassert_held_keys()
+            self._prepare_pointer_action()
             self._move_to(x, y)
             win.send_inputs([win.mouse_event(win.MOUSEEVENTF_LEFTDOWN)])
         self._mouse_held = True
@@ -293,8 +314,7 @@ class WindowsAdapter(DeviceAdapter):
 
     def drag(self, from_x: float, from_y: float, to_x: float, to_y: float) -> None:
         with win.dpi_awareness():
-            win.ensure_foreground(self._window.hwnd)
-            self._reassert_held_keys()
+            self._prepare_pointer_action()
             self._move_to(from_x, from_y)
             win.send_inputs([win.mouse_event(win.MOUSEEVENTF_LEFTDOWN)])
             time.sleep(0.05)
@@ -372,7 +392,10 @@ class WindowsAdapter(DeviceAdapter):
         if not win.ensure_foreground(self._window.hwnd):
             # Keyboard input follows focus, not coordinates: this down event is
             # about to land in whatever window IS focused. Surface it — the
-            # symptom otherwise is "clicks work but the modifier doesn't".
+            # symptom otherwise is "clicks work but the modifier doesn't" —
+            # and mark the held set undelivered so the next pointer action
+            # re-presses it once the window is actually foreground.
+            self._held_undelivered = True
             logger.warning(
                 "key_down(%r): could not bring window %r to the foreground; "
                 "the key press may go to another window",
@@ -388,6 +411,8 @@ class WindowsAdapter(DeviceAdapter):
         win.send_inputs([win.key_scancode_event(sc[0], sc[1], True)])
         if sc in self._held_keys:
             self._held_keys.remove(sc)
+        if not self._held_keys:
+            self._held_undelivered = False
 
     def release_all_inputs(self) -> None:
         # Best-effort sweep; one stuck input must not block releasing the rest.
@@ -397,6 +422,7 @@ class WindowsAdapter(DeviceAdapter):
             except Exception:
                 pass
         self._held_keys.clear()
+        self._held_undelivered = False
         if self._mouse_held:
             try:
                 win.send_inputs([win.mouse_event(win.MOUSEEVENTF_LEFTUP)])
