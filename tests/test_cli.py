@@ -354,6 +354,42 @@ class TestDesktopWindowsEngine:
         assert result.exit_code == 0, result.output
         assert calls == ["launch", "resolve"]
 
+    def _capture_make_bot(self, monkeypatch):
+        from qirabot.cli import main
+
+        captured = {}
+
+        def fake_make_bot(ctx, **kwargs):
+            captured.update(kwargs)
+            return MagicMock(name="bot")
+
+        monkeypatch.setattr(main, "_make_bot", fake_make_bot)
+        monkeypatch.setattr(main, "_run_local", lambda *a, **k: None)
+        return captured
+
+    def test_record_follows_bound_window(self, monkeypatch, win_platform):
+        """--record with a bound window must thread record_window=True to the
+        SDK — otherwise ffmpeg grabs the full screen despite the binding."""
+        captured = self._capture_make_bot(monkeypatch)
+
+        result = _invoke(["desktop", "do it", "--hwnd", "1234", "--record"])
+
+        assert result.exit_code == 0, result.output
+        assert captured["record"] is True
+        assert captured["record_window"] is True
+
+    def test_full_screen_desktop_leaves_record_window_off(self, monkeypatch):
+        """Without a window binding there is no window to follow — the
+        pyautogui path must not set record_window."""
+        captured = self._capture_make_bot(monkeypatch)
+        monkeypatch.setitem(sys.modules, "pyautogui", types.ModuleType("pyautogui"))
+
+        result = _invoke(["desktop", "do it", "--record"])
+
+        assert result.exit_code == 0, result.output
+        assert captured["record"] is True
+        assert not captured.get("record_window")
+
 
 class TestEngineFlagValidation:
     """Engine-specific URL/device flags are rejected under the other engine

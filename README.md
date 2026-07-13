@@ -5,9 +5,11 @@ Cross-platform GUI automation, driven by multimodal AI vision. Drive browsers, m
 Run it standalone (`bot.open()` launches a browser for you; Android / iOS / Windows-window backends are built in with zero extra dependencies), bolt it onto your existing Playwright / Selenium / Appium / pyautogui session, drop it into a pytest suite, or bind by HWND to drive a Unity / Unreal / native desktop game. Same API across all of them.
 
 **Contents:** [Installation](#installation) · [Quick Start](#quick-start) · [CLI](#cli) ·
-[Bolt-On to Any Framework](#bolt-on-to-any-framework) · [API Reference](#api-reference) ·
-[Reports](#reports) · [Configuration](#configuration) · [Error Handling](#error-handling) ·
-[Agent Skill](#agent-skill)
+[Bolt-On to Any Framework](#bolt-on-to-any-framework) · [Bind a target](#bind-a-target-optional) ·
+[Custom adapters](#custom-adapters) · [Migrating from 1.x](#migrating-from-1x-airtest-to-20) ·
+[Examples](#examples) · [API Reference](#api-reference) · [Reports](#reports) ·
+[Configuration](#configuration) · [Error Handling](#error-handling) ·
+[Task Lifecycle](#task-lifecycle) · [Agent Skill](#agent-skill)
 
 ## Installation
 
@@ -141,8 +143,16 @@ extras. Only `browser` (`qirabot[browser]`), whole-screen `desktop`
 # Browser (needs qirabot[browser] + `playwright install chromium`)
 qirabot browser "Search for SpaceX and get the first sentence of the article" --url wikipedia.org
 
+# Browser — more control: headless/viewport; a persistent profile (cookies and
+# logins survive runs) in your installed Chrome/Edge; or take over an
+# already-running Chrome via CDP (also works with remote pools like browserless)
+qirabot browser "..." --headless --viewport 1920x1080
+qirabot browser "..." --user-data-dir ~/.qira-profile --channel chrome
+qirabot browser "..." --cdp-url http://localhost:9222
+
 # Android — direct over adb (built in; only needs the adb binary, no server)
 qirabot android "Open settings and turn on airplane mode"
+qirabot android "..." -d emulator-5554 --app-package com.android.settings  # pick one of several devices, start in an app
 
 # iOS — direct to WebDriverAgent (built in; WDA must be running on :8100).
 # The device is picked by --wda-url, not by name; USB real device: `iproxy 8100 8100`
@@ -167,7 +177,7 @@ qirabot doctor
 
 # Read-only server queries
 qirabot task <task_id>            # status, commands, steps
-qirabot screenshot <task_id>      # download a screenshot (auto-named; use -o to choose a path)
+qirabot screenshot <task_id>      # download a screenshot (latest step; -s N picks step N, -o the path)
 qirabot models                    # list model aliases
 ```
 
@@ -198,8 +208,9 @@ project `.env` (loaded automatically, same rules as
 `qirabot login` config file — so `login` covers the everyday case and an env
 var still wins for CI or one-off overrides; `qirabot login --status` shows
 which layer is active. `--base-url` falls back to `QIRA_BASE_URL`; also
-available are `--timeout` and `--verify-ssl` / `--no-verify-ssl`. Run
-`qirabot -h` or `qirabot <command> -h` for the full option list.
+available are `--timeout`, `--verify-ssl` / `--no-verify-ssl`, and
+`--version`. Run `qirabot -h` or `qirabot <command> -h` for the full option
+list.
 
 **Exit codes** are script-friendly: `0` task succeeded, `1` task failed or any
 error, `130` interrupted with Ctrl+C — so `qirabot browser "..." && next-step`
@@ -377,6 +388,44 @@ Full examples: [examples/windows/quickstart.py](examples/windows/quickstart.py)
 and the game walkthrough in [examples/game/](examples/game/). For whole-desktop
 automation (any OS) use the pyautogui backend.
 
+## Bind a target (optional)
+
+Every action takes the framework object (`page` / `driver` / device / module) as
+its first argument: `bot.click(target, "Login")`. When you drive a **single,
+stable target** for the whole session, call `bot.bind(target)` once to get a
+drop-in proxy that drops the repeated first argument:
+
+```python
+bot = Qirabot().bind(driver)     # Selenium/Appium driver, pyautogui, AdbDevice/WdaClient/Window
+bot.click("Login")
+bot.type_text("Email", "a@b.com")
+with Qirabot().bind(driver) as bot:   # works as a context manager too
+    ...
+```
+
+`bind()` is recommended for **the device backends (adb/WDA/Window), pyautogui, Appium, Selenium**. For
+**Playwright** keep the explicit form `page = bot.click(page, ...)` so new-tab
+follows stay visible (a click can open a new tab; the returned page is the one
+your native `page.fill(...)` calls should use). With a bound proxy, reach the
+live page via `bot.current_page()`.
+
+## Custom adapters
+
+The same two hooks work for any backend qirabot doesn't ship (cloud-device
+SDKs, custom engine bridges, …): subclass
+`qirabot.DeviceAdapter` — the required primitives are just `screenshot` /
+`click` / `double_click` / `type_text` / `press_key` / `scroll` /
+`device_info` — then either pass an instance straight to `bind()`:
+
+```python
+bot = Qirabot().bind(MyAdapter(handle))
+```
+
+or implement `accepts()` and `register_adapter(MyAdapter)` once so `bind()`
+recognizes your framework's native objects. Registered adapters are checked
+before the built-ins. [examples/airtest/adapter.py](examples/airtest/adapter.py)
+is a complete reference implementation.
+
 ## Migrating from 1.x (airtest) to 2.0
 
 2.0 removes the airtest integration — and with it the `numpy<2` /
@@ -384,6 +433,9 @@ automation (any OS) use the pyautogui backend.
 environments. The direct backends above are drop-in replacements; the AI loop,
 reports, and recording behave the same. Passing an airtest target to 2.0 raises
 an error with these same pointers; to defer migrating, pin `qirabot<2.0`.
+
+<details>
+<summary><b>Per-target migration snippets (Android / iOS / Windows / CLI), 1.x maintenance policy, staying on airtest</b></summary>
 
 > **1.x maintenance policy.** The 1.x series lives on the
 > [`1.x` branch](https://github.com/qirabot/qirabot-python/tree/1.x) in
@@ -439,43 +491,8 @@ register_adapter(AirtestAdapter)
 bot = Qirabot().bind(connect_device("Android:///emulator-5554"))
 ```
 
-## Custom adapters
 
-The same two hooks work for any backend qirabot doesn't ship (cloud-device
-SDKs, custom engine bridges, …): subclass
-`qirabot.DeviceAdapter` — the required primitives are just `screenshot` /
-`click` / `double_click` / `type_text` / `press_key` / `scroll` /
-`device_info` — then either pass an instance straight to `bind()`:
-
-```python
-bot = Qirabot().bind(MyAdapter(handle))
-```
-
-or implement `accepts()` and `register_adapter(MyAdapter)` once so `bind()`
-recognizes your framework's native objects. Registered adapters are checked
-before the built-ins. [examples/airtest/adapter.py](examples/airtest/adapter.py)
-is a complete reference implementation.
-
-## Bind a target (optional)
-
-Every action takes the framework object (`page` / `driver` / device / module) as
-its first argument: `bot.click(target, "Login")`. When you drive a **single,
-stable target** for the whole session, call `bot.bind(target)` once to get a
-drop-in proxy that drops the repeated first argument:
-
-```python
-bot = Qirabot().bind(driver)     # Selenium/Appium driver, pyautogui, AdbDevice/WdaClient/Window
-bot.click("Login")
-bot.type_text("Email", "a@b.com")
-with Qirabot().bind(driver) as bot:   # works as a context manager too
-    ...
-```
-
-`bind()` is recommended for **the device backends (adb/WDA/Window), pyautogui, Appium, Selenium**. For
-**Playwright** keep the explicit form `page = bot.click(page, ...)` so new-tab
-follows stay visible (a click can open a new tab; the returned page is the one
-your native `page.fill(...)` calls should use). With a bound proxy, reach the
-live page via `bot.current_page()`.
+</details>
 
 ## Examples
 
@@ -612,29 +629,6 @@ Runnable examples: [examples/game/custom_tool_gm.py](examples/game/custom_tool_g
 (let the AI call your GM backend mid-task) and
 [examples/automation/06_human_in_the_loop.py](examples/automation/06_human_in_the_loop.py)
 (pause for a human to solve a CAPTCHA / login wall, then continue).
-
-### Settle delay
-
-After every screen-changing action each adapter pauses briefly so the UI repaints
-before the next screenshot — without it the model can capture a mid-animation frame
-and wrongly conclude the action did nothing. The defaults are tuned per platform
-(desktop/Android `1.0`s, Appium/WDA `0.6`s; Playwright relies on its own
-auto-waiting and adds none).
-
-Override the floor globally with `settle_seconds` — useful to slow down for a laggy
-remote device, or speed up a snappy local app. `0` disables it (rely on `wait_for`
-/ `timeout=` polling instead, which is more precise):
-
-```python
-bot = Qirabot(settle_seconds=1.5)   # laggy environment: wait longer
-bot = Qirabot(settle_seconds=0.3)   # fast local app: go quicker
-bot = Qirabot(settle_seconds=0)     # disable; lean on wait_for() instead
-# or, without touching code:  export QIRA_SETTLE_SECONDS=1.5
-```
-
-This is a blunt fixed delay. For "wait until X appears" prefer the auto-wait
-`timeout=`/`wait_for()` polling shown above — it returns as soon as the condition
-holds instead of always sleeping the full interval.
 
 ### Screenshot (No AI)
 
@@ -872,8 +866,10 @@ bot = Qirabot(record_mjpeg_url="http://127.0.0.1:9100")
   in practice WDA's device-screen stream for iOS runs driven directly through
   WDA, where there is no Appium session to record with.
 
-**Per-window capture + system audio (Windows).** On Windows you can record just
-the window under test and capture its sound:
+<details>
+<summary><b>Per-window capture + system audio (Windows)</b></summary>
+
+On Windows you can record just the window under test and capture its sound:
 
 ```python
 from qirabot import Qirabot, Window
@@ -902,7 +898,12 @@ bot.close()                         # recording.mp4 = just that window, with sou
   silently with a warning. If audio lags the video, nudge it with
   `record_audio_offset=-0.4` (or `QIRA_AUDIO_OFFSET`).
 
-**Multiple monitors (macOS).** The full screen is captured one display at a
+</details>
+
+<details>
+<summary><b>Multiple monitors (macOS)</b></summary>
+
+The full screen is captured one display at a
 time; by default that's the primary display (`Capture screen 0`). To record a
 different one, set `QIRA_SCREEN_INDEX` to its avfoundation device index:
 
@@ -919,6 +920,8 @@ Make sure the window you care about is on the recorded display — with
 `headless=False` the browser opens wherever macOS places it. On Windows/Linux
 the default already grabs the whole virtual desktop (all monitors), so this knob
 is macOS-only.
+
+</details>
 
 Call `bot.report("path.html")` to also write the report to a custom location on
 demand. Use `bot.screenshot(target)` for a one-off frame (saved under
@@ -962,7 +965,7 @@ Constructor options:
 | `report_dir` | `QIRA_REPORT_DIR` | `./qira_runs/<date>/<time-id>/` | Output root; the `<date>/<time-id>/` subdirs are always appended |
 | `record` | `QIRA_RECORD` | `False` | Record the screen with ffmpeg into `recording.mp4` (embedded in the report) |
 | `record_fps` | — | `12` | Recording frame rate |
-| `record_window` | `QIRA_RECORD_WINDOW` | `False` | **Windows window backend only.** Record just the window under test (auto-resolved from the first action) instead of the full screen; falls back to full screen otherwise |
+| `record_window` | `QIRA_RECORD_WINDOW` | `False` | **Windows window backend only.** Record just the window under test (auto-resolved from the first action) instead of the full screen; falls back to full screen otherwise. The CLI sets this automatically when `--window-title`/`--hwnd` is bound |
 | `record_audio` | `QIRA_RECORD_AUDIO` | `False` | **Windows only.** Capture system audio into the recording. `True` auto-detects a loopback device, or pass a DirectShow device name |
 | `record_audio_offset` | `QIRA_AUDIO_OFFSET` | `None` | A/V sync offset in seconds (usually negative, e.g. `-0.4`) applied to the audio input |
 | `record_device` | `QIRA_RECORD_DEVICE` | `False` | Record the automated **device's** screen instead of the host's: Appium driver → session recording API, AdbDevice → `adb screenrecord` (resolved from the first action's target). Implies `record` |
@@ -1001,6 +1004,29 @@ short language tag like `"zh"` or `"en"` — empty means the server default:
 bot = Qirabot(language="zh")                      # extract/ai answers in Chinese
 text = bot.extract(page, "Get the main heading", language="zh")
 ```
+
+### Settle delay
+
+After every screen-changing action each adapter pauses briefly so the UI repaints
+before the next screenshot — without it the model can capture a mid-animation frame
+and wrongly conclude the action did nothing. The defaults are tuned per platform
+(desktop/Android `1.0`s, Appium/WDA `0.6`s; Playwright relies on its own
+auto-waiting and adds none).
+
+Override the floor globally with `settle_seconds` — useful to slow down for a laggy
+remote device, or speed up a snappy local app. `0` disables it (rely on `wait_for`
+/ `timeout=` polling instead, which is more precise):
+
+```python
+bot = Qirabot(settle_seconds=1.5)   # laggy environment: wait longer
+bot = Qirabot(settle_seconds=0.3)   # fast local app: go quicker
+bot = Qirabot(settle_seconds=0)     # disable; lean on wait_for() instead
+# or, without touching code:  export QIRA_SETTLE_SECONDS=1.5
+```
+
+This is a blunt fixed delay. For "wait until X appears" prefer the auto-wait
+`timeout=`/`wait_for()` polling shown above — it returns as soon as the condition
+holds instead of always sleeping the full interval.
 
 ## Error Handling
 

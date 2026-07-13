@@ -57,6 +57,7 @@ def _make_bot(
     record: bool = False,
     record_mjpeg_url: str = "",
     record_device: bool = False,
+    record_window: bool = False,
     task_name: str = "",
 ) -> Any:
     from qirabot import Qirabot
@@ -78,6 +79,7 @@ def _make_bot(
             record=record,
             record_mjpeg_url=record_mjpeg_url or None,
             record_device=record_device,
+            record_window=record_window,
         )
     except Exception as e:
         # No special-casing needed: Transport already maps connection failures to
@@ -780,20 +782,23 @@ def _run_direct(
     record: bool = False,
     record_mjpeg_url: str = "",
     record_device: bool = False,
+    record_window: bool = False,
 ) -> None:
     """Shared direct-engine body: build the bot, connect the device, run.
 
     ``connect`` resolves the device + optional app launch and returns the bind
     target. Like _run_appium, the bot is built first (it validates the API key
     and may sys.exit()); there is no remote session to quit, so the only
-    teardown is bot.close(). Recording is device-side: ``record_mjpeg_url``
-    for ios (WDA's MJPEG stream), ``record_device`` for android (adb
-    screenrecord, resolved from the AdbDevice target).
+    teardown is bot.close(). Recording is device-side for android/ios —
+    ``record_mjpeg_url`` for ios (WDA's MJPEG stream), ``record_device`` for
+    android (adb screenrecord, resolved from the AdbDevice target) — and
+    host-side for desktop, where ``record_window`` makes it follow the bound
+    window instead of grabbing the full screen.
     """
     bot = _make_bot(
         ctx, model=model, language=language, report=report, report_dir=report_dir,
         annotate=annotate, record=record, record_mjpeg_url=record_mjpeg_url,
-        record_device=record_device,
+        record_device=record_device, record_window=record_window,
         task_name=name or _default_task_name(instruction),
     )
     try:
@@ -1082,9 +1087,12 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
             window.hwnd  # noqa: B018 — resolve now for actionable errors
             return window
 
+        # record_window unconditionally: it only takes effect when a recording
+        # actually starts (--record here, or QIRA_RECORD=1 from the env), and
+        # then makes it follow the bound window instead of the full screen.
         _run_direct(
             ctx, instruction, name, model, language, max_steps, connect,
-            report, report_dir, annotate, record=record,
+            report, report_dir, annotate, record=record, record_window=True,
         )
         return
 
