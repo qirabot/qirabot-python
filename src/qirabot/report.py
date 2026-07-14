@@ -357,28 +357,38 @@ def write_html(
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    # Group entries by section, preserving first-seen order.
-    sections: list[str] = []
-    grouped: dict[str, list[dict[str, Any]]] = {}
+    # Group entries into runs of consecutive same-section steps, so the report
+    # reads in execution order: manual steps interleaved between ai() tasks
+    # stay where they happened instead of all merging into one block. The same
+    # section name can therefore appear as several groups.
+    groups: list[tuple[str, list[dict[str, Any]]]] = []
     for entry in log:
         sec = entry.get("section") or "setup"
-        if sec not in grouped:
-            grouped[sec] = []
-            sections.append(sec)
-        grouped[sec].append(entry)
+        if not groups or groups[-1][0] != sec:
+            groups.append((sec, []))
+        groups[-1][1].append(entry)
     # A section that failed before recording any step (e.g. a terminal server
     # error on its first step) has a banner but no entries — still render it,
     # or the failure reason would vanish from the report.
+    group_names = {name for name, _ in groups}
     for sec in section_errors:
-        if sec not in grouped:
-            grouped[sec] = []
-            sections.append(sec)
+        if sec not in group_names:
+            groups.append((sec, []))
+            group_names.add(sec)
+    # Banners and badges attach to the *last* group of their section name:
+    # errors/outcomes describe how that section's final run ended.
+    last_group_of = {name: i for i, (name, _) in enumerate(groups)}
 
-    def section_kind(sec: str) -> tuple[str, str]:
-        if sec in outcomes:
-            status = _normalize_status(outcomes[sec])
+    def display_name(name: str) -> str:
+        # "setup" is the client's section key for standalone (non-ai) actions;
+        # now that those render in timeline order, "manual" describes them.
+        return "manual" if name == "setup" else name
+
+    def section_kind(name: str, entries: list[dict[str, Any]]) -> tuple[str, str]:
+        if name in outcomes:
+            status = _normalize_status(outcomes[name])
             return _STATUS_KINDS.get(status, ("FAIL", "fail"))
-        return (f"{len(grouped[sec])} steps", "neutral")
+        return (f"{len(entries)} steps", "neutral")
 
     parts: list[str] = []
     parts.append("<!doctype html><html><head><meta charset='utf-8'>")
@@ -402,7 +412,15 @@ def write_html(
     # a truncated run isn't a pass, but as long as nothing truly failed the
     # header is amber (raise the budget) rather than red (something broke).
     parts.append("<div class='summary'>")
-    statuses = [_normalize_status(outcomes[s]) for s in sections if s in outcomes]
+    # Pass/fail tally counts each judged section once, even when its steps
+    # split across several timeline groups (outcomes are keyed per section).
+    judged: list[str] = []
+    seen_judged: set[str] = set()
+    for name, _entries in groups:
+        if name in outcomes and name not in seen_judged:
+            seen_judged.add(name)
+            judged.append(name)
+    statuses = [_normalize_status(outcomes[name]) for name in judged]
     passed = sum(1 for st in statuses if st == "completed")
     truncated = sum(1 for st in statuses if st == "max_steps")
     total_judged = len(statuses)
@@ -417,9 +435,13 @@ def write_html(
         if truncated:
             label += f" · {truncated} truncated"
         parts.append(_badge(label, kind))
-    for sec in sections:
-        label, kind = section_kind(sec)
-        parts.append(_badge(f"{sec}: {label}", kind))
+    for gi, (name, entries) in enumerate(groups):
+        # One badge per judged section (on its last group, matching where the
+        # outcome banner renders); unjudged groups each get their step count.
+        if name in outcomes and last_group_of[name] != gi:
+            continue
+        label, kind = section_kind(name, entries)
+        parts.append(_badge(f"{display_name(name)}: {label}", kind))
     parts.append("</div>")
 
     if recording:
@@ -442,15 +464,16 @@ def write_html(
     # Sections. Every step with a thumbnail also becomes a lightbox "shot" so the
     # viewer can page across all screenshots regardless of which section they're in.
     shots: list[dict[str, str]] = []
-    for sec in sections:
-        label, kind = section_kind(sec)
+    for gi, (sec, entries) in enumerate(groups):
+        label, kind = section_kind(sec, entries)
         parts.append("<section>")
         parts.append(
-            f"<h2>{html.escape(sec)} {_badge(label, kind)}</h2>"
+            f"<h2>{html.escape(display_name(sec))} {_badge(label, kind)}</h2>"
         )
         # Section-level failure banner: amber for a max-steps truncation
-        # (matching its badge), red for a terminal error.
-        sec_err = section_errors.get(sec)
+        # (matching its badge), red for a terminal error. Rendered only on the
+        # section's last group — the error ended its final run.
+        sec_err = section_errors.get(sec) if last_group_of[sec] == gi else None
         if sec_err:
             status = _normalize_status(outcomes[sec]) if sec in outcomes else ""
             if status == "max_steps":
@@ -464,7 +487,7 @@ def write_html(
             "<div class='head'>action</div>"
             "<div class='head'>detail</div><div class='head'>screenshot</div>"
         )
-        for i, e in enumerate(grouped[sec], 1):
+        for i, e in enumerate(entries, 1):
             detail = ""
             decision = e.get("decision") or ""
             if decision:
@@ -504,7 +527,7 @@ def write_html(
                     "src": full or thumb,
                     "action": action,
                     "detail": detail,
-                    "label": f"{sec} · #{i}" + (f" · {clock}" if clock else ""),
+                    "label": f"{display_name(sec)} · #{i}" + (f" · {clock}" if clock else ""),
                 })
                 img = f"<img src='{thumb}' loading='lazy'>"
                 href = html.escape(full or "#")
