@@ -379,6 +379,10 @@ class Qirabot:
         # None = not probed yet; False = old server (404) or terminal task —
         # stop posting for the rest of the session.
         self._local_sync_supported: bool | None = None
+        # One warning per session when the server rejects a batch outright
+        # (4xx): the batch is dropped for good, which the user should see once
+        # — repeats stay at debug so a stale server can't spam every flush.
+        self._local_sync_rejected_warned = False
         # Built-in ffmpeg full-screen recording. Opt-in (default off); the
         # QIRA_RECORD env var enables it without a code change. Auto-started here
         # and stopped in close() so the mp4 is finalized before the report scans
@@ -1760,7 +1764,24 @@ class Qirabot:
                     )
                 self._local_sync_supported = False
             else:
-                logger.debug("local step sync failed: %s", e)
+                status = getattr(e, "status_code", None)
+                if (
+                    status is not None
+                    and 400 <= status < 500
+                    and not self._local_sync_rejected_warned
+                ):
+                    # Deterministic rejection (e.g. an action type this
+                    # server's whitelist doesn't know): retrying won't help
+                    # and the batch is gone from the cloud timeline, so say
+                    # so once instead of dropping it silently. The local
+                    # report still has the full record.
+                    self._local_sync_rejected_warned = True
+                    logger.warning(
+                        "server rejected a local-step batch (dropped from the "
+                        "cloud timeline; the local report is unaffected): %s", e
+                    )
+                else:
+                    logger.debug("local step sync failed: %s", e)
             return
         except Exception:
             logger.debug("local step sync failed", exc_info=True)
