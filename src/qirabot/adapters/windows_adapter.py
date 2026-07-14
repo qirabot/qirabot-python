@@ -10,12 +10,16 @@ Behavior deliberately preserved from the retired airtest Windows adapter:
 click hardening (pre-move jitter + a real hold), modifier press→pace→base→
 reverse-release ordering, per-key hold/gap pacing, and the focus settle before
 typing. What airtest couldn't do — horizontal wheel, unicode text without a
-SendKeys fallback — is native here.
+SendKeys fallback — is native here. Text games can't receive as injected
+unicode (CJK and friends: KEYEVENTF_UNICODE needs a TranslateMessage loop
+Raw-Input/DirectInput games don't run) is delivered via clipboard + Ctrl+V;
+QIRA_TEXT_FALLBACK=unicode reverts to injection.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any
 
@@ -123,6 +127,9 @@ KEY_GAP = 0.025
 # Delay between the focusing click and the first keystroke, so focus
 # animations/IME activation finish before characters start arriving.
 FOCUS_SETTLE = 0.3
+# After Ctrl+V: the target reads the clipboard while processing the paste,
+# possibly frames later — don't restore the user's clipboard under it.
+PASTE_SETTLE = 0.2
 # Click hardening: apps that hit-test on WM_MOUSEMOVE or debounce fast clicks
 # miss teleport-and-instant-click; jitter the cursor and hold the button.
 CLICK_OFFSET = 2
@@ -465,7 +472,8 @@ class WindowsAdapter(DeviceAdapter):
 
     def type_focused(self, text: str) -> None:
         # Prefer scancodes so games receive the text; any unmappable char
-        # switches the WHOLE string to unicode injection so ordering holds.
+        # (CJK, emoji, non-US symbols) switches the WHOLE string to one
+        # fallback path so ordering holds.
         codes = []
         for ch in text:
             m = char_scancode(ch)
@@ -484,7 +492,34 @@ class WindowsAdapter(DeviceAdapter):
                     win.send_inputs([win.key_scancode_event(shift[0], shift[1], True)])
                 time.sleep(KEY_GAP)
             return
+        if text and os.environ.get("QIRA_TEXT_FALLBACK", "").strip().lower() != "unicode":
+            self._paste_text(text)
+            return
         for ch in text:
             win.send_inputs(win.key_unicode_events(ch, False))
+            time.sleep(KEY_HOLD)
             win.send_inputs(win.key_unicode_events(ch, True))
             time.sleep(KEY_GAP)
+
+    def _paste_text(self, text: str) -> None:
+        """Deliver unmappable text via clipboard + Ctrl+V.
+
+        KEYEVENTF_UNICODE injects VK_PACKET events that only become text if
+        the target's message loop runs them through TranslateMessage →
+        WM_CHAR; games on Raw Input (RIDEV_NOLEGACY) or DirectInput never see
+        them. Ctrl+V rides the scancode path games DO receive. The previous
+        clipboard text is restored afterwards (best effort — non-text
+        contents like images are lost). QIRA_TEXT_FALLBACK=unicode reverts to
+        unicode injection for targets that block pasting.
+        """
+        saved = win.get_clipboard_text()
+        win.set_clipboard_text(text)
+        try:
+            self.press_key("ctrl+v")
+            time.sleep(PASTE_SETTLE)
+        finally:
+            if saved is not None:
+                try:
+                    win.set_clipboard_text(saved)
+                except Exception:
+                    logger.warning("could not restore previous clipboard text")

@@ -11,8 +11,10 @@ fakes; nothing in this module touches a DLL at import time.
 
 The adapter-facing surface is deliberately small: window resolution, the
 client-area rectangle, two capture paths (PrintWindow, full-screen BitBlt
-crop), a DPI-awareness guard, foreground management, and SendInput event
-builders (scancode, unicode, mouse) + :func:`send_inputs`.
+crop), a DPI-awareness guard, foreground management, SendInput event
+builders (scancode, unicode, mouse) + :func:`send_inputs`, and clipboard
+text access (the adapter's paste path for text games can't receive as
+injected unicode).
 """
 
 from __future__ import annotations
@@ -539,3 +541,107 @@ def ensure_foreground(hwnd: int) -> bool:
     user32.SetForegroundWindow(ctypes.c_void_p(hwnd))
     time.sleep(0.05)
     return bool(_same_hwnd(user32.GetForegroundWindow(), hwnd))
+
+
+# ---------------------------------------------------------------------------
+# Clipboard (backs the adapter's paste path for text games can't receive via
+# KEYEVENTF_UNICODE — see WindowsAdapter.type_focused)
+# ---------------------------------------------------------------------------
+
+CF_UNICODETEXT = 13
+_GMEM_MOVEABLE = 0x0002
+
+
+def _kernel32() -> Any:
+    return _dll("kernel32")
+
+
+def _set_types(fn: Any, restype: Any, argtypes: list[Any]) -> None:
+    # HANDLEs/pointers are pointer-sized; ctypes' default c_int restype
+    # truncates them on 64-bit. Test fakes (bound methods) reject attribute
+    # assignment — same best-effort pattern as dpi_awareness.
+    try:
+        fn.restype = restype
+        fn.argtypes = argtypes
+    except Exception:
+        pass
+
+
+def _open_clipboard() -> None:
+    """OpenClipboard, retrying briefly — another process may hold it."""
+    user32 = _user32()
+    for _ in range(10):
+        if user32.OpenClipboard(None):
+            return
+        time.sleep(0.02)
+    raise QirabotError(
+        f"OpenClipboard failed (err={_last_error()})",
+        code="windows.clipboard_busy",
+    )
+
+
+def get_clipboard_text() -> str | None:
+    """Current clipboard text, or None if empty, non-text, or unavailable."""
+    try:
+        _open_clipboard()
+    except QirabotError:
+        return None
+    user32, kernel32 = _user32(), _kernel32()
+    _set_types(user32.GetClipboardData, ctypes.c_void_p, [ctypes.c_uint32])
+    _set_types(kernel32.GlobalLock, ctypes.c_void_p, [ctypes.c_void_p])
+    _set_types(kernel32.GlobalUnlock, ctypes.c_int, [ctypes.c_void_p])
+    try:
+        handle = user32.GetClipboardData(CF_UNICODETEXT)
+        if not handle:
+            return None
+        ptr = kernel32.GlobalLock(ctypes.c_void_p(handle))
+        if not ptr:
+            return None
+        try:
+            return str(ctypes.wstring_at(ptr))
+        finally:
+            kernel32.GlobalUnlock(ctypes.c_void_p(handle))
+    finally:
+        user32.CloseClipboard()
+
+
+def set_clipboard_text(text: str) -> None:
+    """Replace the clipboard contents with ``text`` (CF_UNICODETEXT)."""
+    user32, kernel32 = _user32(), _kernel32()
+    _set_types(kernel32.GlobalAlloc, ctypes.c_void_p, [ctypes.c_uint32, ctypes.c_size_t])
+    _set_types(kernel32.GlobalLock, ctypes.c_void_p, [ctypes.c_void_p])
+    _set_types(kernel32.GlobalUnlock, ctypes.c_int, [ctypes.c_void_p])
+    _set_types(kernel32.GlobalFree, ctypes.c_void_p, [ctypes.c_void_p])
+    _set_types(user32.SetClipboardData, ctypes.c_void_p, [ctypes.c_uint32, ctypes.c_void_p])
+    data = text.encode("utf-16-le") + b"\x00\x00"
+    handle = kernel32.GlobalAlloc(_GMEM_MOVEABLE, len(data))
+    if not handle:
+        raise QirabotError(
+            f"GlobalAlloc failed (err={_last_error()})",
+            code="windows.clipboard_failed",
+        )
+    ptr = kernel32.GlobalLock(ctypes.c_void_p(handle))
+    if not ptr:
+        kernel32.GlobalFree(ctypes.c_void_p(handle))
+        raise QirabotError(
+            f"GlobalLock failed (err={_last_error()})",
+            code="windows.clipboard_failed",
+        )
+    ctypes.memmove(ptr, data, len(data))
+    kernel32.GlobalUnlock(ctypes.c_void_p(handle))
+    try:
+        _open_clipboard()
+    except QirabotError:
+        kernel32.GlobalFree(ctypes.c_void_p(handle))
+        raise
+    try:
+        user32.EmptyClipboard()
+        if not user32.SetClipboardData(CF_UNICODETEXT, ctypes.c_void_p(handle)):
+            # Ownership only transfers on success; free our copy on failure.
+            kernel32.GlobalFree(ctypes.c_void_p(handle))
+            raise QirabotError(
+                f"SetClipboardData failed (err={_last_error()})",
+                code="windows.clipboard_failed",
+            )
+    finally:
+        user32.CloseClipboard()

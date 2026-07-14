@@ -7,11 +7,14 @@ and the send_inputs seam, asserting on the real INPUT ctypes structs
 
 from __future__ import annotations
 
+import ctypes
+
 import pytest
 
 import qirabot.windows as win
 from qirabot.adapters.windows_adapter import (
     KEY_HOLD,
+    PASTE_SETTLE,
     SCANCODES,
     WindowsAdapter,
     char_scancode,
@@ -90,7 +93,17 @@ def fake_env(monkeypatch):
     monkeypatch.setattr(
         "qirabot.adapters.windows_adapter.time.sleep", lambda s: sleeps.append(s)
     )
-    return {"user32": user32, "sent": sent, "sleeps": sleeps}
+
+    # In-memory clipboard so the paste fallback runs anywhere.
+    clipboard = {"text": None, "sets": []}
+
+    def _set_clipboard(text):
+        clipboard["sets"].append(text)
+        clipboard["text"] = text
+
+    monkeypatch.setattr(win, "get_clipboard_text", lambda: clipboard["text"])
+    monkeypatch.setattr(win, "set_clipboard_text", _set_clipboard)
+    return {"user32": user32, "sent": sent, "sleeps": sleeps, "clipboard": clipboard}
 
 
 def key_events(sent):
@@ -407,14 +420,61 @@ class TestTypeText:
         ]
         assert all(e.ki.dwFlags & win.KEYEVENTF_SCANCODE for e in evs)
 
-    def test_non_ascii_switches_whole_string_to_unicode(self, fake_env):
+    def test_non_ascii_switches_whole_string_to_paste(self, fake_env):
+        # Unicode injection (VK_PACKET) needs a TranslateMessage loop games
+        # don't run — unmappable text must arrive as clipboard + Ctrl+V, with
+        # the WHOLE string pasted (no scancode/paste mixing => ordering holds).
         WindowsAdapter(Window(hwnd=42)).type_focused("a你")
+        assert fake_env["clipboard"]["sets"][0] == "a你"
         evs = key_events(fake_env["sent"])
-        # ALL events are unicode (no scancode/unicode mixing => ordering holds)
+        seq = [(e.ki.wScan, bool(e.ki.dwFlags & win.KEYEVENTF_KEYUP)) for e in evs]
+        ctrl, v = SCANCODES["LCTRL"][0], SCANCODES["V"][0]
+        # exactly one ctrl down (toggle-mode games treat a duplicate as "off")
+        assert seq == [(ctrl, False), (v, False), (v, True), (ctrl, True)]
+        assert all(e.ki.dwFlags & win.KEYEVENTF_SCANCODE for e in evs)
+        # the clipboard isn't restored under the target mid-paste
+        assert PASTE_SETTLE in fake_env["sleeps"]
+
+    def test_paste_restores_previous_clipboard(self, fake_env):
+        fake_env["clipboard"]["text"] = "user data"
+        WindowsAdapter(Window(hwnd=42)).type_focused("你好")
+        assert fake_env["clipboard"]["sets"] == ["你好", "user data"]
+        assert fake_env["clipboard"]["text"] == "user data"
+
+    def test_paste_skips_restore_when_clipboard_was_empty(self, fake_env):
+        WindowsAdapter(Window(hwnd=42)).type_focused("你")
+        assert fake_env["clipboard"]["sets"] == ["你"]
+
+    def test_paste_restore_failure_is_swallowed(self, fake_env, monkeypatch, caplog):
+        # A flaky restore (clipboard held by another process) must not turn a
+        # successful paste into a typing failure.
+        fake_env["clipboard"]["text"] = "user data"
+        calls = []
+
+        def _flaky_set(text):
+            calls.append(text)
+            if len(calls) > 1:
+                raise QirabotError("busy", code="windows.clipboard_busy")
+
+        monkeypatch.setattr(win, "set_clipboard_text", _flaky_set)
+        with caplog.at_level("WARNING", logger="qirabot"):
+            WindowsAdapter(Window(hwnd=42)).type_focused("你")
+        assert calls == ["你", "user data"]
+        assert any("clipboard" in r.message for r in caplog.records)
+
+    def test_env_knob_reverts_to_unicode_injection(self, fake_env, monkeypatch):
+        # Targets that block pasting: QIRA_TEXT_FALLBACK=unicode restores the
+        # KEYEVENTF_UNICODE path, now with a hold between down and up.
+        monkeypatch.setenv("QIRA_TEXT_FALLBACK", "unicode")
+        WindowsAdapter(Window(hwnd=42)).type_focused("a你")
+        assert fake_env["clipboard"]["sets"] == []
+        evs = key_events(fake_env["sent"])
         assert all(e.ki.dwFlags & win.KEYEVENTF_UNICODE for e in evs)
         assert [e.ki.wScan for e in evs] == [ord("a"), ord("a"), ord("你"), ord("你")]
+        assert KEY_HOLD in fake_env["sleeps"]
 
-    def test_surrogate_pair_emoji(self, fake_env):
+    def test_surrogate_pair_emoji_unicode_path(self, fake_env, monkeypatch):
+        monkeypatch.setenv("QIRA_TEXT_FALLBACK", "unicode")
         WindowsAdapter(Window(hwnd=42)).type_focused("🎮")
         evs = key_events(fake_env["sent"])
         units = "🎮".encode("utf-16-le")
@@ -449,6 +509,107 @@ class TestCharScancode:
 
         for name in set(SHIFT_CHARS.values()) | set(SYMBOL_CHARS.values()):
             assert name in SCANCODES, name
+
+
+# ---------------------------------------------------------------------------
+# Clipboard (Win32 layer)
+# ---------------------------------------------------------------------------
+
+
+class FakeClipboardUser32:
+    """user32 clipboard surface; handles are addresses of real ctypes memory."""
+
+    def __init__(self):
+        self.data_handle = 0  # what GetClipboardData returns
+        self.open_ok = True
+        self.emptied = False
+        self.set_handle = None
+        self.closed = 0
+
+    def OpenClipboard(self, owner):
+        return 1 if self.open_ok else 0
+
+    def CloseClipboard(self):
+        self.closed += 1
+        return 1
+
+    def GetClipboardData(self, fmt):
+        return self.data_handle
+
+    def EmptyClipboard(self):
+        self.emptied = True
+        return 1
+
+    def SetClipboardData(self, fmt, handle):
+        self.set_handle = handle.value if hasattr(handle, "value") else handle
+        return self.set_handle
+
+
+class FakeKernel32:
+    def __init__(self):
+        self.buffers = {}  # addr -> buffer (kept alive for wstring_at)
+        self.freed = []
+
+    def GlobalAlloc(self, flags, size):
+        buf = ctypes.create_string_buffer(int(size))
+        addr = ctypes.addressof(buf)
+        self.buffers[addr] = buf
+        return addr
+
+    def GlobalLock(self, handle):
+        return handle.value if hasattr(handle, "value") else handle
+
+    def GlobalUnlock(self, handle):
+        return 1
+
+    def GlobalFree(self, handle):
+        self.freed.append(handle.value if hasattr(handle, "value") else handle)
+
+
+class TestClipboard:
+    @pytest.fixture
+    def clip_env(self, monkeypatch):
+        user32, kernel32 = FakeClipboardUser32(), FakeKernel32()
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        monkeypatch.setattr(win, "_kernel32", lambda: kernel32)
+        monkeypatch.setattr("qirabot.windows.time.sleep", lambda s: None)
+        return user32, kernel32
+
+    def test_set_writes_nul_terminated_utf16(self, clip_env):
+        user32, kernel32 = clip_env
+        win.set_clipboard_text("你好a")
+        assert user32.emptied
+        # Compare raw bytes: CF_UNICODETEXT is UTF-16 regardless of the test
+        # host's wchar_t width, so wstring_at would misread this off-Windows.
+        raw = kernel32.buffers[user32.set_handle].raw
+        assert raw == "你好a".encode("utf-16-le") + b"\x00\x00"
+        assert user32.closed == 1
+        assert kernel32.freed == []  # ownership transferred to the system
+
+    def test_get_reads_unicode_text(self, clip_env):
+        user32, _ = clip_env
+        buf = ctypes.create_unicode_buffer("剪贴板")
+        user32.data_handle = ctypes.addressof(buf)
+        assert win.get_clipboard_text() == "剪贴板"
+        assert user32.closed == 1
+
+    def test_get_returns_none_for_non_text(self, clip_env):
+        user32, _ = clip_env
+        assert win.get_clipboard_text() is None
+        assert user32.closed == 1  # clipboard not left open
+
+    def test_get_returns_none_when_clipboard_busy(self, clip_env):
+        user32, _ = clip_env
+        user32.open_ok = False
+        assert win.get_clipboard_text() is None
+
+    def test_set_raises_and_frees_when_clipboard_busy(self, clip_env):
+        user32, kernel32 = clip_env
+        user32.open_ok = False
+        with pytest.raises(QirabotError) as ei:
+            win.set_clipboard_text("x")
+        assert ei.value.code == "windows.clipboard_busy"
+        assert len(kernel32.freed) == 1  # our copy was not leaked
 
 
 # ---------------------------------------------------------------------------
