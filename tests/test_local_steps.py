@@ -192,6 +192,30 @@ class TestBufferAndFlush:
         bot.close()
         assert len(transport.local_calls()) == 1
 
+    def test_flush_4xx_warns_once(self, tmp_path, caplog):
+        import logging
+
+        bot, transport = _make_bot(tmp_path)
+        adapter = _FakeAdapter()
+        bot._record_local_step(adapter, "press_key", {"key": "a"})
+        transport.errors["local"] = [
+            QirabotError("unsupported action type: type_text", status_code=400),
+            QirabotError("unsupported action type: type_text", status_code=400),
+        ]
+        with caplog.at_level(logging.WARNING, logger="qirabot"):
+            bot._flush_local_steps()
+            # Second rejected batch stays at debug — one warning per session.
+            bot._record_local_step(adapter, "press_key", {"key": "b"})
+            bot._flush_local_steps()
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "rejected a local-step batch" in warnings[0].getMessage()
+        # A 4xx is not the 404 downgrade signal: later batches still try.
+        bot._record_local_step(adapter, "press_key", {"key": "c"})
+        bot._flush_local_steps()
+        assert len(transport.local_calls()) == 1
+        bot._closed = True
+
     def test_flush_failure_drops_batch_silently(self, tmp_path):
         bot, transport = _make_bot(tmp_path)
         adapter = _FakeAdapter()
