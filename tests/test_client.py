@@ -266,6 +266,49 @@ class TestAiLoopStatus:
         assert bot._section_errors["do thing"] == "max steps reached (1)"
         bot.close()
 
+    def test_repeat_instruction_gets_numbered_section_key(self):
+        # Two ai() runs with the same instruction must NOT share a section
+        # key — the second run's outcome/error would overwrite the first's
+        # in the report. Repeats get "<instruction> #2", "#3", ...
+        bot = self._bot_returning({
+            "success": True, "finished": True, "actionType": "done",
+            "params": {}, "output": "ok",
+        })
+        sections = []
+        bot._record_step = (
+            lambda *a, **k: sections.append(bot._current_section) or None
+        )
+        bot.ai(object(), "do thing", max_steps=3)
+        bot.ai(object(), "do thing", max_steps=3)
+        bot.ai(object(), "other", max_steps=3)
+        assert set(bot._section_outcomes) == {"do thing", "do thing #2", "other"}
+        assert bot._section_outcomes["do thing"] == "completed"
+        assert bot._section_outcomes["do thing #2"] == "completed"
+        # Log entries carry the numbered key too, so the report renders the
+        # runs as separate sections.
+        assert sections == ["do thing", "do thing #2", "other"]
+        # Section is restored between runs, so standalone actions afterwards
+        # still land in "setup".
+        assert bot._current_section == "setup"
+        bot.close()
+
+    def test_repeat_instruction_errors_stay_separate(self):
+        # First run truncates at max steps, second hits a terminal error:
+        # each run's banner text must survive under its own key.
+        bot = self._bot_returning({
+            "success": True, "finished": False, "actionType": "wait", "params": {},
+        })
+        bot.ai(object(), "do thing", max_steps=1)
+        bot._post_act_retrying = lambda **kw: {
+            "success": False, "finished": True, "error": "session expired",
+        }
+        bot.ai(object(), "do thing", max_steps=1)
+        assert bot._section_errors["do thing"] == "max steps reached (1)"
+        assert bot._section_errors["do thing #2"] == "session expired"
+        assert bot._section_outcomes["do thing"] == "max_steps"
+        assert bot._section_outcomes["do thing #2"] == "error"
+        bot.close()
+
     def test_server_terminal_error_records_section_error_not_step(self):
         # Same for a server-reported terminal error: no step committed
         # server-side, so none is recorded locally either.

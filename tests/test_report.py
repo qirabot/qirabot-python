@@ -61,6 +61,56 @@ class TestSectionBadges:
         assert "badge neutral" in out.read_text(encoding="utf-8")
 
 
+class TestTimelineGrouping:
+    def test_interleaved_manual_steps_stay_in_execution_order(self, tmp_path):
+        # manual → ai(a) → manual → ai(b) must render as four sections in
+        # that order, not one merged manual block up front.
+        log = [_entry("setup"), _entry("a"), _entry("setup"), _entry("b")]
+        out = write_html(
+            log,
+            tmp_path / "report.html",
+            outcomes={"a": "completed", "b": "completed"},
+        )
+        html = out.read_text(encoding="utf-8")
+        first_manual = html.index("<h2>manual")
+        sec_a = html.index("<h2>a ")
+        second_manual = html.index("<h2>manual", first_manual + 1)
+        sec_b = html.index("<h2>b ")
+        assert first_manual < sec_a < second_manual < sec_b
+
+    def test_setup_section_displays_as_manual(self, tmp_path):
+        # The log key stays "setup" (client outcomes/errors are keyed on it),
+        # but the report renders standalone actions as "manual".
+        out = write_html([_entry("setup")], tmp_path / "report.html")
+        html = out.read_text(encoding="utf-8")
+        assert "<h2>manual" in html
+        assert "<h2>setup" not in html
+
+    def test_summary_counts_split_section_once(self, tmp_path):
+        # A judged section whose steps split across two timeline groups is
+        # still one section in the pass tally.
+        log = [_entry("a"), _entry("setup"), _entry("a")]
+        out = write_html(
+            log, tmp_path / "report.html", outcomes={"a": "completed"}
+        )
+        assert "1/1 passed" in out.read_text(encoding="utf-8")
+
+    def test_error_banner_renders_only_on_last_group(self, tmp_path):
+        # A section that ran twice and errored on the second run shows the
+        # banner once, under its final group.
+        log = [_entry("a"), _entry("setup"), _entry("a")]
+        out = write_html(
+            log,
+            tmp_path / "report.html",
+            outcomes={"a": "error"},
+            section_errors={"a": "session expired"},
+        )
+        html = out.read_text(encoding="utf-8")
+        assert html.count("✗ session expired") == 1
+        # The banner sits after the second "a" heading, not the first.
+        assert html.index("✗ session expired") > html.rindex("<h2>a ")
+
+
 class TestSummaryBadge:
     def test_all_completed_is_green(self, tmp_path):
         out = write_html(

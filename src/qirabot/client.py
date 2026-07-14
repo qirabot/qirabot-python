@@ -308,10 +308,15 @@ class Qirabot:
             Path(root) / time.strftime("%Y-%m-%d") / f"{time.strftime('%H%M%S')}-{short}"
         )
         # Session-wide action timeline for the report, and the current task
-        # section ai() runs are grouped under (standalone actions = "setup").
+        # section ai() runs are grouped under. Standalone actions carry the
+        # "setup" key, which the report renders as "manual".
         self._log: list[dict[str, Any]] = []
         self._current_section = "setup"
-        # ai() instruction -> RunStatus, for the per-section badge in the
+        # instruction -> times ai() has run it, to give repeat runs a
+        # numbered section key ("<instruction> #2") so each run keeps its own
+        # outcome/error instead of the later run overwriting the earlier.
+        self._section_runs: dict[str, int] = {}
+        # ai() section key -> RunStatus, for the per-section badge in the
         # report (completed / goal_failed / max_steps / error).
         self._section_outcomes: dict[str, str] = {}
         # ai() instruction -> failure text, rendered as a banner above the
@@ -1017,7 +1022,12 @@ class Qirabot:
         from the model's tool list for this call; ``done`` cannot be excluded.
         """
         prev_section = self._current_section
-        self._current_section = instruction or "ai"
+        section = instruction or "ai"
+        runs = self._section_runs.get(section, 0) + 1
+        self._section_runs[section] = runs
+        if runs > 1:
+            section = f"{section} #{runs}"
+        self._current_section = section
         try:
             result = self._ai_loop(
                 target,
