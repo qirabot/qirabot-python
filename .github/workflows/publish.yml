@@ -26,3 +26,34 @@ jobs:
       - run: pip install build
       - run: python -m build
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Commits land on main directly (no PRs), so gh's --generate-notes would
+  # produce an empty body; build the notes from the commit log instead.
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          prev=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)
+          range=${prev:+${prev}..}${tag}
+          {
+            git log "$range" --pretty='- %s' | grep -v '^- chore: release' || true
+            if [ -n "$prev" ]; then
+              printf '\n**Full Changelog**: %s/compare/%s...%s\n' \
+                "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "$prev" "$tag"
+            fi
+          } > notes.md
+          prerelease_flag=""
+          case "$tag" in
+            *rc*|*a[0-9]*|*b[0-9]*|*dev*) prerelease_flag="--prerelease" ;;
+          esac
+          gh release create "$tag" --title "$tag" --notes-file notes.md $prerelease_flag
