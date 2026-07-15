@@ -1,10 +1,42 @@
 # Qirabot Python SDK
 
+English | [简体中文](README.zh.md)
+
 Cross-platform GUI automation, driven by multimodal AI vision. Drive browsers, mobile apps, full desktops, and games through pixels — no DOM, no selectors — reaching what frameworks like Playwright, Selenium, and Appium cannot.
 
 Run it standalone (`bot.open()` launches a browser for you; Android / iOS / Windows-window backends are built in with zero extra dependencies), bolt it onto your existing Playwright / Selenium / Appium / pyautogui session, drop it into a pytest suite, or bind by HWND to drive a Unity / Unreal / native desktop game. Same API across all of them.
 
 **📖 Full documentation: [qirabot.com/docs](https://qirabot.com/docs/)** ([中文](https://qirabot.com/docs/zh/))
+
+## See it work
+
+<!-- TODO: hero video — drag a <10MB mp4 into the GitHub web editor here so it
+     plays inline (github.com user-attachments; external mp4 URLs don't render). -->
+
+Real, unedited runs — the AI sees only pixels. Click a poster to watch
+([all demos →](https://qirabot.com/#demos)):
+
+[![Play an MMORPG from zero to level 15, hands-free](https://assets.qirabot.com/demos/mhxy_zero_to_15.poster.webp)](https://qirabot.com/#demos)
+
+**Play an MMORPG from zero to level 15, hands-free** — iOS real device ·
+[script](examples/game/ios_appium_mmorpg.py)
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <a href="https://qirabot.com/#demos"><img src="https://assets.qirabot.com/demos/afk_journey_tutorial.poster.webp" alt="Clear AFK Journey's tutorial and reach the open world"></a>
+      <br><b>Clear AFK Journey's tutorial and reach the open world</b> — iOS real device
+    </td>
+    <td align="center" width="33%">
+      <a href="https://qirabot.com/#demos"><img src="https://assets.qirabot.com/demos/lichess_play_chess.poster.webp" alt="Play chess on lichess.org"></a>
+      <br><b>Play chess on lichess.org</b> — Android real device
+    </td>
+    <td align="center" width="33%">
+      <a href="https://qirabot.com/#demos"><img src="https://assets.qirabot.com/demos/tile_match_game.poster.webp" alt="Beat a fruit tile-match game on its own"></a>
+      <br><b>Beat a fruit tile-match game on its own</b> — Android real device
+    </td>
+  </tr>
+</table>
 
 ## Installation
 
@@ -66,20 +98,27 @@ writes an HTML report with per-step screenshots; `--record` captures a video.
 ## Bolt onto your existing stack
 
 No rewrite: pass your existing `page` / `driver` / device object and mix AI
-steps with the selectors you already have —
+steps with the selectors you already have. Add AI where selectors hurt —
+visual assertions, dynamic widgets, and flows too tedious to script:
 
 ```python
+import pytest
 from qirabot import Qirabot
 
-bot = Qirabot(task_name="test-checkout")
+@pytest.fixture(scope="session")
+def bot():
+    with Qirabot(task_name="test-checkout") as bot:   # one task per run
+        yield bot
 
-def test_checkout(page):          # your existing pytest-playwright fixture
+def test_checkout(page, bot):     # `page` is your pytest-playwright fixture
     page.goto("https://shop.example.com")
     page.fill("#username", "test_user")             # your selectors, as-is
     page.click("#login-btn")
 
-    assert bot.verify(page, "Product listing page is displayed")   # AI assertion
+    # Visual assertion — survives markup rewrites and CSS refactors
+    assert bot.verify(page, "the product grid shows items with prices and no error banner")
 
+    # One line replaces a page of brittle selector steps
     result = bot.ai(page, "Complete checkout, name John Doe zip 10001", max_steps=8)
     assert result.success
 ```
@@ -93,8 +132,8 @@ backends (`AdbDevice`, `WdaClient`, `Window`) — and anything else via a
 | Topic | |
 |---|---|
 | Getting started | [Installation](https://qirabot.com/docs/guide/installation.html) · [Quick Start](https://qirabot.com/docs/guide/quickstart.html) · [CLI Reference](https://qirabot.com/docs/guide/cli.html) |
-| Platform backends | [Browser](https://qirabot.com/docs/backends/browser.html) · [Android (adb, no Appium)](https://qirabot.com/docs/backends/android.html) · [iOS (WDA, no Appium)](https://qirabot.com/docs/backends/ios.html) · [Windows & Games (DirectInput)](https://qirabot.com/docs/backends/windows-games.html) · [Desktop](https://qirabot.com/docs/backends/desktop.html) · [Custom Adapters](https://qirabot.com/docs/backends/custom-adapters.html) |
-| Framework bolt-on | [Playwright](https://qirabot.com/docs/frameworks/playwright.html) · [Selenium](https://qirabot.com/docs/frameworks/selenium.html) · [Appium](https://qirabot.com/docs/frameworks/appium.html) · [pytest](https://qirabot.com/docs/frameworks/pytest.html) |
+| Platforms | [Browser](https://qirabot.com/docs/backends/browser.html) · [Android (adb, no Appium)](https://qirabot.com/docs/backends/android.html) · [iOS (WDA, no Appium)](https://qirabot.com/docs/backends/ios.html) · [Windows & Games (DirectInput)](https://qirabot.com/docs/backends/windows-games.html) · [Desktop](https://qirabot.com/docs/backends/desktop.html) · [Custom Adapters](https://qirabot.com/docs/backends/custom-adapters.html) |
+| Integrations | [Playwright](https://qirabot.com/docs/frameworks/playwright.html) · [Selenium](https://qirabot.com/docs/frameworks/selenium.html) · [Appium](https://qirabot.com/docs/frameworks/appium.html) · [pytest](https://qirabot.com/docs/frameworks/pytest.html) |
 | Advanced | [AI Tasks & Custom Tools](https://qirabot.com/docs/advanced/ai-tasks.html) · [Reports & Recording](https://qirabot.com/docs/advanced/reports.html) · [Configuration](https://qirabot.com/docs/advanced/configuration.html) · [Error Handling](https://qirabot.com/docs/advanced/error-handling.html) |
 | Reference | [API — Actions & Platform Matrix](https://qirabot.com/docs/reference/api.html) |
 
@@ -107,8 +146,9 @@ Runnable examples live in [examples/](examples/), in three styles:
   [desktop/](examples/desktop/)
 - **Standalone automation (plain scripts)** — scraping / RPA / agents:
   [automation/](examples/automation/)
-- **Drive a desktop game (Windows)** — bind by HWND, deterministic steps +
-  `bot.ai()`: [game/](examples/game/)
+- **Drive a game** — Windows desktop games (bind by HWND) and the iOS
+  MMORPG script behind the [demo video](https://qirabot.com/#demos):
+  [game/](examples/game/)
 
 See [examples/README.md](examples/README.md) for which to pick.
 

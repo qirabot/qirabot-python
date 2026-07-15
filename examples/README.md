@@ -9,13 +9,15 @@ setup. Build scraping / RPA / agent scripts and run with `python`.
 
 - [automation/](automation/) — `bot.open()`, `bot.ai()`, scraping, CDP connect
 
-## 2. Drive a desktop game (Windows)
+## 2. Drive a game
 
-Bind to a game's renderer window by HWND and drive it directly — pure vision,
-no DOM, no accessibility tree. Mix deterministic steps for the known launch /
-splash flow with `bot.ai()` for open-ended in-game UI audits.
+Games have no DOM and no accessibility tree — Qirabot drives them purely by
+what's on screen. On Windows, bind the renderer window by HWND; on a real
+iPhone, bind an Appium session. Mix deterministic steps for the known launch /
+splash flow with `bot.ai()` for open-ended play or UI audits.
 
-- [game/](game/) — Unity / Unreal / native Windows games via `Windows:///<hwnd>`
+- [game/](game/) — Unity / Unreal / native Windows games via `Windows:///<hwnd>`,
+  plus the iOS MMORPG script behind the [demo video](https://qirabot.com/#demos)
 
 ## 3. Bolt onto a framework you already use
 

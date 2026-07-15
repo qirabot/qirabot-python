@@ -1,15 +1,19 @@
-# Drive a desktop game with Qirabot
+# Drive a game with Qirabot
 
-Most DOM-based automation (Playwright / Selenium / Appium) can't reach a
-desktop game's UI — there's no accessibility tree, the renderer is on the GPU,
-and the window may sit above other apps. Qirabot drives the game window
-directly: bind by HWND, locate elements purely by what's on screen, mix
+DOM-based automation (Playwright / Selenium / Appium locators) can't reach a
+game's UI — there's no accessibility tree and the renderer is on the GPU.
+Qirabot drives the game purely by what's on screen: on Windows bind the
+renderer window by HWND; on a phone bind the device session. Mix
 deterministic steps (for known splash / launcher UI) with `bot.ai()` (for
-open-ended audits).
+open-ended play or audits).
 
-| Example | Engine | What it does |
+| Example | Platform | What it does |
 |---|---|---|
-| [windows_unity_game.py](windows_unity_game.py) | Unity (default) / Unreal / native | Launch the game, wait for splash → in-game, then audit the character & inventory menus with `bot.ai()`. |
+| [windows_unity_game.py](windows_unity_game.py) | Windows — Unity (default) / Unreal / native | Launch the game, wait for splash → in-game, then audit the character & inventory menus with `bot.ai()`. |
+| [ios_appium_mmorpg.py](ios_appium_mmorpg.py) | iOS real device (Appium XCUITest) | The script behind the ["zero to level 15" demo video](https://qirabot.com/#demos): one `bot.ai()` task creates an MMORPG character and clears the whole new-player flow, recording the screen throughout. Setup/run instructions are in the script docstring. |
+
+The rest of this README covers the Windows example; the iOS example is
+self-contained (prerequisites and run steps in its docstring).
 
 ## Install
 
