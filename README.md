@@ -66,16 +66,37 @@ missing (with the exact fix), and whether your API key reaches the server.
 ## Quick Start
 
 Save your API key once (get it from your
-[dashboard](https://app.qirabot.com)), then hand the AI a task:
+[dashboard](https://app.qirabot.com)):
 
 ```bash
 qirabot login
-qirabot browser "Search for SpaceX and get the first sentence of the article" --url wikipedia.org
 ```
 
-The same task through the Python SDK — `bot.ai()` is the same engine: the AI
-looks at the screen, decides the next action, and loops until the task is
-done:
+Then hand the AI a task. Real, unedited output:
+
+```text
+$ qirabot browser "Search for SpaceX and get the first sentence of the article" --url wikipedia.org
+Task: 6237d4ff-b96b-4c7d-addb-30d8a0334970
+[1/20] type_text  ← "SpaceX"
+        └ Type 'SpaceX' into the Wikipedia search bar and press enter to search.
+Done: Space Exploration Technologies Corp., doing business as SpaceX, is an
+      American spaceflight, telecommunications, and artificial intelligence
+      company headquartered at the Starbase development site in Starbase, Texas.
+```
+
+Every run writes an HTML report with per-step screenshots; `--record`
+captures a video of the whole run.
+
+<!-- TODO: real-world CLI transcript section here, mirroring README.zh.md's
+     "实战场景：社交媒体运营" (two runs sharing --user-data-dir: first pauses for
+     the user to log in, second reuses the session unattended). Needs a real
+     English-language run — do not translate the Chinese transcript. -->
+
+## Python SDK
+
+The CLI is powered by the same engine. Call `bot.ai()` from Python and the AI
+likewise looks at the screen, decides the next action, and loops until the
+task is done — except the result lands directly in your code:
 
 ```python
 from qirabot import Qirabot
@@ -92,8 +113,7 @@ bot.close()
 
 Prefer to drive each step yourself? The same natural-language targeting works
 as single-step calls — `bot.click(page, "Login button")`,
-`bot.extract(...)`, `bot.verify(...)` — with your code in control. Every run
-writes an HTML report with per-step screenshots; `--record` captures a video.
+`bot.extract(...)`, `bot.verify(...)` — with your code in control.
 
 ## Bolt onto your existing stack
 
