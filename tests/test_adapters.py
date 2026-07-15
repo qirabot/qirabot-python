@@ -1089,6 +1089,34 @@ class TestAirtestHover:
         dev.mouse_move.assert_not_called()
 
 
+class TestAirtestWindowsWheel:
+    """One mouse.scroll(±1) per notch: pywinauto merges a multi-notch
+    wheel_dist into a single SendInput event, which games that count wheel
+    events (not summed deltas) read as one notch."""
+
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self, monkeypatch):
+        monkeypatch.setattr("time.sleep", lambda s: None)
+
+    def _adapter(self):
+        from qirabot.adapters.airtest_adapter import AirtestAdapter
+
+        dev = MagicMock()
+        dev.platform = "windows"
+        dev._fix_op_pos.return_value = (100, 200)
+        return AirtestAdapter(dev), dev
+
+    def test_one_event_per_notch(self):
+        a, dev = self._adapter()
+        a._win_wheel(10, 20, "down", 500)
+        assert dev.mouse.scroll.call_args_list == [call((100, 200), -1)] * 5
+
+    def test_up_is_positive(self):
+        a, dev = self._adapter()
+        a._win_wheel(10, 20, "up", 100)
+        dev.mouse.scroll.assert_called_once_with((100, 200), 1)
+
+
 class TestPlaywrightAdapterListener:
     """The adapter hooks the context's "page" event in __init__; close() must
     unhook it so the listener doesn't outlive the adapter and accumulate on the

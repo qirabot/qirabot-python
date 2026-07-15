@@ -516,6 +516,10 @@ class AirtestAdapter(DeviceAdapter):
     # an ``amount`` of 500 becomes ~5 notches instead of the single-notch crawl
     # a left-button drag produced.
     _WIN_PIXELS_PER_NOTCH = 100
+    # Gap between per-notch wheel events. Games reading Raw Input count wheel
+    # EVENTS (often just their sign) rather than summing deltas, so notches
+    # must arrive as separate events in separate frames to all register.
+    _WIN_WHEEL_NOTCH_GAP = 0.02
 
     def _win_wheel(self, cx: float, cy: float, direction: str, pixels: int) -> None:
         """Scroll a Windows desktop with the mouse wheel (vertical only).
@@ -526,12 +530,19 @@ class AirtestAdapter(DeviceAdapter):
         """
         dev = self._device
         notches = max(1, round(pixels / self._WIN_PIXELS_PER_NOTCH))
-        wheel = notches if direction == "up" else -notches
+        wheel = 1 if direction == "up" else -1
         # mouse.scroll() anchors at SCREEN coords and sends the wheel to the
         # control under the cursor, so convert window->screen exactly as
         # touch()/swipe() do (_action_pos + _fix_op_pos).
         pos = dev._fix_op_pos(dev._action_pos((int(cx), int(cy))))
-        dev.mouse.scroll((int(pos[0]), int(pos[1])), wheel)
+        # One scroll() call per notch, paced across frames — pywinauto merges
+        # a multi-notch wheel_dist into ONE SendInput event, which games that
+        # count events instead of summing deltas read as a single notch;
+        # regular apps sum either way.
+        for i in range(notches):
+            if i:
+                time.sleep(self._WIN_WHEEL_NOTCH_GAP)
+            dev.mouse.scroll((int(pos[0]), int(pos[1])), wheel)
 
     def _swipe(
         self, cx: float, cy: float, direction: str, pixels: int, info: DeviceInfo
