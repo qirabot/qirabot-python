@@ -10,9 +10,9 @@
 
 ## 效果演示
 
-真实、未剪辑的运行记录——AI 全程只看屏幕画面。点击封面观看（[全部 demo →](https://qirabot.com/#demos)）：
+真实、未剪辑的运行记录——AI 全程只看屏幕画面。点击封面观看（[全部 demo →](https://qirabot.com/?lang=zh#demos)）：
 
-[![《梦幻西游》手游：从创号自动玩到 15 级](https://assets.qirabot.com/demos/mhxy_zero_to_15.poster.webp)](https://qirabot.com/#demos)
+[![《梦幻西游》手游：从创号自动玩到 15 级](https://assets.qirabot.com/demos/mhxy_zero_to_15.poster.webp)](https://qirabot.com/?lang=zh#demos)
 
 **《梦幻西游》手游：从创号自动玩到 15 级** — iOS 真机 ·
 [脚本](examples/game/ios_appium_mmorpg.py)
@@ -20,15 +20,15 @@
 <table>
   <tr>
     <td align="center" width="33%">
-      <a href="https://qirabot.com/#demos"><img src="https://assets.qirabot.com/demos/afk_journey_tutorial.poster.webp" alt="《剑与远征：启程》创号通关新手教程，进入大世界"></a>
+      <a href="https://qirabot.com/?lang=zh#demos"><img src="https://assets.qirabot.com/demos/afk_journey_tutorial.poster.webp" alt="《剑与远征：启程》创号通关新手教程，进入大世界"></a>
       <br><b>《剑与远征：启程》创号通关新手教程，进入大世界</b> — iOS 真机
     </td>
     <td align="center" width="33%">
-      <a href="https://qirabot.com/#demos"><img src="https://assets.qirabot.com/demos/lichess_play_chess.poster.webp" alt="在 lichess.org 上对弈国际象棋"></a>
+      <a href="https://qirabot.com/?lang=zh#demos"><img src="https://assets.qirabot.com/demos/lichess_play_chess.poster.webp" alt="在 lichess.org 上对弈国际象棋"></a>
       <br><b>在 lichess.org 上对弈国际象棋</b> — Android 真机
     </td>
     <td align="center" width="33%">
-      <a href="https://qirabot.com/#demos"><img src="https://assets.qirabot.com/demos/tile_match_game.poster.webp" alt="自主通关水果连连消手游"></a>
+      <a href="https://qirabot.com/?lang=zh#demos"><img src="https://assets.qirabot.com/demos/tile_match_game.poster.webp" alt="自主通关水果连连消手游"></a>
       <br><b>自主通关水果连连消手游</b> — Android 真机
     </td>
   </tr>
