@@ -48,7 +48,7 @@ qirabot android "清除所有通知" --appium-url http://localhost:4723
 qirabot ios "..." --device "iPhone 15"      # 模拟器设备类型(选择 Appium)
 ```
 
-注意:CLI 的 Appium iOS 引擎面向**模拟器**(`-d` 是
+注意:CLI 的 Appium iOS 引擎面向**模拟器**(`--device` 是
 `xcrun simctl list devicetypes` 里的设备类型)。iPhone 真机更适合走
 [WDA 直连后端](/zh/backends/ios)——完全不需要 Appium。
 

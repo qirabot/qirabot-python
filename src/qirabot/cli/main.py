@@ -201,28 +201,65 @@ _CONTEXT_SETTINGS = {
 
 _FC = TypeVar("_FC", bound=Callable[..., Any])
 
+# --help group headings for the task commands. The two shared groups say
+# "(all platforms)" so users can see at a glance which flags carry over
+# between browser/android/ios/desktop.
+_TASK_GROUP = "Task options (all platforms)"
+_DEBUG_GROUP = "Report & debug options (all platforms)"
+
+
+def _option(*decls: str, group: str, **attrs: Any) -> Callable[[_FC], _FC]:
+    """click.option that tags the option with a --help group heading, rendered
+    by _GroupedCommand. Groups appear in declaration (reading) order."""
+
+    def deco(f: _FC) -> _FC:
+        f = click.option(*decls, **attrs)(f)
+        f.__click_params__[-1].help_group = group  # type: ignore[attr-defined]
+        return f
+
+    return deco
+
+
+class _GroupedCommand(click.Command):
+    """Command whose --help lists options under group headings instead of one
+    flat list. Untagged params (just the trailing --help in practice) land
+    under "Other options"."""
+
+    def format_options(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        groups: dict[str, list[tuple[str, str]]] = {}
+        for param in self.get_params(ctx):
+            record = param.get_help_record(ctx)
+            if record is None:
+                continue
+            title = getattr(param, "help_group", "") or "Other options"
+            groups.setdefault(title, []).append(record)
+        for title, records in groups.items():
+            with formatter.section(title):
+                formatter.write_dl(records)
+
 
 def _task_options(f: _FC) -> _FC:
     """Task options shared by browser/android/ios/desktop. Applied in reverse so
     --help lists them in reading order (name, model, language, max-steps)."""
-    f = click.option("--max-steps", default=20, help="Max steps for AI")(f)
-    f = click.option("--language", "-l", default="", help="Language (e.g. zh, en)")(f)
-    f = click.option("--model", "-m", default="", help="Model alias")(f)
-    f = click.option("--name", "-n", default="", help="Task name shown in the web UI (default: derived from the instruction)")(f)
+    f = _option("--max-steps", group=_TASK_GROUP, default=20, help="Max steps for AI")(f)
+    f = _option("--language", "-l", group=_TASK_GROUP, default="", help="Language (e.g. zh, en)")(f)
+    f = _option("--model", "-m", group=_TASK_GROUP, default="", help="Model alias")(f)
+    f = _option("--name", "-n", group=_TASK_GROUP, default="", help="Task name shown in the web UI (default: derived from the instruction)")(f)
     return f
 
 
 def _debug_options(record: bool = True) -> Callable[[_FC], _FC]:
     """Debug options shared by browser/android/ios/desktop. This --record is
     the host-screen (ffmpeg) recorder, so it's opted out for android/ios —
-    they define their own device-screen --record instead."""
+    they define their own device-screen --record instead (grouped under the
+    platform heading, since its semantics are platform-specific)."""
 
     def wrap(f: _FC) -> _FC:
         if record:
-            f = click.option("--record", is_flag=True, help="Record the screen to report-dir/recording.mp4 (requires ffmpeg)")(f)
-        f = click.option("--annotate/--no-annotate", default=True, help="Annotate saved screenshots with click coordinates")(f)
-        f = click.option("--report-dir", default="", help="Report output root (env QIRA_REPORT_DIR; default ./qira_runs/<date>/<run>/)")(f)
-        f = click.option("--report/--no-report", default=True, help="Write an HTML run report to --report-dir")(f)
+            f = _option("--record", group=_DEBUG_GROUP, is_flag=True, help="Record the screen to report-dir/recording.mp4 (requires ffmpeg)")(f)
+        f = _option("--annotate/--no-annotate", group=_DEBUG_GROUP, default=True, help="Annotate saved screenshots with click coordinates")(f)
+        f = _option("--report-dir", group=_DEBUG_GROUP, default="", help="Report output root (env QIRA_REPORT_DIR; default ./qira_runs/<date>/<run>/)")(f)
+        f = _option("--report/--no-report", group=_DEBUG_GROUP, default=True, help="Write an HTML run report to --report-dir")(f)
         return f
 
     return wrap
@@ -641,18 +678,18 @@ def doctor(ctx: click.Context) -> None:
     console.print(f"[bold green]Ready[/bold green] — usable backends: {escape(ready_labels)}.")
 
 
-@cli.command()
+@cli.command(cls=_GroupedCommand)
 @click.argument("instruction")
 @_task_options
 # Browser — basic
-@click.option("--url", "-u", default="", help="URL to open (optional, AI navigates if omitted)")
-@click.option("--headless", is_flag=True, help="Run browser in headless mode")
-@click.option("--viewport", default="1280x800", help="Viewport size as WIDTHxHEIGHT")
+@_option("--url", "-u", group="Browser options", default="", help="URL to open (optional, AI navigates if omitted)")
+@_option("--headless", group="Browser options", is_flag=True, help="Run browser in headless mode")
+@_option("--viewport", group="Browser options", default="1280x800", help="Viewport size as WIDTHxHEIGHT")
 # Browser — advanced
-@click.option("--channel", default="", help="Browser channel: chrome, msedge, etc. (uses installed browser instead of bundled Chromium)")
-@click.option("--user-data-dir", default="", help="Persistent browser profile directory (keeps cookies/history across runs)")
-@click.option("--browser-arg", multiple=True, help="Extra Chromium launch arg, repeatable (e.g. --browser-arg=--disable-blink-features=AutomationControlled)")
-@click.option("--cdp-url", default="", help="Connect to existing Chrome via CDP (e.g. http://localhost:9222 or wss://chrome.browserless.io?token=xxx). Mutually exclusive with --headless/--user-data-dir/--channel/--browser-arg.")
+@_option("--channel", group="Browser options", default="", help="Browser channel: chrome, msedge, etc. (uses installed browser instead of bundled Chromium)")
+@_option("--user-data-dir", group="Browser options", default="", help="Persistent browser profile directory (keeps cookies/history across runs)")
+@_option("--browser-arg", group="Browser options", multiple=True, help="Extra Chromium launch arg, repeatable (e.g. --browser-arg=--disable-blink-features=AutomationControlled)")
+@_option("--cdp-url", group="Browser options", default="", help="Connect to existing Chrome via CDP (e.g. http://localhost:9222 or wss://chrome.browserless.io?token=xxx). Mutually exclusive with --headless/--user-data-dir/--channel/--browser-arg.")
 @_debug_options()
 @click.pass_context
 def browser(
@@ -835,17 +872,17 @@ def _adb_launch_app(dev: Any, package: str, activity: str) -> None:
             )
 
 
-@cli.command()
+@cli.command(cls=_GroupedCommand)
 @click.argument("instruction")
 @_task_options
-@click.option("--device", "-d", default="", help="Which device: an adb serial from `adb devices` (e.g. emulator-5554 or 192.168.1.8:5555). Optional when exactly one device is connected. With --appium-url: passed as deviceName.")
-@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL — passing this flag switches the run to the Appium engine", show_default="direct adb, no server")
+@_option("--device", "-d", group="Android options", default="", help="Which device: an adb serial from `adb devices` (e.g. emulator-5554 or 192.168.1.8:5555). Optional when exactly one device is connected. With --appium-url: passed as deviceName.")
+@_option("--appium-url", group="Android options", default="http://localhost:4723", help="Appium server URL — passing this flag switches the run to the Appium engine", show_default="direct adb, no server")
 # Android — app launch
-@click.option("--app-package", default="", help="App package to launch (e.g. com.android.settings)")
-@click.option("--app-activity", default="", help="App activity to launch")
+@_option("--app-package", group="Android options", default="", help="App package to launch (e.g. com.android.settings)")
+@_option("--app-activity", group="Android options", default="", help="App activity to launch")
 # Android — device-screen recording: adb screenrecord (direct engine) or
 # Appium's recording API — both capture the phone screen, not the host's.
-@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (direct engine: adb screenrecord, ffmpeg merges runs over 3 min; Appium engine: Appium's recording API)")
+@_option("--record", group="Android options", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (direct engine: adb screenrecord, ffmpeg merges runs over 3 min; Appium engine: Appium's recording API)")
 @_debug_options(record=False)
 @click.pass_context
 def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, report: bool, report_dir: str, annotate: bool) -> None:
@@ -948,19 +985,22 @@ def _check_mjpeg_ready(mjpeg_url: str) -> None:
         )
 
 
-@cli.command()
+@cli.command(cls=_GroupedCommand)
 @click.argument("instruction")
 @_task_options
-@click.option("--wda-url", default="http://127.0.0.1:8100", help="WebDriverAgent URL — this is how the default engine picks the device (USB real device: run `iproxy 8100 8100` and keep the default; another device = its WDA address)")
-@click.option("--device", "-d", default="", help="Simulator device type (a name from `xcrun simctl list devicetypes`, e.g. \"iPhone 15\") — passing this flag switches the run to the Appium engine (simulators only). Real devices: keep the default engine, which selects the device via --wda-url.")
-@click.option("--appium-url", default="http://localhost:4723", help="Appium server URL — passing this flag switches the run to the Appium engine", show_default="direct WDA, no server")
+@_option("--wda-url", group="iOS options", default="http://127.0.0.1:8100", help="WebDriverAgent URL — this is how the default engine picks the device (USB real device: run `iproxy 8100 8100` and keep the default; another device = its WDA address)")
+# No -d short here, unlike android: on ios --device switches the engine to
+# Appium, and an engine switch should be typed out deliberately, not inherited
+# as muscle memory from `qirabot android -d`.
+@_option("--device", group="iOS options", default="", help="Simulator device type (a name from `xcrun simctl list devicetypes`, e.g. \"iPhone 15\") — passing this flag switches the run to the Appium engine (simulators only). Real devices: keep the default engine, which selects the device via --wda-url.")
+@_option("--appium-url", group="iOS options", default="http://localhost:4723", help="Appium server URL — passing this flag switches the run to the Appium engine", show_default="direct WDA, no server")
 # iOS — app launch
-@click.option("--bundle-id", default="", help="App bundle id to launch (e.g. com.tencent.xin)")
+@_option("--bundle-id", group="iOS options", default="", help="App bundle id to launch (e.g. com.tencent.xin)")
 # iOS — device-screen recording: the default engine transcodes WDA's MJPEG
 # stream with ffmpeg; the Appium engine uses Appium's recording API. Either
 # way this captures the phone screen, unlike the desktop --record.
-@click.option("--record", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (default engine: WDA's MJPEG stream, requires ffmpeg, USB real device also needs `iproxy 9100 9100`; Appium engine: Appium's recording API)")
-@click.option("--mjpeg-url", default="", help="WDA MJPEG stream URL for --record (default: --wda-url's host on port 9100; direct engine only)")
+@_option("--record", group="iOS options", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (default engine: WDA's MJPEG stream, requires ffmpeg, USB real device also needs `iproxy 9100 9100`; Appium engine: Appium's recording API)")
+@_option("--mjpeg-url", group="iOS options", default="", help="WDA MJPEG stream URL for --record (default: --wda-url's host on port 9100; direct engine only)")
 @_debug_options(record=False)
 @click.pass_context
 def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, report: bool, report_dir: str, annotate: bool) -> None:
@@ -975,7 +1015,7 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
     Appium — passing --appium-url or --device (simulator) selects the Appium
     engine; needs a running server (npm i -g appium && appium driver install
     xcuitest && appium), and can auto build/sign WDA for you:
-      qirabot ios "..." -d "iPhone 15" --bundle-id com.apple.Preferences
+      qirabot ios "..." --device "iPhone 15" --bundle-id com.apple.Preferences
     \b
     Recording — --record saves the device screen. Default engine: WDA's MJPEG
     stream (port 9100; USB real device: also `iproxy 9100 9100`). Appium
@@ -1037,14 +1077,14 @@ def _launch_desktop_app(app: str, app_wait: float) -> None:
         sys.exit(1)
 
 
-@cli.command()
+@cli.command(cls=_GroupedCommand)
 @click.argument("instruction")
 @_task_options
-@click.option("--window-title", default="", help="Bind to the window whose title matches this regex — selects the built-in Windows window backend (screenshots/coords become window-relative, input is game-readable scancodes, recording follows the window). Windows only.")
-@click.option("--hwnd", default=0, type=int, help="Bind to a specific window handle — selects the built-in Windows window backend. Windows only.")
+@_option("--window-title", group="Desktop options", default="", help="Bind to the window whose title matches this regex — selects the built-in Windows window backend (screenshots/coords become window-relative, input is game-readable scancodes, recording follows the window). Windows only.")
+@_option("--hwnd", group="Desktop options", default=0, type=int, help="Bind to a specific window handle — selects the built-in Windows window backend. Windows only.")
 # Desktop — app launch
-@click.option("--app", default="", help="Launch/activate an app before the task. macOS: app name (\"WeChat\") or bundle id; Windows: exe path, registered name, or UWP AppUserModelID; Linux: executable.")
-@click.option("--app-wait", default=2.0, type=float, help="Seconds to wait after --app launch for the window to appear")
+@_option("--app", group="Desktop options", default="", help="Launch/activate an app before the task. macOS: app name (\"WeChat\") or bundle id; Windows: exe path, registered name, or UWP AppUserModelID; Linux: executable.")
+@_option("--app-wait", group="Desktop options", default=2.0, type=float, help="Seconds to wait after --app launch for the window to appear")
 @_debug_options()
 @click.pass_context
 def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, window_title: str, hwnd: int, app: str, app_wait: float, report: bool, report_dir: str, annotate: bool, record: bool) -> None:

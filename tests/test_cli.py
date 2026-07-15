@@ -837,6 +837,40 @@ class TestMobileSplit:
         assert result.exit_code != 0
         assert "--bundle-id" in result.output
 
+    def test_ios_has_no_d_short_for_device(self, fake_appium, stub_bot):
+        """On ios, --device switches the engine to Appium — that must be typed
+        out deliberately, not inherited as -d muscle memory from android."""
+        result = _invoke(["ios", "do it", "-d", "iPhone 15"])
+
+        assert result.exit_code != 0
+        assert "No such option" in result.output
+
+
+class TestGroupedHelp:
+    """Task-command --help renders options under group headings so the shared
+    surface (task + report/debug groups) is recognizable across platforms."""
+
+    @pytest.mark.parametrize(
+        ("command", "platform_heading"),
+        [
+            ("browser", "Browser options:"),
+            ("android", "Android options:"),
+            ("ios", "iOS options:"),
+            ("desktop", "Desktop options:"),
+        ],
+    )
+    def test_help_shows_group_headings(self, command, platform_heading):
+        from qirabot.cli.main import cli
+
+        result = CliRunner().invoke(cli, [command, "-h"])
+
+        assert result.exit_code == 0, result.output
+        assert "Task options (all platforms):" in result.output
+        assert platform_heading in result.output
+        assert "Report & debug options (all platforms):" in result.output
+        # The flat default heading must be gone — every option is grouped.
+        assert "\nOptions:\n" not in result.output
+
 
 class TestScreenshotDownload:
     def _stub_transport(self, monkeypatch):

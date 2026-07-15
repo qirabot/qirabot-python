@@ -54,7 +54,7 @@ one `iproxy` per device on different local ports and select with `--wda-url`.
 
 ## Simulators
 
-For simulators, use the Appium engine instead: pass `-d/--device` with a
+For simulators, use the Appium engine instead: pass `--device` with a
 simulator device type (a name from `xcrun simctl list devicetypes`, e.g.
 `iPhone 15`) — Appium creates and boots a matching simulator. Requires
 `qirabot[appium]`.

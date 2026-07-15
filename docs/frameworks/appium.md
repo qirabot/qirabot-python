@@ -50,7 +50,7 @@ qirabot android "Clear all notifications" --appium-url http://localhost:4723
 qirabot ios "..." --device "iPhone 15"      # simulator device type (selects Appium)
 ```
 
-Note: the CLI's Appium iOS engine targets **simulators** (`-d` is a device
+Note: the CLI's Appium iOS engine targets **simulators** (`--device` is a device
 type from `xcrun simctl list devicetypes`). Real iPhones are better served
 by the [WDA-direct backend](/backends/ios) — no Appium at all.
 

@@ -84,20 +84,20 @@ Appium: Appium's recording API).
 
 Default talks to WebDriverAgent directly (built in, zero extra installs) — WDA
 must already be running (USB real device: `iproxy 8100 8100` first). Passing
-`--appium-url` or `-d/--device` (simulator) switches to the Appium engine, for
+`--appium-url` or `--device` (simulator) switches to the Appium engine, for
 simulators or auto WDA build/sign:
 
 ```bash
 qirabot ios "..." --bundle-id com.tencent.xin           # WDA on 127.0.0.1:8100
 qirabot ios "..." --wda-url http://192.168.1.20:8100    # another device's WDA
-qirabot ios "..." -d "iPhone 15" --bundle-id com.apple.Preferences   # simulator via Appium
+qirabot ios "..." --device "iPhone 15" --bundle-id com.apple.Preferences   # simulator via Appium
 ```
 
 | Option | Notes |
 |---|---|
 | `--wda-url` | `http://127.0.0.1:8100` — how the direct engine picks the device. **Direct engine only.** |
 | `--bundle-id` | app to launch (via WDA `app_launch`, iOS 17+-safe) |
-| `-d/--device` | a simulator device type from `xcrun simctl list devicetypes` — passing it selects the Appium engine |
+| `--device` | a simulator device type from `xcrun simctl list devicetypes` — passing it selects the Appium engine (no `-d` short) |
 | `--appium-url` | passing this flag selects the Appium engine |
 | `--mjpeg-url` | WDA MJPEG stream for `--record` (default: `--wda-url` host on port 9100). **Direct engine + `--record` only.** |
 

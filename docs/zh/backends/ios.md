@@ -52,7 +52,7 @@ bot.close()
 
 ## 模拟器
 
-模拟器请改用 Appium 引擎:传 `-d/--device` 加模拟器设备类型(来自
+模拟器请改用 Appium 引擎:传 `--device` 加模拟器设备类型(来自
 `xcrun simctl list devicetypes` 的名字,如 `iPhone 15`)——Appium 会创建
 并启动对应模拟器。需要 `qirabot[appium]`。
 

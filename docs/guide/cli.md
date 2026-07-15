@@ -126,8 +126,8 @@ proceeds on success.
 |---|---|---|
 | `--wda-url` | `http://127.0.0.1:8100` | WebDriverAgent URL — this selects the device (USB real device: `iproxy 8100 8100`) |
 | `--bundle-id` | — | App bundle id to launch (e.g. `com.tencent.xin`) |
-| `-d, --device` | — | Simulator device type from `xcrun simctl list devicetypes` — switches to the Appium engine, simulators only |
-| `--appium-url` | direct WDA, no server | Appium server URL (with `-d`) |
+| `--device` | — | Simulator device type from `xcrun simctl list devicetypes` — switches to the Appium engine, simulators only (no `-d` short: switching engines is deliberate) |
+| `--appium-url` | direct WDA, no server | Appium server URL (with `--device`) |
 | `--record` | off | Record the **device** screen (WDA MJPEG + ffmpeg / Appium API) |
 | `--mjpeg-url` | `--wda-url` host on port 9100 | MJPEG stream override for `--record` |
 
