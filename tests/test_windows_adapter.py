@@ -323,9 +323,10 @@ class TestWheel:
         adapter = WindowsAdapter(Window(hwnd=42))
         adapter._scroll_action("scroll", {"direction": "down", "amount": 500})
         wheel = [e for e in mouse_events(fake_env["sent"]) if e.mi.dwFlags == win.MOUSEEVENTF_WHEEL]
-        assert len(wheel) == 1
-        # 500px -> 5 notches down -> -600 (stored as unsigned 32-bit)
-        assert wheel[0].mi.mouseData == (-600) & 0xFFFFFFFF
+        # 500px -> 5 notches down, one WHEEL_DELTA event each (games count
+        # events, not summed deltas; stored as unsigned 32-bit)
+        assert len(wheel) == 5
+        assert all(e.mi.mouseData == (-120) & 0xFFFFFFFF for e in wheel)
 
     def test_horizontal_wheel(self, fake_env):
         adapter = WindowsAdapter(Window(hwnd=42))

@@ -137,6 +137,10 @@ CLICK_DURATION = 0.1
 # Pixels of intended travel per wheel notch (WHEEL_DELTA); approximate and
 # deliberately generous — apps disagree on lines-per-notch anyway.
 PIXELS_PER_NOTCH = 100
+# Gap between per-notch wheel events. Games reading Raw Input count wheel
+# EVENTS (often just their sign) rather than summing deltas, so notches must
+# arrive as separate events in separate frames to all register.
+WHEEL_NOTCH_GAP = 0.02
 
 
 class WindowsAdapter(DeviceAdapter):
@@ -367,13 +371,19 @@ class WindowsAdapter(DeviceAdapter):
             win.ensure_foreground(self._window.hwnd)
             self._move_to(cx, cy)  # wheel goes to the control under the cursor
             if direction in ("up", "down"):
-                delta = win.WHEEL_DELTA * notches * (1 if direction == "up" else -1)
+                delta = win.WHEEL_DELTA * (1 if direction == "up" else -1)
                 flags = win.MOUSEEVENTF_WHEEL
             else:
                 # Horizontal wheel: positive = right (airtest couldn't do this).
-                delta = win.WHEEL_DELTA * notches * (1 if direction == "right" else -1)
+                delta = win.WHEEL_DELTA * (1 if direction == "right" else -1)
                 flags = win.MOUSEEVENTF_HWHEEL
-            win.send_inputs([win.mouse_event(flags, data=delta)])
+            # One event per notch, paced across frames — a single merged
+            # delta reads as ONE notch to games that count events instead of
+            # summing (Raw Input/frame polling); regular apps sum either way.
+            for i in range(notches):
+                if i:
+                    time.sleep(WHEEL_NOTCH_GAP)
+                win.send_inputs([win.mouse_event(flags, data=delta)])
 
     def _dispatch(self, action_type: str, params: dict[str, Any]) -> None:
         if action_type in ("scroll", "scroll_at"):
