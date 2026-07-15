@@ -27,8 +27,19 @@ h1 { font-size: 20px; margin: 0 0 4px; }
 .meta { color: #666; font-size: 12px; margin-bottom: 16px; }
 .stats { color: #555; font-size: 12px; margin: -10px 0 16px;
          font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.summary { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
-.badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.tally { margin-bottom: 10px; }
+.tally .badge { font-size: 14px; padding: 5px 14px; }
+/* One judged task per grid row: status badge, then name. The status column
+   is max-content, so it auto-sizes to the widest badge and every badge (and
+   every name) lines up exactly, whatever width the font gives "MAX STEPS". */
+.summary { display: grid; grid-template-columns: max-content minmax(0, 1fr);
+           gap: 6px 10px; align-items: center; justify-items: start;
+           margin-bottom: 20px; }
+.badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;
+         white-space: nowrap; }
+.summary .badge { justify-self: stretch; text-align: center; }
+.summary .tname { font-size: 13px; max-width: 80ch; overflow: hidden;
+                  text-overflow: ellipsis; white-space: nowrap; }
 .pass { background: #d7f5dd; color: #06632b; }
 .fail { background: #fbdcdc; color: #8a1010; }
 .warn { background: #fdeec8; color: #7a5200; }
@@ -408,12 +419,13 @@ def write_html(
     parts.append(f"<div class='meta'>{meta}</div>")
     parts.append(_render_stats(stats, model))
 
-    # Summary badges. max_steps counts toward the total but not toward passed:
-    # a truncated run isn't a pass, but as long as nothing truly failed the
-    # header is amber (raise the budget) rather than red (something broke).
-    parts.append("<div class='summary'>")
-    # Pass/fail tally counts each judged section once, even when its steps
-    # split across several timeline groups (outcomes are keyed per section).
+    # Overall tally, on its own line: the report's headline answer ("how many
+    # tasks ran, how many passed"), kept clear of the per-task badges below.
+    # max_steps counts toward the total but not toward passed: a truncated run
+    # isn't a pass, but as long as nothing truly failed the tally is amber
+    # (raise the budget) rather than red (something broke). Each judged
+    # section counts once, even when its steps split across several timeline
+    # groups (outcomes are keyed per section).
     judged: list[str] = []
     seen_judged: set[str] = set()
     for name, _entries in groups:
@@ -434,15 +446,25 @@ def write_html(
         label = f"{passed}/{total_judged} passed"
         if truncated:
             label += f" · {truncated} truncated"
-        parts.append(_badge(label, kind))
-    for gi, (name, entries) in enumerate(groups):
-        # One badge per judged section (on its last group, matching where the
-        # outcome banner renders); unjudged groups each get their step count.
-        if name in outcomes and last_group_of[name] != gi:
-            continue
-        label, kind = section_kind(name, entries)
-        parts.append(_badge(f"{display_name(name)}: {label}", kind))
-    parts.append("</div>")
+        parts.append(f"<div class='tally'>{_badge(label, kind)}</div>")
+    # One line per judged task, in run order: an aligned status column, then
+    # the task name. A section name can be an entire ai() instruction, so the
+    # name is CSS-truncated with the full text on hover; unjudged (manual)
+    # groups stay out of the summary — their step counts already show in the
+    # stats line and on each section header.
+    if judged:
+        parts.append("<div class='summary'>")
+        for name in judged:
+            status = _normalize_status(outcomes[name])
+            label, kind = _STATUS_KINDS.get(status, ("FAIL", "fail"))
+            disp = html.escape(display_name(name))
+            # Badge and name are direct grid children (no row wrapper): the
+            # summary grid places each pair on its own row.
+            parts.append(
+                _badge(label, kind)
+                + f'<span class="tname" title="{disp}">{disp}</span>'
+            )
+        parts.append("</div>")
 
     if recording:
         parts.append(

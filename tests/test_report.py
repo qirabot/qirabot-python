@@ -34,10 +34,20 @@ class TestSectionBadges:
             },
         )
         html = out.read_text(encoding="utf-8")
-        assert '<span class="badge pass">a: PASS</span>' in html
-        assert '<span class="badge fail">b: FAIL</span>' in html
-        assert '<span class="badge warn">c: MAX STEPS</span>' in html
-        assert '<span class="badge fail">d: ERROR</span>' in html
+        # Each judged task renders as its own summary grid row: an aligned
+        # status badge first, then the name (CSS-truncated, full text in the
+        # hover title — long ai() instructions would otherwise flood the
+        # summary).
+        def row(kind, name, label):
+            return (
+                f'<span class="badge {kind}">{label}</span>'
+                f'<span class="tname" title="{name}">{name}</span>'
+            )
+
+        assert row("pass", "a", "PASS") in html
+        assert row("fail", "b", "FAIL") in html
+        assert row("warn", "c", "MAX STEPS") in html
+        assert row("fail", "d", "ERROR") in html
 
     def test_legacy_bool_outcomes_still_render(self, tmp_path):
         # Pre-status callers passed dict[str, bool]; True/False must keep
@@ -47,14 +57,16 @@ class TestSectionBadges:
             log, tmp_path / "report.html", outcomes={"a": True, "b": False}
         )
         html = out.read_text(encoding="utf-8")
-        assert "a: PASS" in html
-        assert "b: FAIL" in html
+        assert '<span class="badge pass">PASS</span><span class="tname" title="a">' in html
+        assert '<span class="badge fail">FAIL</span><span class="tname" title="b">' in html
 
     def test_unknown_status_falls_back_to_fail(self, tmp_path):
         out = write_html(
             [_entry("a")], tmp_path / "report.html", outcomes={"a": "someday-new"}
         )
-        assert "a: FAIL" in out.read_text(encoding="utf-8")
+        assert '<span class="badge fail">FAIL</span><span class="tname" title="a">' in (
+            out.read_text(encoding="utf-8")
+        )
 
     def test_unjudged_section_stays_neutral(self, tmp_path):
         out = write_html([_entry("setup")], tmp_path / "report.html", outcomes={})
@@ -131,6 +143,29 @@ class TestSummaryBadge:
             '<span class="badge warn">1/2 passed · 1 truncated</span>'
             in out.read_text(encoding="utf-8")
         )
+
+    def test_tally_renders_on_its_own_line(self, tmp_path):
+        # The tally is the report's headline: it gets its own .tally block
+        # above the per-task summary instead of flowing inline with it.
+        out = write_html(
+            [_entry("a")], tmp_path / "report.html", outcomes={"a": "completed"}
+        )
+        html = out.read_text(encoding="utf-8")
+        assert (
+            "<div class='tally'>"
+            '<span class="badge pass">1/1 passed</span></div>' in html
+        )
+
+    def test_manual_groups_stay_out_of_summary(self, tmp_path):
+        # Manual step counts are process detail (stats line + section
+        # headers), not outcomes — they no longer get summary chips.
+        log = [_entry("setup"), _entry("a"), _entry("setup")]
+        out = write_html(
+            log, tmp_path / "report.html", outcomes={"a": "completed"}
+        )
+        html = out.read_text(encoding="utf-8")
+        assert "manual: 1 steps" not in html
+        assert '<span class="tname" title="a">a</span>' in html
 
     def test_any_real_failure_is_red(self, tmp_path):
         log = [_entry("a"), _entry("b"), _entry("c")]
@@ -247,7 +282,8 @@ class TestSectionErrorBanners:
         )
         html = out.read_text(encoding="utf-8")
         assert "AI request failed" in html
-        assert "b:" in html  # badge line for the error-only section
+        # summary line for the error-only section
+        assert '<span class="badge fail">ERROR</span><span class="tname" title="b">' in html
 
 
 class TestStatsLine:
