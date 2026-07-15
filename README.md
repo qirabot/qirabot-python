@@ -127,6 +127,37 @@ Works the same for Selenium, Appium, pyautogui, and the built-in device
 backends (`AdbDevice`, `WdaClient`, `Window`) — and anything else via a
 7-primitive [custom adapter](https://qirabot.com/docs/backends/custom-adapters.html).
 
+## Custom tools: let the AI call your code
+
+Mid-task, the AI isn't limited to clicking and typing. `custom_tools`
+registers plain Python functions the model can invoke as it works — hit an
+internal API, query a database, fetch an OTP from your mail server, seed test
+data, or pause for a human at a CAPTCHA. Name, description, and parameters are
+introspected from the function itself:
+
+```python
+def gm_command(command: str) -> str:
+    """Send a command to the game's GM backend and return its reply.
+    Available commands: add_energy <amount>, add_gold <amount>"""
+    return requests.post(GM_URL, json={"cmd": command}, timeout=10).text
+
+result = bot.ai(
+    device,
+    "Complete every daily quest. If an out-of-energy popup appears, "
+    "use gm_command to add 100 energy and continue",
+    custom_tools=[gm_command],
+)
+```
+
+The tool runs **locally on your machine** — the server never sees your
+endpoints or credentials — and its return value becomes the model's next
+observation. One instruction now spans systems that used to take a page of
+glue code: UI steps, backend calls, and human handoffs in a single flow.
+Details (schemas, error handling, pruning built-in tools):
+[AI Tasks & Custom Tools](https://qirabot.com/docs/advanced/ai-tasks.html).
+Runnable examples: [custom_tool_gm.py](examples/game/custom_tool_gm.py) ·
+[06_human_in_the_loop.py](examples/automation/06_human_in_the_loop.py).
+
 ## Documentation
 
 | Topic | |

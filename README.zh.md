@@ -82,6 +82,26 @@ bot.close()
 
 也无需重写任何代码：将现有的 `page` / `driver` / 设备对象直接传入，即可在原有选择器脚本中混用 AI 步骤（视觉断言、动态控件、逐步脚本化过于繁琐的流程）——Playwright / Selenium / Appium / pyautogui 及内置设备后端均适用，详见[框架集成文档](https://qirabot.com/docs/zh/frameworks/playwright.html)。
 
+## 自定义工具：让 AI 调用你的代码
+
+任务执行中，AI 不只会点击和输入。`custom_tools` 可以把普通 Python 函数注册为模型可调用的工具——调内部 API、查数据库、从邮箱取验证码、造测试数据，或在遇到 CAPTCHA 时暂停等人工处理。工具的名称、描述和参数会自动从函数本身提取：
+
+```python
+def gm_command(command: str) -> str:
+    """向游戏 GM 后台发送命令并返回结果。
+    可用命令：add_energy <数量>、add_gold <数量>"""
+    return requests.post(GM_URL, json={"cmd": command}, timeout=10).text
+
+result = bot.ai(
+    device,
+    "完成所有日常任务。如果弹出体力不足的提示，"
+    "就用 gm_command 加 100 体力后继续",
+    custom_tools=[gm_command],
+)
+```
+
+工具**在你的本地机器上执行**——服务端接触不到你的接口和凭据——返回值会作为模型下一步的观察结果。过去需要一整页胶水代码串联的跨系统流程（UI 操作、后端调用、人工介入），现在一句指令就能覆盖。更多细节（schema、错误处理、裁剪内置工具）见[AI 任务与自定义工具](https://qirabot.com/docs/zh/advanced/ai-tasks.html)；可运行示例：[custom_tool_gm.py](examples/game/custom_tool_gm.py) · [06_human_in_the_loop.py](examples/automation/06_human_in_the_loop.py)。
+
 ## 文档
 
 | 主题 | |
