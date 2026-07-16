@@ -56,7 +56,8 @@ open(url="", headless=False, *, viewport=(1280, 800), user_data_dir="",
 
 Launches Chromium (requires `qirabot[browser]`) and returns the Playwright
 page. `channel` uses an installed browser (`"chrome"`, `"msedge"`);
-`user_data_dir` keeps a persistent profile; `args` is a list of extra
+`user_data_dir` keeps a persistent profile (`~` expands to the home
+directory on all platforms); `args` is a list of extra
 Chromium flags; `cdp_url` attaches to a running Chrome instead of launching
 (mutually exclusive with the launch options). On a display-less machine it
 falls back to headless with a warning. See [Browser](/backends/browser).

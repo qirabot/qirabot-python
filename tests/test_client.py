@@ -386,6 +386,15 @@ class TestQirabotInit:
         assert Path("local") in bot._report_dir.parents
         bot.close()
 
+    def test_report_dir_expands_tilde(self, monkeypatch):
+        # A ~ root (e.g. QIRA_REPORT_DIR=~/reports in a .env, which no shell
+        # expands) must resolve to home, not a literal "~" directory under cwd.
+        monkeypatch.setenv("QIRA_REPORT_DIR", "~/qira_reports")
+        bot = Qirabot(api_key="k", task_id="t")
+        assert Path("~/qira_reports").expanduser() in bot._report_dir.parents
+        assert "~" not in str(bot._report_dir)
+        bot.close()
+
     def test_settle_seconds_default_none(self):
         bot = Qirabot(api_key="k", task_id="t")
         assert bot._settle_seconds is None
@@ -1117,3 +1126,24 @@ class TestOpenHeadlessFallback:
         # macOS/Windows always have a display server; env vars are irrelevant.
         kwargs = self._launch_kwargs(monkeypatch, platform="darwin")
         assert kwargs["headless"] is False
+
+
+class TestOpenUserDataDir:
+    """open() must expand a leading ~ in user_data_dir — playwright resolves
+    the raw string against cwd and would create a literal "~" directory."""
+
+    def test_tilde_is_expanded(self, monkeypatch):
+        import os
+
+        import qirabot.client as client_mod
+
+        fake_pw = MagicMock(name="playwright.sync_api")
+        monkeypatch.setattr(client_mod, "require", lambda module, extra: fake_pw)
+
+        bot = Qirabot(api_key="k", task_id="t")
+        bot.open(headless=True, user_data_dir="~/.automation")
+
+        call = fake_pw.sync_playwright().start().chromium.launch_persistent_context.call_args
+        passed = call.args[0]
+        assert passed == os.path.expanduser("~/.automation")
+        assert not passed.startswith("~")

@@ -312,7 +312,9 @@ class Qirabot:
         root = report_dir or os.environ.get("QIRA_REPORT_DIR", "") or "./qira_runs"
         short = (self._task_id or "run")[:8]
         self._report_dir = (
-            Path(root) / time.strftime("%Y-%m-%d") / f"{time.strftime('%H%M%S')}-{short}"
+            Path(root).expanduser()
+            / time.strftime("%Y-%m-%d")
+            / f"{time.strftime('%H%M%S')}-{short}"
         )
         # Session-wide action timeline for the report, and the current task
         # section ai() runs are grouped under. Standalone actions carry the
@@ -531,6 +533,9 @@ class Qirabot:
             user_data_dir: persistent profile directory. When set, uses
                 ``launch_persistent_context`` so cookies/history/extensions persist
                 across runs. Cannot be shared by two browsers at the same time.
+                A leading ``~`` is expanded to the user's home directory on all
+                platforms (``~/.automation`` → ``/home/me/.automation`` or
+                ``C:\\Users\\me\\.automation``).
             channel: Chromium channel (e.g. ``"chrome"``, ``"msedge"``). Uses the
                 locally installed browser instead of Playwright's bundled Chromium.
             args: extra raw arguments passed to the Chromium process.
@@ -577,6 +582,9 @@ class Qirabot:
             page = context.new_page()
             self._cdp_pages.append(page)
         elif user_data_dir:
+            # Playwright resolves the path as-is (no ~ expansion), which would
+            # silently create a literal "~" directory under cwd.
+            user_data_dir = os.path.expanduser(user_data_dir)
             launch_kwargs: dict[str, Any] = {"headless": headless}
             if channel:
                 launch_kwargs["channel"] = channel
