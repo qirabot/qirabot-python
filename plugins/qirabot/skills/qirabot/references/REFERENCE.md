@@ -36,7 +36,7 @@ Common constructor options (all keyword):
 
 ```python
 result = bot.ai(target, instruction, max_steps=20, *, on_step=None, model_alias="",
-                language="", custom_tools=None, exclude_tools=None)
+                language="", custom_tools=None, exclude_tools=None, knowledge=None)
 # result.success -> bool, result.output -> str (final answer)
 ```
 
@@ -84,6 +84,34 @@ model can't wander into them. `done` cannot be excluded. Excluding an action the
 task actually requires (e.g. `"click"` on a browsing task) strands the run.
 Both params work on bound calls too; a server too old to support them logs a
 warning and the run continues without them.
+
+**`knowledge` — domain background the model consults while deciding** (game
+rules, business flows, terminology), kept separate from `instruction` so
+reference material is never mistaken for the goal. Accepts the text itself
+(`str`), a local file (`pathlib.Path`, UTF-8), or a list mixing both; combined
+limit 32 KB. A plain `str` is always literal text — never a filename. For
+remote sources fetch the text yourself (`requests.get(url).text`) and pass it.
+Like the tool params, it works on bound calls, and a server too old to support
+it logs a warning and the run continues without it.
+Per-call scope makes staged loading natural: each `bot.ai` stage passes only
+its own knowledge, and dropping a stage's knowledge (or a tool) is just not
+passing it to the next call. Hard limits ("GM may be used once") belong in the
+custom tool's handler code — prompts persuade, code enforces:
+
+```python
+gm_used = False
+def gm_command(cmd: str) -> str:
+    """发送 GM 命令。整个任务只允许使用一次。"""
+    global gm_used
+    if gm_used:
+        return "GM 命令已使用过，请用常规操作完成目标。"
+    gm_used = True
+    return send_gm(cmd)
+
+bot.ai(win, "完成新手引导", custom_tools=[gm_command],
+       knowledge=Path("game_rules.md"))       # 阶段知识随调用挂载
+bot.ai(win, "完成每日副本", knowledge="副本每日上限 3 次")  # 上一阶段的 GM 工具与知识自然卸载
+```
 
 ## Bind (drop the repeated first arg)
 

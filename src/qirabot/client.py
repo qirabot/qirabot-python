@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 
 from qirabot._heartbeat import Heartbeat
+from qirabot._knowledge import resolve_knowledge
 from qirabot._optional import require
 from qirabot._tools import build_tool_defs
 from qirabot._transport import Transport
@@ -1015,6 +1016,7 @@ class Qirabot:
         language: str = "",
         custom_tools: list[Callable[..., Any] | dict[str, Any]] | None = None,
         exclude_tools: list[str] | None = None,
+        knowledge: str | Path | list[str | Path] | None = None,
     ) -> RunResult:
         """AI-powered multi-step operation.
 
@@ -1030,6 +1032,16 @@ class Qirabot:
 
         ``exclude_tools`` removes built-in tools (by name, e.g. ``"scroll"``)
         from the model's tool list for this call; ``done`` cannot be excluded.
+
+        ``knowledge`` supplies domain background the model consults while
+        deciding (game rules, business flows, terminology) — kept separate
+        from ``instruction`` so reference material is never mistaken for the
+        goal. Pass the text itself, a local file as ``pathlib.Path`` (UTF-8),
+        or a list mixing both. For remote sources, fetch the text yourself
+        (e.g. ``requests.get(url).text``) and pass it. Applies to this call
+        only, so per-stage knowledge loads with its stage and drops with it.
+        Hard limits (e.g. "GM may be used once") belong in the custom tool's
+        handler code, not here — prompts persuade, code enforces.
         """
         prev_section = self._current_section
         section = instruction or "ai"
@@ -1048,6 +1060,7 @@ class Qirabot:
                 language=language,
                 custom_tools=custom_tools,
                 exclude_tools=exclude_tools,
+                knowledge=knowledge,
             )
             self._section_outcomes[self._current_section] = result.status
             self._last_ai_status = result.status
@@ -1082,12 +1095,14 @@ class Qirabot:
         language: str = "",
         custom_tools: list[Callable[..., Any] | dict[str, Any]] | None = None,
         exclude_tools: list[str] | None = None,
+        knowledge: str | Path | list[str | Path] | None = None,
     ) -> RunResult:
         adapter = self._get_adapter(target)
         steps: list[StepResult] = []
         last_action_result = ""
         last_was_save_note = False
         tool_defs, tool_handlers = build_tool_defs(custom_tools) if custom_tools else ([], {})
+        knowledge_text = resolve_knowledge(knowledge) if knowledge is not None else ""
         sent_tool_params = bool(tool_defs or exclude_tools)
 
         for step_num in range(1, max_steps + 1):
@@ -1117,6 +1132,8 @@ class Qirabot:
                     ai_params["custom_tools"] = tool_defs
                 if exclude_tools:
                     ai_params["exclude_tools"] = list(exclude_tools)
+                if knowledge_text:
+                    ai_params["knowledge"] = knowledge_text
                 request_body["action"] = {
                     "type": "ai",
                     "params": ai_params,
@@ -1173,6 +1190,17 @@ class Qirabot:
                         "server does not support custom_tools/exclude_tools; "
                         "tools will not take effect"
                     )
+            if step_num == 1 and knowledge_text:
+                # Same old-server detection as tools: only successful responses
+                # go through NewStepResponse, so a missing echo there means the
+                # server ignored the param — warn instead of degrading silently.
+                registered = result.get("knowledge_registered")
+                if registered is None:
+                    logger.warning(
+                        "server does not support knowledge; it will not take effect"
+                    )
+                else:
+                    logger.info("knowledge registered: %d bytes", registered)
 
             action_type = result.get("actionType")
             action_params = result.get("params") or {}

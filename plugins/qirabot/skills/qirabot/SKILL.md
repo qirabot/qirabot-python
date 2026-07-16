@@ -117,7 +117,12 @@ When the task needs something the UI can't do, pass
 query a database, fetch an OTP, pause for a human to pass a captcha. The model
 calls it mid-task, it runs locally, and the return value feeds back as the
 observation. `exclude_tools=["..."]`
-prunes built-in actions the task never needs. Rules and details:
+prunes built-in actions the task never needs.
+
+When the model would get stuck for lack of domain context (game rules,
+business terms), pass `knowledge=` — the text, a `Path` to a local file, or a
+list of both. It rides in the system prompt as reference material, per call,
+so each stage loads only its own knowledge. Rules and details:
 `references/REFERENCE.md`.
 
 **Drop to per-step primitives only as a deliberate optimization** — strict
