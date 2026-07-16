@@ -27,12 +27,34 @@ The same thing in Python:
 ```python
 from qirabot import Qirabot, Window
 
-window = Window(title_re="Genshin")   # or Window(hwnd=132456)
+window = Window(title="Genshin")   # literal substring; or Window(hwnd=132456)
 bot = Qirabot().bind(window)
 
 result = bot.ai("Open the inventory and list all items")
 bot.close()
 ```
+
+`Window` selectors: `hwnd=` (explicit handle), `title=` (literal substring —
+paste the title straight from the taskbar, parentheses and dots are safe),
+`title_re=` (a regex, for fuzzy/multi-language matching), or `class_name=`
+(exact window class — Unity games expose `UnityWndClass`, Unreal
+`UnrealWindow`; steadier than titles and combinable with `title`/`title_re`).
+If several windows match, resolution fails listing the candidates; when the
+duplicates are unavoidable — cloud-gaming clients and launcher overlays often
+share the main window's exact title — add `ambiguous="largest"` to pick the
+biggest window. `timeout=` keeps polling for the window while a game is still
+starting:
+
+```python
+window = Window(title="MyGame · Cloud(Beta)", ambiguous="largest")
+window = Window(class_name="UnityWndClass", timeout=180)   # just-launched game
+```
+
+Before the first input is injected, the backend switches the window's input
+language to US English and closes its IME — an active CJK IME would swallow
+injected letter keys into its composition window instead of the game. This is
+per-window state (Win+Space switches it back); pass
+`Window(..., english_ime=False)` to leave the IME alone.
 
 ## Game-grade input
 

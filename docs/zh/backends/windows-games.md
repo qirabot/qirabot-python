@@ -25,12 +25,30 @@ qirabot desktop "..." --hwnd 132456
 ```python
 from qirabot import Qirabot, Window
 
-window = Window(title_re="Genshin")   # 或 Window(hwnd=132456)
+window = Window(title="Genshin")   # 标题子串匹配;或 Window(hwnd=132456)
 bot = Qirabot().bind(window)
 
 result = bot.ai("打开背包并列出所有物品")
 bot.close()
 ```
+
+`Window` 的选择器:`hwnd=`(显式句柄)、`title=`(字面子串——直接粘贴
+任务栏里的标题即可,括号、点号等都按字面匹配)、`title_re=`(正则,用于
+模糊/多语言匹配)、`class_name=`(精确窗口类名——Unity 游戏是
+`UnityWndClass`、Unreal 是 `UnrealWindow`;比标题更稳定,可与
+`title`/`title_re` 组合缩小范围)。多个窗口同时匹配时默认报错并列出候选;
+如果重名不可避免——云游戏客户端、启动器悬浮窗常和主窗口标题完全相同——
+加 `ambiguous="largest"` 自动选面积最大的窗口。`timeout=` 会在窗口尚未
+出现时持续轮询,适合刚启动还在加载的游戏:
+
+```python
+window = Window(title="MyGame · Cloud(Beta)", ambiguous="largest")
+window = Window(class_name="UnityWndClass", timeout=180)   # 刚启动的游戏
+```
+
+首次注入输入前,后端会把目标窗口的输入语言切到英文并关闭 IME——中文输入法
+开着时,注入的字母键会被输入法候选窗截走,游戏收不到。输入语言是按窗口的
+状态(Win+Space 可切回);传 `Window(..., english_ime=False)` 可关闭此行为。
 
 ## 游戏级输入
 

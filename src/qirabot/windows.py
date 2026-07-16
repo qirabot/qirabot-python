@@ -23,7 +23,7 @@ import ctypes
 import sys
 import time
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator, Literal
 
 from qirabot.exceptions import QirabotError
 
@@ -131,29 +131,103 @@ def list_visible_windows() -> list[tuple[int, str]]:
     return results
 
 
+def _visible_windows_by_class(class_name: str) -> list[tuple[int, str]]:
+    """Visible top-level windows whose class equals ``class_name``, as
+    (hwnd, title). Unlike :func:`list_visible_windows`, untitled windows are
+    included — a game's renderer window may not have set its title yet."""
+    user32 = _user32()
+    results: list[tuple[int, str]] = []
+
+    @_WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)  # type: ignore[untyped-decorator]
+    def enum_proc(hwnd: Any, _lparam: Any) -> int:
+        if user32.IsWindowVisible(hwnd):
+            cbuf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, cbuf, 256)
+            if cbuf.value == class_name:
+                length = user32.GetWindowTextLengthW(hwnd)
+                title = ""
+                if length:
+                    tbuf = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, tbuf, length + 1)
+                    title = tbuf.value
+                results.append((int(hwnd) if hwnd else 0, title))
+        return 1
+
+    user32.EnumWindows(enum_proc, 0)
+    return results
+
+
 class Window:
     """Handle to one Windows top-level window.
 
     Args:
         hwnd: explicit window handle (from Spy++, ``qirabot doctor``, or a
             previous resolution).
-        title_re: regex matched (``re.search``) against visible window titles;
-            exactly one of ``hwnd``/``title_re`` is required. Whole-desktop
-            automation belongs to the pyautogui backend instead.
+        title: literal substring matched against visible window titles
+            (regex metacharacters like ``(`` are safe here).
+        title_re: regex matched (``re.search``) against visible window titles.
+        class_name: exact window class name (e.g. Unity games expose
+            ``UnityWndClass``, Unreal ``UnrealWindow``). More reliable than
+            titles for games: it can't match a File Explorer window that
+            shares the game's name, and it works before the game sets its
+            title. Combinable with ``title``/``title_re`` to narrow further.
+        ambiguous: what to do when several windows match:
+            ``"error"`` (default) raises listing the candidates;
+            ``"largest"`` picks the window with the biggest on-screen area —
+            the right call for games whose launcher/overlay windows share the
+            main window's exact title.
+        timeout: seconds to keep polling (1s interval) for a matching window
+            before giving up — for binding to a game that is still starting.
+            0 (default) resolves exactly once.
+        english_ime: switch the window's input language to US English before
+            the first input is injected (default True). An active CJK IME
+            swallows injected letter keys into its composition window instead
+            of the game. Pass False to leave the window's IME alone.
+
+    ``hwnd`` alone, or any combination of ``title``/``title_re`` (mutually
+    exclusive) and ``class_name``, selects the window. Whole-desktop
+    automation belongs to the pyautogui backend instead.
     """
 
-    def __init__(self, hwnd: int | None = None, title_re: str | None = None) -> None:
-        if not hwnd and not title_re:
+    def __init__(
+        self,
+        hwnd: int | None = None,
+        title: str | None = None,
+        title_re: str | None = None,
+        class_name: str | None = None,
+        ambiguous: Literal["error", "largest"] = "error",
+        timeout: float = 0.0,
+        english_ime: bool = True,
+    ) -> None:
+        if not hwnd and not title and not title_re and not class_name:
             raise QirabotError(
-                "Window needs hwnd= or title_re= (for whole-desktop automation "
-                "use the pyautogui backend)",
+                "Window needs hwnd=, title=, title_re= or class_name= (for "
+                "whole-desktop automation use the pyautogui backend)",
                 code="windows.window_unspecified",
             )
+        if title and title_re:
+            raise QirabotError(
+                "pass title= (literal substring) or title_re= (regex), not both",
+                code="windows.window_unspecified",
+            )
+        if ambiguous not in ("error", "largest"):
+            raise QirabotError(
+                f"ambiguous= must be 'error' or 'largest', got {ambiguous!r}",
+                code="windows.bad_argument",
+            )
         self._hwnd = int(hwnd) if hwnd else None
+        self._title = title
         self._title_re = title_re
+        self._class_name = class_name
+        self._ambiguous = ambiguous
+        self._timeout = timeout
+        self.english_ime = english_ime
 
     def __repr__(self) -> str:
-        return f"Window(hwnd={self._hwnd!r}, title_re={self._title_re!r})"
+        return (
+            f"Window(hwnd={self._hwnd!r}, title={self._title!r}, "
+            f"title_re={self._title_re!r}, class_name={self._class_name!r})"
+        )
 
     @property
     def hwnd(self) -> int:
@@ -175,25 +249,59 @@ class Window:
     def _resolve(self) -> int:
         import re
 
-        assert self._title_re is not None
-        pattern = re.compile(self._title_re)
-        windows = list_visible_windows()
-        matches = [(h, t) for h, t in windows if pattern.search(t)]
+        pattern = None
+        wanted_parts = []
+        if self._title is not None:
+            pattern = re.compile(re.escape(self._title))
+            wanted_parts.append(f"title {self._title!r}")
+        elif self._title_re is not None:
+            pattern = re.compile(self._title_re)
+            wanted_parts.append(f"title_re {self._title_re!r}")
+        if self._class_name is not None:
+            wanted_parts.insert(0, f"class {self._class_name!r}")
+        wanted = " + ".join(wanted_parts)
+
+        deadline = time.monotonic() + self._timeout
+        while True:
+            if self._class_name is not None:
+                windows = _visible_windows_by_class(self._class_name)
+            else:
+                windows = list_visible_windows()
+            matches = [(h, t) for h, t in windows if pattern is None or pattern.search(t)]
+            if matches:
+                break
+            if time.monotonic() >= deadline:
+                titles = ", ".join(repr(t) for _, t in list_visible_windows()[:20]) or "none"
+                waited = f" within {self._timeout:g}s" if self._timeout > 0 else ""
+                raise QirabotError(
+                    f"no visible window matches {wanted}{waited} "
+                    f"(visible windows: {titles})",
+                    code="windows.window_not_found",
+                )
+            time.sleep(1.0)
         if len(matches) == 1:
             return matches[0][0]
-        if not matches:
-            titles = ", ".join(repr(t) for _, t in windows[:20]) or "none"
-            raise QirabotError(
-                f"no visible window title matches {self._title_re!r} "
-                f"(visible windows: {titles})",
-                code="windows.window_not_found",
-            )
+        if self._ambiguous == "largest":
+            return max(matches, key=lambda m: _window_area(m[0]))[0]
         listing = ", ".join(f"{t!r} (hwnd={h})" for h, t in matches[:10])
         raise QirabotError(
-            f"{len(matches)} windows match {self._title_re!r}: {listing} — "
-            "narrow the regex or pass hwnd=",
+            f"{len(matches)} windows match {wanted}: {listing} — narrow the "
+            "pattern, pass hwnd=, or pass ambiguous='largest' to pick the "
+            "biggest matching window",
             code="windows.window_ambiguous",
         )
+
+
+def _window_area(hwnd: int) -> int:
+    """On-screen area of ``hwnd``'s window rect (0 on failure).
+
+    Only used to ORDER candidate windows in the ``ambiguous="largest"``
+    tiebreak, so DPI virtualization scaling the values doesn't matter.
+    """
+    rect = _RECT()
+    if not _user32().GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(rect)):
+        return 0
+    return max(0, int(rect.right) - int(rect.left)) * max(0, int(rect.bottom) - int(rect.top))
 
 
 # ---------------------------------------------------------------------------
@@ -541,6 +649,51 @@ def ensure_foreground(hwnd: int) -> bool:
     user32.SetForegroundWindow(ctypes.c_void_p(hwnd))
     time.sleep(0.05)
     return bool(_same_hwnd(user32.GetForegroundWindow(), hwnd))
+
+
+# ---------------------------------------------------------------------------
+# IME
+# ---------------------------------------------------------------------------
+
+WM_INPUTLANGCHANGEREQUEST = 0x0050
+_WM_IME_CONTROL = 0x0283
+_IMC_SETOPENSTATUS = 0x0006
+_KLF_ACTIVATE = 0x0001
+_EN_US_LAYOUT = "00000409"
+
+
+def _imm32() -> Any:
+    return _dll("imm32")
+
+
+def set_english_ime(hwnd: int) -> None:
+    """Switch ``hwnd``'s input language to US English and close its IME.
+
+    An active CJK IME swallows injected scancode letters into its composition
+    window instead of delivering them to the game. Input language is
+    per-window state, so only the target window is touched (the user can
+    switch back with Win+Space). Best-effort: a window that ignores
+    WM_INPUTLANGCHANGEREQUEST keeps its layout.
+    """
+    user32 = _user32()
+    _set_types(
+        user32.LoadKeyboardLayoutW, ctypes.c_void_p, [ctypes.c_wchar_p, ctypes.c_uint32]
+    )
+    _set_types(
+        user32.SendMessageW,
+        ctypes.c_ssize_t,
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_size_t, ctypes.c_void_p],
+    )
+    hkl = user32.LoadKeyboardLayoutW(_EN_US_LAYOUT, _KLF_ACTIVATE)
+    if hkl:
+        user32.SendMessageW(
+            ctypes.c_void_p(hwnd), WM_INPUTLANGCHANGEREQUEST, 0, ctypes.c_void_p(hkl)
+        )
+    imm32 = _imm32()
+    _set_types(imm32.ImmGetDefaultIMEWnd, ctypes.c_void_p, [ctypes.c_void_p])
+    ime = imm32.ImmGetDefaultIMEWnd(ctypes.c_void_p(hwnd))
+    if ime:
+        user32.SendMessageW(ctypes.c_void_p(ime), _WM_IME_CONTROL, _IMC_SETOPENSTATUS, None)
 
 
 # ---------------------------------------------------------------------------

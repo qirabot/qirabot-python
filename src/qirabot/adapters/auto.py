@@ -79,7 +79,7 @@ def detect(target: Any) -> DeviceAdapter:
         raise TypeError(
             "airtest support was removed in qirabot 2.0. Migrate the target: "
             "Android -> qirabot.AdbDevice (direct adb, zero dependencies), "
-            "Windows -> qirabot.Window(hwnd=/title_re=), "
+            "Windows -> qirabot.Window(hwnd=/title=/title_re=), "
             "iOS -> qirabot.WdaClient(wda_url). To keep driving airtest, copy "
             "examples/airtest/adapter.py into your project and "
             "register_adapter(AirtestAdapter) — or pin qirabot<2.0. "

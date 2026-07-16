@@ -171,6 +171,26 @@ class WindowsAdapter(DeviceAdapter):
         # foreground: the down event went to whichever window had focus, so
         # the next pointer action must re-press the held keys.
         self._held_undelivered = False
+        self._ime_prepared = False
+
+    def _ensure_english_ime(self) -> None:
+        """Once, before the first injected input: force the US English IME.
+
+        An active CJK IME swallows injected scancode letters into its
+        composition window instead of the game — part of the same "input must
+        actually arrive" contract as ensure_foreground. Lazy so constructing
+        the adapter never forces window resolution; Window(english_ime=False)
+        opts out; best-effort because IME state must never block input.
+        """
+        if self._ime_prepared:
+            return
+        self._ime_prepared = True
+        if not getattr(self._window, "english_ime", True):
+            return
+        try:
+            win.set_english_ime(self._window.hwnd)
+        except Exception:
+            logger.warning("could not switch the window to the English IME")
 
     @classmethod
     def accepts(cls, target: Any) -> bool:
@@ -274,6 +294,7 @@ class WindowsAdapter(DeviceAdapter):
         ``_reassert_held_keys``). Otherwise front the window (whose ALT-tap
         unlock may release a held ALT) and re-press whatever is held.
         """
+        self._ensure_english_ime()
         if win.is_foreground(self._window.hwnd):
             if self._held_undelivered:
                 self._reassert_held_keys()
@@ -406,6 +427,7 @@ class WindowsAdapter(DeviceAdapter):
         sc = self._scancode_for(key)
         if sc is None:
             raise NotImplementedError(f"no scancode for key {key!r}")
+        self._ensure_english_ime()
         if not win.ensure_foreground(self._window.hwnd):
             # Keyboard input follows focus, not coordinates: this down event is
             # about to land in whatever window IS focused. Surface it — the
@@ -450,6 +472,7 @@ class WindowsAdapter(DeviceAdapter):
     def press_key(self, key: str) -> None:
         mods, base = split_combo(key)
         codes = [self._scancode_for(k) for k in mods + [base]]
+        self._ensure_english_ime()
         if all(c is not None for c in codes):
             win.ensure_foreground(self._window.hwnd)
             *mod_codes, base_code = codes
@@ -490,6 +513,7 @@ class WindowsAdapter(DeviceAdapter):
             if m is None:
                 break
             codes.append(m)
+        self._ensure_english_ime()
         win.ensure_foreground(self._window.hwnd)
         if text and len(codes) == len(text):
             shift = SCANCODES["LSHIFT"]

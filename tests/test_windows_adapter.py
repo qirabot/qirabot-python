@@ -31,9 +31,33 @@ from qirabot.windows import Window
 class FakeUser32:
     """Just enough user32 for Window resolution + geometry + foreground."""
 
-    def __init__(self, windows=None, foreground=0):
+    def __init__(self, windows=None, foreground=0, rects=None, classes=None):
         self.windows = windows or []  # [(hwnd, title, visible)]
         self.foreground = foreground
+        self.rects = rects or {}  # hwnd -> (left, top, right, bottom)
+        self.classes = classes or {}  # hwnd -> window class name
+        self.messages = []  # SendMessageW calls: (hwnd, msg, wparam, lparam)
+
+    def GetClassNameW(self, hwnd, buf, n):
+        h = hwnd if isinstance(hwnd, int) else (hwnd or 0)
+        buf.value = self.classes.get(h, "")[: n - 1]
+        return len(buf.value)
+
+    def LoadKeyboardLayoutW(self, layout, flags):
+        return 0x04090409  # en-US HKL
+
+    def SendMessageW(self, hwnd, msg, wparam, lparam):
+        h = hwnd.value if hasattr(hwnd, "value") else hwnd
+        self.messages.append((h, msg, wparam, lparam))
+        return 0
+
+    def GetWindowRect(self, hwnd, rect_ref):
+        h = hwnd.value if hasattr(hwnd, "value") else hwnd
+        if h not in self.rects:
+            return 0
+        rect = rect_ref._obj
+        rect.left, rect.top, rect.right, rect.bottom = self.rects[h]
+        return 1
 
     def EnumWindows(self, proc, lparam):
         for hwnd, _title, _visible in self.windows:
@@ -81,6 +105,12 @@ def fake_env(monkeypatch):
     user32 = FakeUser32(windows=[(42, "Genshin Impact", True)], foreground=42)
     monkeypatch.setattr(win, "_user32", lambda: user32)
     monkeypatch.setattr(win, "_gdi32", lambda: object())
+
+    class FakeImm32:
+        def ImmGetDefaultIMEWnd(self, hwnd):
+            return 999  # the window's default IME window
+
+    monkeypatch.setattr(win, "_imm32", lambda: FakeImm32())
 
     sent: list[win.INPUT] = []
     monkeypatch.setattr(win, "send_inputs", lambda evs: sent.extend(evs))
@@ -148,6 +178,109 @@ class TestWindow:
             _ = Window(title_re="Chrome").hwnd
         assert ei.value.code == "windows.window_ambiguous"
         assert "hwnd=1" in str(ei.value)
+        assert "ambiguous='largest'" in str(ei.value)  # points at the fix
+
+    def test_title_is_literal_substring(self, monkeypatch):
+        # Regex metacharacters in the title must not be interpreted: as a
+        # regex, "Cloud(Beta)" would match "CloudBeta" (capture group), not
+        # the literal text — the exact trap cloud-gaming titles hit.
+        user32 = FakeUser32(windows=[(7, "MyGame · Cloud(Beta)", True)])
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        assert Window(title="Cloud(Beta)").hwnd == 7
+        with pytest.raises(QirabotError) as ei:
+            _ = Window(title_re="Cloud(Beta)").hwnd  # regex semantics: no match
+        assert ei.value.code == "windows.window_not_found"
+
+    def test_ambiguous_largest_picks_biggest_window(self, monkeypatch):
+        # Three identically-titled windows (cloud client + overlays): the
+        # game's main window is the biggest one.
+        user32 = FakeUser32(
+            windows=[
+                (1, "MyGame · Cloud(Beta)", True),
+                (2, "MyGame · Cloud(Beta)", True),
+                (3, "MyGame · Cloud(Beta)", True),
+            ],
+            rects={1: (0, 0, 300, 200), 2: (0, 0, 1920, 1080), 3: (0, 0, 800, 600)},
+        )
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        assert Window(title="MyGame", ambiguous="largest").hwnd == 2
+
+    def test_ambiguous_largest_treats_rect_failure_as_zero_area(self, monkeypatch):
+        user32 = FakeUser32(
+            windows=[(1, "Genshin", True), (2, "Genshin", True)],
+            rects={2: (0, 0, 100, 100)},  # GetWindowRect fails for hwnd=1
+        )
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        assert Window(title="Genshin", ambiguous="largest").hwnd == 2
+
+    def test_ambiguous_largest_with_unique_match_is_direct(self, monkeypatch):
+        user32 = FakeUser32(windows=[(5, "Genshin", True)])  # no rects needed
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        assert Window(title="Genshin", ambiguous="largest").hwnd == 5
+
+    def test_class_name_matches_untitled_window(self, monkeypatch):
+        # A game's renderer window may not have set its title yet — class
+        # matching must still find it (title matching never can).
+        user32 = FakeUser32(
+            windows=[(7, "", True), (8, "File Explorer", True)],
+            classes={7: "UnityWndClass", 8: "CabinetWClass"},
+        )
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        assert Window(class_name="UnityWndClass").hwnd == 7
+
+    def test_class_name_combined_with_title(self, monkeypatch):
+        user32 = FakeUser32(
+            windows=[(1, "Game A", True), (2, "Game B", True)],
+            classes={1: "UnityWndClass", 2: "UnityWndClass"},
+        )
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        assert Window(class_name="UnityWndClass", title="Game B").hwnd == 2
+
+    def test_timeout_polls_until_window_appears(self, monkeypatch):
+        # Simulates binding to a game that is still starting: the window
+        # only exists from the third enumeration onwards.
+        user32 = FakeUser32(classes={7: "UnityWndClass"})
+        real_enum, calls = user32.EnumWindows, {"n": 0}
+
+        def enum_windows(proc, lparam):
+            calls["n"] += 1
+            if calls["n"] >= 3:
+                user32.windows = [(7, "Game", True)]
+            return real_enum(proc, lparam)
+
+        user32.EnumWindows = enum_windows
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        sleeps: list[float] = []
+        monkeypatch.setattr(win.time, "sleep", lambda s: sleeps.append(s))
+        assert Window(class_name="UnityWndClass", timeout=60).hwnd == 7
+        assert len(sleeps) == 2  # two misses, then found
+
+    def test_timeout_zero_enumerates_once(self, monkeypatch):
+        user32 = FakeUser32(windows=[(1, "Notepad", True)])
+        calls = {"n": 0}
+        real_enum = user32.EnumWindows
+
+        def enum_windows(proc, lparam):
+            calls["n"] += 1
+            return real_enum(proc, lparam)
+
+        user32.EnumWindows = enum_windows
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        with pytest.raises(QirabotError) as ei:
+            _ = Window(class_name="UnityWndClass").hwnd
+        assert ei.value.code == "windows.window_not_found"
+        # one class enumeration + one title listing for the error message
+        assert calls["n"] == 2
+
+    def test_title_and_title_re_conflict(self):
+        with pytest.raises(QirabotError) as ei:
+            Window(title="a", title_re="b")
+        assert ei.value.code == "windows.window_unspecified"
+
+    def test_invalid_ambiguous_value(self):
+        with pytest.raises(QirabotError) as ei:
+            Window(title="a", ambiguous="biggest")
+        assert ei.value.code == "windows.bad_argument"
 
     def test_explicit_hwnd_skips_enumeration(self):
         assert Window(hwnd=1234).hwnd == 1234
@@ -155,6 +288,35 @@ class TestWindow:
     def test_accepts_only_window(self, fake_env):
         assert WindowsAdapter.accepts(Window(hwnd=42))
         assert not WindowsAdapter.accepts(object())
+
+
+# ---------------------------------------------------------------------------
+# English IME
+# ---------------------------------------------------------------------------
+
+
+class TestEnglishIme:
+    def test_first_input_forces_english_ime_once(self, fake_env):
+        adapter = WindowsAdapter(Window(hwnd=42))
+        adapter.press_key("esc")
+        msgs = fake_env["user32"].messages
+        lang = [m for m in msgs if m[1] == win.WM_INPUTLANGCHANGEREQUEST]
+        assert [m[0] for m in lang] == [42]  # layout switch sent to the window
+        ime = [m for m in msgs if m[1] == 0x0283]  # WM_IME_CONTROL
+        assert [(m[0], m[2]) for m in ime] == [(999, 0x0006)]  # IMC_SETOPENSTATUS off
+        adapter.press_key("esc")  # second input: no re-switch
+        assert len([m for m in msgs if m[1] == win.WM_INPUTLANGCHANGEREQUEST]) == 1
+
+    def test_english_ime_opt_out(self, fake_env):
+        adapter = WindowsAdapter(Window(hwnd=42, english_ime=False))
+        adapter.press_key("esc")
+        assert fake_env["user32"].messages == []
+
+    def test_pointer_action_also_prepares_ime(self, fake_env):
+        adapter = WindowsAdapter(Window(hwnd=42))
+        adapter.click(10, 10)
+        msgs = fake_env["user32"].messages
+        assert any(m[1] == win.WM_INPUTLANGCHANGEREQUEST for m in msgs)
 
 
 # ---------------------------------------------------------------------------
