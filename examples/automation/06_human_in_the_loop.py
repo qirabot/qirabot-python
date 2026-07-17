@@ -7,7 +7,10 @@ until you finish the verification in the (headed) browser window, then the
 model re-checks the page and continues the task.
 
 A persistent profile (user_data_dir) makes the pause a one-time cost: the
-session cookie survives, so the next run sails through without help.
+session cookie survives, so the next run sails through without help. To skip
+even the first pause, log in ahead of time with no AI task at all:
+`qirabot open-browser --user-data-dir ~/.qirabot-profile` — this example is
+for walls the model hits mid-task.
 
 Install:
     python -m pip install "qirabot[browser]"

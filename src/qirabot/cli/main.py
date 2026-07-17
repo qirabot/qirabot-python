@@ -12,6 +12,7 @@ from typing import Any, NoReturn, TypeVar
 import click
 from click.core import ParameterSource
 
+from qirabot._browser import launch_browser
 from qirabot._dotenv import load_dotenv
 from qirabot._optional import extra_install_hint, package_install_hint, require
 from qirabot._transport import Transport
@@ -611,6 +612,69 @@ def install_browser() -> None:
     click.echo('Chromium installed — you\'re ready: qirabot browser "..."')
 
 
+def _parse_viewport(viewport: str) -> tuple[int, int]:
+    try:
+        w_str, h_str = viewport.lower().split("x")
+        return (int(w_str), int(h_str))
+    except ValueError:
+        raise click.BadParameter(f"viewport must be WIDTHxHEIGHT, got '{viewport}'")
+
+
+@cli.command("open-browser", cls=_GroupedCommand)
+@_option("--url", "-u", group="Browser options", default="", help="URL to open, e.g. the site's login page")
+@_option("--user-data-dir", group="Browser options", required=True, help="Profile directory to save the session into — pass the same directory to `qirabot browser` or bot.open() later")
+@_option("--viewport", group="Browser options", default="1280x800", help="Viewport size as WIDTHxHEIGHT")
+@_option("--channel", group="Browser options", default="", help="Browser channel: chrome, msedge, etc. (uses installed browser instead of bundled Chromium)")
+@_option("--browser-arg", group="Browser options", multiple=True, help="Extra Chromium launch arg, repeatable")
+def open_browser(
+    url: str,
+    user_data_dir: str,
+    viewport: str,
+    channel: str,
+    browser_arg: tuple[str, ...],
+) -> None:
+    """Open a browser to log in to websites by hand — no AI task, no API key.
+
+    Cookies and local storage persist in --user-data-dir, so AI runs that
+    reuse the same directory (`qirabot browser ... --user-data-dir <dir>` or
+    `bot.open(url, user_data_dir=<dir>)`) start already signed in. Close the
+    browser window (or press Ctrl-C) when you're done; a profile directory
+    can't be shared by two browsers at once, so close it before running tasks.
+    """
+    # Qirabot.open() would fall back to headless here, which is right for AI
+    # tasks but useless for a browser that exists only to be clicked in.
+    if not _display_available():
+        raise click.ClickException(
+            "no display detected (DISPLAY/WAYLAND_DISPLAY unset) — this command "
+            "opens a visible browser for you to log in with, which cannot work "
+            "here. Run it on a machine with a display, then copy the profile "
+            "directory over."
+        )
+    vp = _parse_viewport(viewport)
+    launched = launch_browser(
+        url=url,
+        headless=False,
+        viewport=vp,
+        user_data_dir=user_data_dir,
+        channel=channel,
+        args=list(browser_arg) if browser_arg else None,
+    )
+    click.echo("Browser is open — log in to the sites your automation needs.")
+    click.echo("When you're done, close the browser window (or press Ctrl-C here).")
+    try:
+        launched.context.wait_for_event("close", timeout=0)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for close in (launched.context.close, launched.playwright.stop):
+            try:
+                close()
+            except Exception:
+                pass
+    click.echo(f"Session saved to {user_data_dir}")
+    click.echo(f'Next: qirabot browser "<your task>" --user-data-dir {user_data_dir}')
+
+
 def _has_module(module: str) -> bool:
     """Probe an optional dependency without require()'s raise (doctor only).
 
@@ -851,11 +915,7 @@ def browser(
         raise click.UsageError(
             "--cdp-url cannot be combined with --headless/--user-data-dir/--channel/--browser-arg"
         )
-    try:
-        w_str, h_str = viewport.lower().split("x")
-        vp = (int(w_str), int(h_str))
-    except ValueError:
-        raise click.BadParameter(f"viewport must be WIDTHxHEIGHT, got '{viewport}'")
+    vp = _parse_viewport(viewport)
 
     bot = _make_bot(
         ctx, model=model, language=language, report=report, report_dir=report_dir,

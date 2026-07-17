@@ -1095,6 +1095,78 @@ class TestBrowserCommand:
         assert result.exit_code == 0, result.output
 
 
+class TestOpenBrowserCommand:
+    """open-browser exists so users can log in to sites by hand once and
+    persist the session in --user-data-dir — no AI task, no API key."""
+
+    @pytest.fixture
+    def launched(self, monkeypatch):
+        """Stub the launch; return (launch_browser mock, its LaunchedBrowser)."""
+        from qirabot.cli import main
+
+        monkeypatch.setattr(main, "_display_available", lambda: True)
+        fake = MagicMock(name="launched")
+        launch = MagicMock(name="launch_browser", return_value=fake)
+        monkeypatch.setattr(main, "launch_browser", launch)
+        return launch, fake
+
+    def _invoke_without_key(self, args, monkeypatch):
+        # No --api-key flag, no env var: the command must not need either.
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        from qirabot.cli.main import cli
+
+        return CliRunner().invoke(cli, ["open-browser", *args])
+
+    def test_user_data_dir_is_required(self, launched, monkeypatch):
+        result = self._invoke_without_key([], monkeypatch)
+
+        assert result.exit_code != 0
+        assert "--user-data-dir" in result.output
+        launched[0].assert_not_called()
+
+    def test_opens_waits_and_prints_next_step(self, launched, monkeypatch):
+        launch, fake = launched
+        result = self._invoke_without_key(
+            ["--user-data-dir", "~/.automation", "--url", "news.ycombinator.com/login"],
+            monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        kwargs = launch.call_args.kwargs
+        assert kwargs["user_data_dir"] == "~/.automation"
+        assert kwargs["url"] == "news.ycombinator.com/login"
+        assert kwargs["headless"] is False
+        fake.context.wait_for_event.assert_called_once_with("close", timeout=0)
+        fake.context.close.assert_called_once()
+        fake.playwright.stop.assert_called_once()
+        assert 'qirabot browser "<your task>" --user-data-dir ~/.automation' in result.output
+
+    def test_ctrl_c_still_cleans_up_and_reports(self, launched, monkeypatch):
+        launch, fake = launched
+        fake.context.wait_for_event.side_effect = KeyboardInterrupt
+
+        result = self._invoke_without_key(["--user-data-dir", "/tmp/p"], monkeypatch)
+
+        assert result.exit_code == 0, result.output
+        assert "Session saved to /tmp/p" in result.output
+        fake.context.close.assert_called_once()
+        fake.playwright.stop.assert_called_once()
+
+    def test_no_display_is_a_hard_error(self, launched, monkeypatch):
+        """Unlike bot.open(), no headless fallback: a browser nobody can see
+        or click is useless for manual login."""
+        from qirabot.cli import main
+
+        launch, _ = launched
+        monkeypatch.setattr(main, "_display_available", lambda: False)
+
+        result = self._invoke_without_key(["--user-data-dir", "/tmp/p"], monkeypatch)
+
+        assert result.exit_code != 0
+        assert "no display detected" in result.output
+        launch.assert_not_called()
+
+
 class TestDesktopKeyCheckBeforeAppLaunch:
     def test_missing_key_fails_before_launching_app(self, monkeypatch):
         """A missing API key must fail before the --app side effect — the old

@@ -59,6 +59,7 @@ qirabot models                    # 列出模型档位
 | `desktop 指令` | 在[桌面](/zh/backends/desktop)运行 AI 任务(pyautogui;`--window-title`/`--hwnd` 绑定[单个 Windows 窗口](/zh/backends/windows-games),内置) |
 | `login` | 浏览器授权登录并保存 API key(`--paste` 手动粘贴,`--status` 查看当前生效的 key,已脱敏) |
 | `install-browser` | 一次性下载浏览器后端所需的 Chromium |
+| `open-browser` | 打开浏览器手动登录网站——登录态保存在 `--user-data-dir`,无需 API key |
 | `doctor` | 检查 Python、API key/服务器与各后端依赖 |
 | `task TASK_ID` | 打印任务状态、指令与步骤 |
 | `screenshot TASK_ID` | 下载任务截图 |

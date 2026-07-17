@@ -60,6 +60,7 @@ qirabot models                    # list model aliases
 | `desktop INSTRUCTION` | Run an AI task on the [desktop screen](/backends/desktop) (pyautogui; `--window-title`/`--hwnd` binds [one Windows window](/backends/windows-games), built in) |
 | `login` | Log in via the browser and save the API key (`--paste` for manual entry, `--status` shows the active key, masked) |
 | `install-browser` | One-time Chromium download for the browser backend |
+| `open-browser` | Open a browser to log in to sites by hand — the session persists in `--user-data-dir`, no API key needed |
 | `doctor` | Check Python, API key/server, and per-backend dependencies |
 | `task TASK_ID` | Print a task's status, commands, and steps |
 | `screenshot TASK_ID` | Download a task screenshot |

@@ -1092,10 +1092,10 @@ class TestOpenHeadlessFallback:
         """Run bot.open() against a stubbed playwright; return chromium.launch kwargs."""
         import sys as sys_mod
 
-        import qirabot.client as client_mod
+        import qirabot._browser as browser_mod
 
         fake_pw = MagicMock(name="playwright.sync_api")
-        monkeypatch.setattr(client_mod, "require", lambda module, extra: fake_pw)
+        monkeypatch.setattr(browser_mod, "require", lambda module, extra: fake_pw)
         monkeypatch.setattr(sys_mod, "platform", platform)
         for var, value in (("DISPLAY", display), ("WAYLAND_DISPLAY", wayland)):
             if value is None:
@@ -1135,10 +1135,10 @@ class TestOpenUserDataDir:
     def test_tilde_is_expanded(self, monkeypatch):
         import os
 
-        import qirabot.client as client_mod
+        import qirabot._browser as browser_mod
 
         fake_pw = MagicMock(name="playwright.sync_api")
-        monkeypatch.setattr(client_mod, "require", lambda module, extra: fake_pw)
+        monkeypatch.setattr(browser_mod, "require", lambda module, extra: fake_pw)
 
         bot = Qirabot(api_key="k", task_id="t")
         bot.open(headless=True, user_data_dir="~/.automation")

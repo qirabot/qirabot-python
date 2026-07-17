@@ -29,6 +29,23 @@ qirabot browser "..." --cdp-url http://localhost:9222                    # attac
 
 `--cdp-url` also works with remote pools like browserless.
 
+### Log in once, reuse the session
+
+For sites that need an account, set the login up by hand — no AI task, no
+API key, no tokens spent. `open-browser` opens the profile in a visible
+browser; log in, close the window, and every later run that passes the same
+`--user-data-dir` starts already signed in:
+
+```bash
+qirabot open-browser --user-data-dir ~/.qira-profile --url news.ycombinator.com/login
+# log in in the window, then close it
+qirabot browser "Open the top story and summarize the discussion" --user-data-dir ~/.qira-profile
+```
+
+A profile directory can't be shared by two browsers at once, so close the
+login window before running tasks. For login walls the AI hits *mid-task*
+(captchas, 2FA), see [human-in-the-loop](/advanced/ai-tasks#human-in-the-loop).
+
 The same run through the SDK — `bot.open()` launches Chromium (Playwright
 under the hood), you never write framework code:
 
@@ -67,7 +84,9 @@ Details and the smart `go_back` behavior are in the
 ## Notes
 
 - Headless detection: on a display-less box (no `DISPLAY`), `bot.open()` and
-  the CLI automatically run headless, with a warning.
+  the CLI automatically run headless, with a warning. `open-browser` is the
+  exception — it errors out instead, since a browser nobody can see is useless
+  for manual login.
 - `close_tab` is Playwright-only; `navigate`, `go_back`, `press_key`
   (including `ctrl+w` to close the current tab — reassign the returned page),
   and `scroll` all work. See the full per-platform action matrix in the

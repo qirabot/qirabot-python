@@ -89,10 +89,20 @@ Done: Space Exploration Technologies Corp., doing business as SpaceX, is an
 Every run writes an HTML report with per-step screenshots; `--record`
 captures a video of the whole run.
 
+For sites that need an account, log in once by hand — no API key, no tokens —
+and every later run that reuses the profile starts already signed in:
+
+```bash
+qirabot open-browser --user-data-dir ~/.automation --url news.ycombinator.com/login
+# log in in the window, close it, then:
+qirabot browser "Upvote the top story about Rust" --user-data-dir ~/.automation
+```
+
 <!-- TODO: real-world CLI transcript section here, mirroring README.zh.md's
-     "实战场景：社交媒体运营" (two runs sharing --user-data-dir: first pauses for
-     the user to log in, second reuses the session unattended). Needs a real
-     English-language run — do not translate the Chinese transcript. -->
+     "实战场景：社交媒体运营" (two runs sharing --user-data-dir: first `qirabot
+     open-browser` for the manual login, second reuses the session unattended).
+     Needs a real English-language run — do not translate the Chinese
+     transcript. -->
 
 ## Python SDK
 
