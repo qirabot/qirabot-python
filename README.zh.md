@@ -167,6 +167,26 @@ bot.close()
 
 也无需重写任何代码：将现有的 `page` / `driver` / 设备对象直接传入，即可在原有选择器脚本中混用 AI 步骤（视觉断言、动态控件、逐步脚本化过于繁琐的流程）——Playwright / Selenium / Appium / pyautogui 及内置设备后端均适用，详见[框架集成文档](https://qirabot.com/docs/zh/frameworks/playwright.html)。
 
+## 领域知识：把你的规则教给 AI
+
+模型懂得怎么操作界面，但不懂你游戏里的道具名、你团队的业务术语。把参考文本挂载到任务上，AI 每一步决策都会参考它。CLI 里用 `-k` 传文件，可重复，合计 32KB：
+
+```bash
+qirabot browser "在商城买 10 瓶体力药水" -k game-rules.md -k gm-policy.md
+```
+
+Python 里 `knowledge` 接受字面文本、UTF-8 文件，或两者混合的列表：
+
+```python
+result = bot.ai(
+    device,
+    "完成所有日常任务",
+    knowledge=[Path("game-rules.md"), "GM 命令每局只能使用一次"],
+)
+```
+
+知识按调用挂载：下一次 `bot.ai()` 从零开始，长流程的每个阶段只带自己需要的知识。两个有意为之的限制：不支持 URL——远程内容请自行下载，让鉴权和失败处理留在你的代码里；知识只能*引导*决策——"每局一次"这类硬规则应该写进自定义工具的代码里（见下一节），那里才能真正强制执行。
+
 ## 自定义工具：让 AI 调用你的代码
 
 任务执行中，AI 不只会点击和输入。`custom_tools` 可以把普通 Python 函数注册为模型可调用的工具——调内部 API、查数据库、从邮箱取验证码、造测试数据，或在遇到 CAPTCHA 时暂停等人工处理。工具的名称、描述和参数会自动从函数本身提取：

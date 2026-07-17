@@ -149,6 +149,32 @@ Works the same for Selenium, Appium, pyautogui, and the built-in device
 backends (`AdbDevice`, `WdaClient`, `Window`) — and anything else via a
 7-primitive [custom adapter](https://qirabot.com/docs/backends/custom-adapters.html).
 
+## Domain knowledge: teach the AI your rules
+
+The model knows how to drive a UI — not your game's item names or your team's
+business terms. Mount reference text for the task and the AI consults it at
+every step. From the CLI, `-k` takes a file and repeats, 32KB total:
+
+```bash
+qirabot browser "Buy 10 stamina potions in the shop" -k game-rules.md -k gm-policy.md
+```
+
+From Python, `knowledge` takes literal text, a UTF-8 file, or a list mixing both:
+
+```python
+result = bot.ai(
+    device,
+    "Complete every daily quest",
+    knowledge=[Path("game-rules.md"), "GM commands may be used once per match"],
+)
+```
+
+Knowledge is mounted per call: the next `bot.ai()` starts clean, so each stage
+of a long flow carries only what it needs. Two deliberate limits: no URLs —
+fetch remote sources yourself, so auth and failures stay in your code — and
+knowledge *guides* decisions; hard rules like "once per match" belong in
+custom-tool code (next section), where they can actually be enforced.
+
 ## Custom tools: let the AI call your code
 
 Mid-task, the AI isn't limited to clicking and typing. `custom_tools`

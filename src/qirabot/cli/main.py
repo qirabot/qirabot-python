@@ -6,6 +6,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, NoReturn, TypeVar
 
 import click
@@ -96,6 +97,7 @@ def _run_local(
     instruction: str,
     max_steps: int,
     base_url: str = "",
+    knowledge: str = "",
 ) -> None:
     from rich.console import Console
     from rich.markup import escape
@@ -130,7 +132,10 @@ def _run_local(
             console.print(f"{indent}[dim]└ {escape(step.decision)}[/dim]")
 
     try:
-        result = bot.ai(target, instruction, max_steps=max_steps, on_step=on_step)
+        result = bot.ai(
+            target, instruction, max_steps=max_steps, on_step=on_step,
+            knowledge=knowledge or None,
+        )
     except KeyboardInterrupt:
         # Ctrl+C raises KeyboardInterrupt, which is a BaseException — NOT caught
         # by `except Exception` below. Without this branch the interrupt would
@@ -239,9 +244,35 @@ class _GroupedCommand(click.Command):
                 formatter.write_dl(records)
 
 
+def _resolve_knowledge_cb(
+    ctx: click.Context, param: click.Parameter, value: tuple[Path, ...]
+) -> str:
+    """Resolve --knowledge files into the final text at parse time, so UTF-8 and
+    size errors surface before any task is created or browser/device opened.
+    click.Path already guarantees each file exists."""
+    if not value:
+        return ""
+    from qirabot._knowledge import resolve_knowledge
+
+    try:
+        return resolve_knowledge(list(value))
+    except ValueError as e:
+        raise click.BadParameter(str(e)) from None
+
+
 def _task_options(f: _FC) -> _FC:
     """Task options shared by browser/android/ios/desktop. Applied in reverse so
-    --help lists them in reading order (name, model, language, max-steps)."""
+    --help lists them in reading order (name, model, language, max-steps,
+    knowledge)."""
+    # File paths only, never inline text: argv has no str/Path type split to
+    # declare intent with, and sniffing is off the table (see _knowledge.py).
+    # Inline snippets work through the shell: -k <(printf '...').
+    f = _option(
+        "--knowledge", "-k", group=_TASK_GROUP, multiple=True,
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        callback=_resolve_knowledge_cb,
+        help="Knowledge file the AI consults during the task (UTF-8 text; repeatable, 32KB total)",
+    )(f)
     f = _option("--max-steps", group=_TASK_GROUP, default=20, help="Max steps for AI")(f)
     f = _option("--language", "-l", group=_TASK_GROUP, default="", help="Language (e.g. zh, en)")(f)
     f = _option("--model", "-m", group=_TASK_GROUP, default="", help="Model alias")(f)
@@ -802,6 +833,7 @@ def browser(
     model: str,
     language: str,
     max_steps: int,
+    knowledge: str,
     url: str,
     headless: bool,
     viewport: str,
@@ -839,7 +871,10 @@ def browser(
             args=list(browser_arg) if browser_arg else None,
             cdp_url=cdp_url,
         )
-        _run_local(bot, page, instruction, max_steps, base_url=ctx.obj["base_url"])
+        _run_local(
+            bot, page, instruction, max_steps,
+            base_url=ctx.obj["base_url"], knowledge=knowledge,
+        )
     except Exception as e:
         # Only setup (bot.open) reaches here: _run_local reports its own errors
         # and exits via SystemExit, which this `except Exception` deliberately
@@ -870,6 +905,7 @@ def _run_appium(
     report_dir: str,
     annotate: bool,
     record: bool = False,
+    knowledge: str = "",
 ) -> None:
     """Shared android/ios body: build the bot, open an Appium session, run.
 
@@ -897,7 +933,10 @@ def _run_appium(
             # after a successful run must not be misreported as a task failure.
             _fail_setup(bot, e)
         try:
-            _run_local(bot, driver, instruction, max_steps, base_url=ctx.obj["base_url"])
+            _run_local(
+                bot, driver, instruction, max_steps,
+                base_url=ctx.obj["base_url"], knowledge=knowledge,
+            )
         finally:
             # The Appium recording lives in the session: flush it to disk
             # before quit() destroys it (bot.close() would be too late). A
@@ -923,6 +962,7 @@ def _run_direct(
     record_mjpeg_url: str = "",
     record_device: bool = False,
     record_window: bool = False,
+    knowledge: str = "",
 ) -> None:
     """Shared direct-engine body: build the bot, connect the device, run.
 
@@ -949,7 +989,10 @@ def _run_direct(
             # takes over reporting must be recorded, or the finally:bot.close()
             # would complete the task as succeeded.
             _fail_setup(bot, e)
-        _run_local(bot, target, instruction, max_steps, base_url=ctx.obj["base_url"])
+        _run_local(
+            bot, target, instruction, max_steps,
+            base_url=ctx.obj["base_url"], knowledge=knowledge,
+        )
     finally:
         bot.close()
 
@@ -988,7 +1031,7 @@ def _adb_launch_app(dev: Any, package: str, activity: str) -> None:
 @_option("--record", group="Android options", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (direct engine: adb screenrecord, ffmpeg merges runs over 3 min; Appium engine: Appium's recording API)")
 @_debug_options(record=False)
 @click.pass_context
-def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, report: bool, report_dir: str, annotate: bool) -> None:
+def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, report: bool, report_dir: str, annotate: bool) -> None:
     """Run an AI task on an Android device (direct over adb; --appium-url for Appium).
 
     \b
@@ -1020,7 +1063,7 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
 
         _run_appium(
             ctx, instruction, name, model, language, max_steps, appium_url, options,
-            report, report_dir, annotate, record=record,
+            report, report_dir, annotate, record=record, knowledge=knowledge,
         )
         return
 
@@ -1039,7 +1082,7 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
     _run_direct(
         ctx, instruction, name, model, language, max_steps, connect,
         report, report_dir, annotate,
-        record=record, record_device=record,
+        record=record, record_device=record, knowledge=knowledge,
     )
 
 
@@ -1106,7 +1149,7 @@ def _check_mjpeg_ready(mjpeg_url: str) -> None:
 @_option("--mjpeg-url", group="iOS options", default="", help="WDA MJPEG stream URL for --record (default: --wda-url's host on port 9100; direct engine only)")
 @_debug_options(record=False)
 @click.pass_context
-def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, report: bool, report_dir: str, annotate: bool) -> None:
+def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, report: bool, report_dir: str, annotate: bool) -> None:
     """Run an AI task on an iOS device (direct via WDA; --appium-url/--device for Appium).
 
     \b
@@ -1141,7 +1184,7 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
 
         _run_appium(
             ctx, instruction, name, model, language, max_steps, appium_url, options,
-            report, report_dir, annotate, record=record,
+            report, report_dir, annotate, record=record, knowledge=knowledge,
         )
         return
 
@@ -1165,7 +1208,7 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
     _run_direct(
         ctx, instruction, name, model, language, max_steps, connect,
         report, report_dir, annotate,
-        record=record, record_mjpeg_url=record_mjpeg_url,
+        record=record, record_mjpeg_url=record_mjpeg_url, knowledge=knowledge,
     )
 
 
@@ -1190,7 +1233,7 @@ def _launch_desktop_app(app: str, app_wait: float) -> None:
 @_option("--app-wait", group="Desktop options", default=2.0, type=float, help="Seconds to wait after --app launch for the window to appear")
 @_debug_options()
 @click.pass_context
-def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, window_title: str, hwnd: int, app: str, app_wait: float, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
+def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, window_title: str, hwnd: int, app: str, app_wait: float, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
     """Run an AI task on the desktop (pyautogui; --window-title/--hwnd for one Windows window).
 
     \b
@@ -1236,6 +1279,7 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
         _run_direct(
             ctx, instruction, name, model, language, max_steps, connect,
             report, report_dir, annotate, record=record, record_window=True,
+            knowledge=knowledge,
         )
         return
 
@@ -1253,7 +1297,10 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
         annotate=annotate, record=record, task_name=name or _default_task_name(instruction),
     )
     try:
-        _run_local(bot, pyautogui, instruction, max_steps, base_url=ctx.obj["base_url"])
+        _run_local(
+            bot, pyautogui, instruction, max_steps,
+            base_url=ctx.obj["base_url"], knowledge=knowledge,
+        )
     finally:
         bot.close()
 

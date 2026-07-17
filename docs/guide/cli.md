@@ -38,6 +38,9 @@ qirabot desktop "Create a new note titled Groceries" --app Notes
 qirabot desktop "Open the inventory and list all items" --window-title "Genshin"
 qirabot desktop "..." --hwnd 132456
 
+# Mount domain knowledge for the run — game rules, business terms (32KB total)
+qirabot browser "Buy 10 stamina potions in the shop" -k game-rules.md -k gm-policy.md
+
 # Environment check — what's installed, what's missing, is the server reachable
 qirabot doctor
 
@@ -91,6 +94,7 @@ proceeds on success.
 | `-m, --model` | server default | Model alias (see [Configuration](/advanced/configuration)) |
 | `-l, --language` | server default | Response language, e.g. `zh`, `en` |
 | `--max-steps` | `20` | Step budget for the AI task |
+| `-k, --knowledge` | — | Knowledge file the AI consults during the task (UTF-8 text; repeatable, 32KB total). Same rules as `bot.ai(knowledge=...)`: files only, no URLs — fetch remote sources yourself first |
 | `--report / --no-report` | on | Write an HTML run report |
 | `--report-dir` | `./qira_runs/...` | Report output root (env `QIRA_REPORT_DIR`) |
 | `--annotate / --no-annotate` | on | Crosshair click/type coordinates on saved screenshots |

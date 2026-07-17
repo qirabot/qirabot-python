@@ -811,6 +811,160 @@ class TestRunOptionWiring:
         assert captured["record"] is True
 
 
+class TestKnowledgeOption:
+    """--knowledge/-k: files resolve to text at parse time (before any task is
+    created), merge across repeats, and thread through to bot.ai()."""
+
+    def _capture_run_local(self, monkeypatch):
+        from qirabot.cli import main
+
+        captured = {}
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: MagicMock(name="bot"))
+
+        def spy(bot, target, instruction, max_steps, **kwargs):
+            captured.update(kwargs)
+
+        monkeypatch.setattr(main, "_run_local", spy)
+        return captured
+
+    def test_single_file_resolves_to_text(self, monkeypatch):
+        captured = self._capture_run_local(monkeypatch)
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("rules.md", "w", encoding="utf-8") as f:
+                f.write("GM commands may be used once per match.")
+
+            from qirabot.cli.main import cli
+
+            result = runner.invoke(
+                cli, ["--api-key", "qk", "browser", "do it", "-k", "rules.md"]
+            )
+
+        assert result.exit_code == 0, result.output
+        assert captured["knowledge"] == "GM commands may be used once per match."
+
+    def test_multiple_files_merge_in_order(self, monkeypatch):
+        captured = self._capture_run_local(monkeypatch)
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("a.md", "w", encoding="utf-8") as f:
+                f.write("combat rules")
+            with open("b.md", "w", encoding="utf-8") as f:
+                f.write("gm policy")
+
+            from qirabot.cli.main import cli
+
+            result = runner.invoke(
+                cli,
+                ["--api-key", "qk", "browser", "do it", "-k", "a.md", "-k", "b.md"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert captured["knowledge"] == "combat rules\n\ngm policy"
+
+    def test_omitted_resolves_to_empty(self, monkeypatch):
+        captured = self._capture_run_local(monkeypatch)
+
+        result = _invoke(["browser", "do it"])
+
+        assert result.exit_code == 0, result.output
+        assert captured["knowledge"] == ""
+
+    def test_threads_through_appium_engine(self, fake_appium, monkeypatch):
+        captured = self._capture_run_local(monkeypatch)
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("k.md", "w", encoding="utf-8") as f:
+                f.write("android knowledge")
+
+            from qirabot.cli.main import cli
+
+            result = runner.invoke(
+                cli,
+                [
+                    "--api-key", "qk", "android", "do it",
+                    "--appium-url", "http://localhost:4723", "-k", "k.md",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert captured["knowledge"] == "android knowledge"
+
+    def test_missing_file_fails_before_bot_creation(self, monkeypatch):
+        from qirabot.cli import main
+
+        made = []
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: made.append(1) or MagicMock())
+
+        result = _invoke(["browser", "do it", "-k", "nope.md"])
+
+        assert result.exit_code != 0
+        assert "nope.md" in result.output
+        assert made == []
+
+    def test_over_limit_fails_with_byte_breakdown(self, monkeypatch):
+        from qirabot.cli import main
+
+        made = []
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: made.append(1) or MagicMock())
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("big.md", "w", encoding="utf-8") as f:
+                f.write("x" * (33 * 1024))
+
+            from qirabot.cli.main import cli
+
+            result = runner.invoke(
+                cli, ["--api-key", "qk", "browser", "do it", "-k", "big.md"]
+            )
+
+        assert result.exit_code != 0
+        assert "exceeds the 32768-byte limit" in result.output
+        assert "big.md" in result.output  # names the file to trim
+        assert made == []
+
+    def test_non_utf8_file_fails_with_filename(self, monkeypatch):
+        from qirabot.cli import main
+
+        made = []
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: made.append(1) or MagicMock())
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("bin.md", "wb") as f:
+                f.write(b"\xff\xfe\x00garbage")
+
+            from qirabot.cli.main import cli
+
+            result = runner.invoke(
+                cli, ["--api-key", "qk", "browser", "do it", "-k", "bin.md"]
+            )
+
+        assert result.exit_code != 0
+        assert "not UTF-8" in result.output
+        assert made == []
+
+    def test_run_local_passes_none_when_empty(self):
+        """bot.ai must see knowledge=None (not "") when no -k was given, so the
+        SDK skips knowledge handling entirely."""
+        from qirabot.cli.main import _run_local
+        from qirabot.client import RunResult
+
+        bot = MagicMock(name="bot")
+        bot.task_id = ""
+        bot.ai.return_value = RunResult(success=True, output="done")
+
+        _run_local(bot, object(), "do it", max_steps=20)
+        assert bot.ai.call_args.kwargs["knowledge"] is None
+
+        _run_local(bot, object(), "do it", max_steps=20, knowledge="the rules")
+        assert bot.ai.call_args.kwargs["knowledge"] == "the rules"
+
+
 class TestMobileSplit:
     """`mobile` was split into `android`/`ios`; cross-platform flags are now
     rejected by click itself as unknown options instead of hand-rolled guards."""
