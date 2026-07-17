@@ -10,12 +10,14 @@
 
 ## 效果演示
 
-真实、未剪辑的运行记录——AI 全程只看屏幕画面。点击封面观看（[全部 demo →](https://qirabot.com/?lang=zh#demos)）：
+https://github.com/user-attachments/assets/649ea80c-63e7-4c85-9ee8-3c8fe17e5ef4
 
-[![《梦幻西游》手游：从创号自动玩到 15 级](https://assets.qirabot.com/demos/mhxy_zero_to_15.poster.webp)](https://qirabot.com/?lang=zh#demos)
-
-**《梦幻西游》手游：从创号自动玩到 15 级** — iOS 真机 ·
+**《梦幻西游》手游：从创号自动玩到 15 级** — iOS 真机。
+整个任务指令只有一句话：*"这是梦幻西游手游，你的任务是创建角色，然后完成新手流程，能跳过的尽可能跳过"*。
+上方为单次未剪辑运行的精华片段：[完整 5:50 视频](https://qirabot.com/?lang=zh#demos) ·
 [脚本](examples/game/ios_appium_mmorpg.py)
+
+更多真实、未剪辑的运行记录——AI 全程只看屏幕画面。点击封面观看（[全部 demo →](https://qirabot.com/?lang=zh#demos)）：
 
 <table>
   <tr>
