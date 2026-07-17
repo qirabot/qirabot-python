@@ -108,15 +108,20 @@ qirabot browser "Upvote the top story about Rust" --user-data-dir ~/.automation
 
 The CLI is powered by the same engine. Call `bot.ai()` from Python and the AI
 likewise looks at the screen, decides the next action, and loops until the
-task is done — except the result lands directly in your code:
+task is done — except the result lands directly in your code, with an
+`on_step` callback streaming each action as it happens:
 
 ```python
-from qirabot import Qirabot
+from qirabot import Qirabot, StepResult
 
 bot = Qirabot()
 page = bot.open("https://www.wikipedia.org")
 
-result = bot.ai(page, "Search for SpaceX and get the first sentence of the article")
+def on_step(step: StepResult) -> None:
+    label = "done" if step.finished else step.action_type
+    print(f"  step {step.step}: {label} {step.params}")
+
+result = bot.ai(page, "Search for SpaceX and get the first sentence of the article", on_step=on_step)
 print(f"Success: {result.success}")
 print(f"Result: {result.output}")
 
