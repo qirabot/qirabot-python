@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from collections.abc import Callable
 from typing import Any, NoReturn, TypeVar
 
@@ -404,14 +405,18 @@ def models(ctx: click.Context) -> None:
 
 @cli.command()
 @click.option("--status", is_flag=True, help="Show the configured key (masked) and which layer it comes from")
+@click.option("--paste", is_flag=True, help="Paste an API key manually instead of the browser flow")
 @click.pass_context
-def login(ctx: click.Context, status: bool) -> None:
-    """Save your API key once — every later command picks it up automatically.
+def login(ctx: click.Context, status: bool, paste: bool) -> None:
+    """Log in via the browser — every later command picks the key up automatically.
 
-    Prompts for the key (input hidden), verifies it against the server, and
-    only then writes it to the user config file (chmod 600). Environment
-    variables and ./.env keep working and always take precedence; `login` just
-    removes the need to export anything per shell.
+    Prints a short confirmation code and a URL (opening the browser when one
+    is available), waits for you to click Authorize on the web page, then
+    verifies the resulting API key against the server and writes it to the
+    user config file (chmod 600). The page can be opened on any device — the
+    browser doesn't have to run on this machine. Environment variables and
+    ./.env keep working and always take precedence. Use --paste to enter a
+    key from the dashboard manually instead.
     """
     from qirabot import _userconfig as user_config
 
@@ -431,12 +436,110 @@ def login(ctx: click.Context, status: bool) -> None:
         click.echo(f"API key: {user_config.mask_key(key)}  (from: {origin})")
         return
 
+    if paste:
+        _login_paste(ctx)
+        return
+
+    import platform as platform_mod
+
+    transport = Transport(
+        base_url=ctx.obj["base_url"],
+        api_key="",
+        timeout=min(ctx.obj["timeout"], 10.0),
+        verify_ssl=ctx.obj["verify_ssl"],
+    )
+    try:
+        start = transport.request(
+            "POST", "/auth/cli/start", json_data={"clientName": platform_mod.node()}
+        )
+    except QirabotError as e:
+        # Only a missing route means "older server without browser login".
+        # Connection failures must NOT fall back to paste — the user would
+        # save a key for a server they can't reach and be confused later.
+        if getattr(e, "status_code", None) in (404, 405):
+            click.echo(
+                "This server doesn't support browser login; falling back to manual entry."
+            )
+            _login_paste(ctx)
+            return
+        click.echo(f"Error: could not start browser login ({e})", err=True)
+        sys.exit(1)
+
+    user_code = start.get("userCode", "")
+    uri_complete = start.get("verificationUriComplete") or start.get("verificationUri", "")
+    interval = max(1, int(start.get("interval", 3)))
+    expires_in = int(start.get("expiresIn", 600))
+
+    click.echo()
+    click.echo(f"  Confirmation code: {user_code}")
+    click.echo(f"  Open this page and check the code matches: {uri_complete}")
+    click.echo()
+
+    import webbrowser
+
+    try:
+        webbrowser.open(uri_complete)
+    except Exception:
+        pass  # headless is fine — the URL above works from any device
+
+    from rich.console import Console
+
+    key = ""
+    deadline = time.monotonic() + expires_in
+    with Console().status("Waiting for approval in the browser (Ctrl-C to cancel)..."):
+        while time.monotonic() < deadline:
+            time.sleep(interval)
+            try:
+                res = transport.request(
+                    "POST",
+                    "/auth/cli/poll",
+                    json_data={"deviceCode": start.get("deviceCode", "")},
+                )
+            except QirabotError as e:
+                click.echo(f"Error: {e}", err=True)
+                sys.exit(1)
+            poll_status = res.get("status")
+            if poll_status == "pending":
+                continue
+            if poll_status == "approved":
+                key = res.get("apiKey") or ""
+                break
+            if poll_status == "denied":
+                click.echo(
+                    "Error: the request was denied in the browser; nothing saved.",
+                    err=True,
+                )
+                sys.exit(1)
+            click.echo(
+                "Error: the code expired before approval; run `qirabot login` again.",
+                err=True,
+            )
+            sys.exit(1)
+
+    if not key:
+        click.echo(
+            "Error: timed out waiting for approval; run `qirabot login` again.",
+            err=True,
+        )
+        sys.exit(1)
+
+    _verify_and_save(ctx, key)
+
+
+def _login_paste(ctx: click.Context) -> None:
+    """The pre-2.2 manual flow: prompt for a key pasted from the dashboard."""
     key = click.prompt(
         "API key (qk_..., from https://app.qirabot.com)", hide_input=True
     ).strip()
     if not key:
         raise click.ClickException("empty API key; nothing saved")
-    # Verify BEFORE writing — a typo'd key must not silently poison every
+    _verify_and_save(ctx, key)
+
+
+def _verify_and_save(ctx: click.Context, key: str) -> None:
+    from qirabot import _userconfig as user_config
+
+    # Verify BEFORE writing — an unverified key must not silently poison every
     # later command. Short timeout: this is a diagnostic-grade request.
     try:
         with_transport = Transport(

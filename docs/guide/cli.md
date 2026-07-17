@@ -55,7 +55,7 @@ qirabot models                    # list model aliases
 | `android INSTRUCTION` | Run an AI task on an Android device ([adb direct](/backends/android), built in; `--appium-url` for Appium) |
 | `ios INSTRUCTION` | Run an AI task on an iOS device ([WDA direct](/backends/ios), built in; `--appium-url`/`--device` for Appium) |
 | `desktop INSTRUCTION` | Run an AI task on the [desktop screen](/backends/desktop) (pyautogui; `--window-title`/`--hwnd` binds [one Windows window](/backends/windows-games), built in) |
-| `login` | Save your API key once (`--status` shows the active key, masked) |
+| `login` | Log in via the browser and save the API key (`--paste` for manual entry, `--status` shows the active key, masked) |
 | `install-browser` | One-time Chromium download for the browser backend |
 | `doctor` | Check Python, API key/server, and per-backend dependencies |
 | `task TASK_ID` | Print a task's status, commands, and steps |

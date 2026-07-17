@@ -110,11 +110,11 @@ class TestKeyResolution:
 
 
 # ---------------------------------------------------------------------------
-# login (write path)
+# login --paste (manual write path)
 # ---------------------------------------------------------------------------
 
 
-class TestLogin:
+class TestLoginPaste:
     def _login(self, monkeypatch, key="qk_live_key99", server_ok=True):
         from qirabot.cli import main as cli_main
 
@@ -122,7 +122,7 @@ class TestLogin:
         if not server_ok:
             transport.return_value.request.side_effect = RuntimeError("401 bad key")
         monkeypatch.setattr(cli_main, "Transport", transport)
-        result = CliRunner().invoke(cli_main.cli, ["login"], input=key + "\n")
+        result = CliRunner().invoke(cli_main.cli, ["login", "--paste"], input=key + "\n")
         return result, transport
 
     def test_valid_key_is_verified_then_saved(self, config_home, monkeypatch):
@@ -147,8 +147,119 @@ class TestLogin:
     def test_empty_key_is_rejected(self, config_home, monkeypatch):
         from qirabot.cli.main import cli
 
-        result = CliRunner().invoke(cli, ["login"], input="   \n")
+        result = CliRunner().invoke(cli, ["login", "--paste"], input="   \n")
         assert result.exit_code != 0
+        assert not user_config.config_path().exists()
+
+
+# ---------------------------------------------------------------------------
+# login (default browser device flow)
+# ---------------------------------------------------------------------------
+
+START_RESP = {
+    "deviceCode": "dev_code_123",
+    "userCode": "WDJB-MJHT",
+    "verificationUri": "https://app.example.com/cli-auth",
+    "verificationUriComplete": "https://app.example.com/cli-auth?code=WDJB-MJHT",
+    "expiresIn": 600,
+    "interval": 1,
+}
+
+
+class TestLoginDeviceFlow:
+    def _run(self, monkeypatch, responses, args=("login",), input=None):
+        """Invoke login with a Transport whose request() replays `responses`."""
+        import webbrowser
+
+        from qirabot.cli import main as cli_main
+
+        transport = MagicMock(name="Transport")
+        transport.return_value.request.side_effect = responses
+        monkeypatch.setattr(cli_main, "Transport", transport)
+        monkeypatch.setattr(cli_main.time, "sleep", lambda s: None)
+        opened = []
+        monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url))
+        result = CliRunner().invoke(cli_main.cli, list(args), input=input)
+        return result, transport, opened
+
+    def test_happy_path_polls_then_saves(self, config_home, monkeypatch):
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        result, transport, opened = self._run(
+            monkeypatch,
+            [
+                START_RESP,
+                {"status": "pending"},
+                {"status": "pending"},
+                {"status": "approved", "apiKey": "qk_devicekey99"},
+                {"modelAliases": []},  # GET /model-aliases verification
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "WDJB-MJHT" in result.output
+        assert opened == [START_RESP["verificationUriComplete"]]
+        assert user_config.load_api_key() == "qk_devicekey99"
+        # last Transport was constructed with the delivered key for verification
+        assert transport.call_args.kwargs["api_key"] == "qk_devicekey99"
+
+    def test_old_server_404_falls_back_to_paste(self, config_home, monkeypatch):
+        from qirabot.exceptions import QirabotError
+
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        result, _, _ = self._run(
+            monkeypatch,
+            [QirabotError("not found", status_code=404), {"modelAliases": []}],
+            input="qk_pasted_key99\n",
+        )
+        assert result.exit_code == 0, result.output
+        assert "doesn't support browser login" in result.output
+        assert user_config.load_api_key() == "qk_pasted_key99"
+
+    def test_connection_error_does_not_fall_back(self, config_home, monkeypatch):
+        from qirabot.exceptions import QirabotConnectionError
+
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        result, _, _ = self._run(
+            monkeypatch, [QirabotConnectionError("cannot connect")]
+        )
+        assert result.exit_code == 1
+        assert "could not start browser login" in result.output
+        assert not user_config.config_path().exists()
+
+    def test_denied_saves_nothing(self, config_home, monkeypatch):
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        result, _, _ = self._run(monkeypatch, [START_RESP, {"status": "denied"}])
+        assert result.exit_code == 1
+        assert "denied" in result.output
+        assert not user_config.config_path().exists()
+
+    def test_expired_saves_nothing(self, config_home, monkeypatch):
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        result, _, _ = self._run(monkeypatch, [START_RESP, {"status": "expired"}])
+        assert result.exit_code == 1
+        assert "expired" in result.output
+        assert not user_config.config_path().exists()
+
+    def test_timeout_saves_nothing(self, config_home, monkeypatch):
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        start = dict(START_RESP, expiresIn=0)  # deadline already passed
+        result, _, _ = self._run(monkeypatch, [start])
+        assert result.exit_code == 1
+        assert "timed out" in result.output
+        assert not user_config.config_path().exists()
+
+    def test_delivered_key_still_verified_before_save(self, config_home, monkeypatch):
+        # Even a server-minted key must pass verification before persisting.
+        monkeypatch.delenv("QIRA_API_KEY", raising=False)
+        result, _, _ = self._run(
+            monkeypatch,
+            [
+                START_RESP,
+                {"status": "approved", "apiKey": "qk_devicekey99"},
+                RuntimeError("verify blew up"),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "nothing saved" in result.output
         assert not user_config.config_path().exists()
 
 

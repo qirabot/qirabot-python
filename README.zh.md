@@ -56,7 +56,7 @@ pip、虚拟环境、各框架 extras 与故障排查见[安装指南](https://q
 
 ## 快速上手
 
-先保存一次 API key（在[控制台](https://app.qirabot.com)获取）：
+先登录一次——会打开浏览器完成授权并在本地保存 API key（无头服务器上可用任意设备打开打印出的链接；也可用 `--paste` 手动粘贴[控制台](https://app.qirabot.com)里的 key）：
 
 ```bash
 qirabot login

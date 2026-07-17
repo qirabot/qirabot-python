@@ -9,11 +9,11 @@ description: 两条命令跑通第一个 AI 驱动的 GUI 自动化任务,再用
 以及 **Python SDK**。即使你是冲着 SDK 来的,也建议先用 CLI 跑一条——一行
 命令即可验证环境。(无需配置任何模型 API key——视觉模型托管在服务端。)
 
-两条命令——先保存 API key(从[控制台](https://app.qirabot.com)获取,只需
-一次),然后把任务交给 AI:
+两条命令——先登录一次(自动打开浏览器完成授权;无头机器上用任意设备
+打开打印出的链接即可),然后把任务交给 AI:
 
 ```bash
-qirabot login      # 粘贴一次 key;校验后保存,之后每次运行自动读取
+qirabot login      # 浏览器授权;校验后保存,之后每次运行自动读取
 qirabot browser "搜索 SpaceX 并提取词条的第一句话" --url wikipedia.org
 ```
 

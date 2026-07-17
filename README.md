@@ -65,8 +65,9 @@ missing (with the exact fix), and whether your API key reaches the server.
 
 ## Quick Start
 
-Save your API key once (get it from your
-[dashboard](https://app.qirabot.com)):
+Log in once — this opens your browser to authorize the CLI and saves an
+API key locally (on a headless server, open the printed URL from any device;
+`--paste` enters a key from your [dashboard](https://app.qirabot.com) manually):
 
 ```bash
 qirabot login

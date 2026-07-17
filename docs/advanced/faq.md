@@ -8,7 +8,7 @@ description: Do you need your own model API key, which calls are billed, why rec
 ## Do I need my own model API key (OpenAI, Anthropic, …)?
 
 No. The vision models are hosted on Qirabot's servers — run `qirabot login`
-once with your Qirabot key and every run works. There are no model endpoints
+once (browser authorization) and every run works. There are no model endpoints
 or env-var matrices to configure; you pick a quality tier per call or per bot
 with a [model alias](/advanced/configuration#model-language) (`fast` ·
 `balanced` · `balanced_pro` · `high_quality`).

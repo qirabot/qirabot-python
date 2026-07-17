@@ -10,11 +10,11 @@ shell command, no code — and the **Python SDK**. Start with the CLI even if
 you came for the SDK: it proves your setup in one line. (No model API keys
 to configure — the vision models are hosted server-side.)
 
-Two commands — save your API key once (get it from your
-[dashboard](https://app.qirabot.com)), then hand the AI a task:
+Two commands — log in once (opens your browser to authorize; on a headless
+box, open the printed URL from any device), then hand the AI a task:
 
 ```bash
-qirabot login      # paste the key once; verified, stored, picked up by every later run
+qirabot login      # browser authorization; verified, stored, picked up by every later run
 qirabot browser "Search for SpaceX and get the first sentence of the article" --url wikipedia.org
 ```
 
