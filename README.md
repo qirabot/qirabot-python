@@ -13,7 +13,9 @@ Run it standalone (`bot.open()` launches a browser for you; Android / iOS / Wind
 https://github.com/user-attachments/assets/649ea80c-63e7-4c85-9ee8-3c8fe17e5ef4
 
 **Play an MMORPG from zero to level 15, hands-free** — iOS real device.
-Highlights cut from a single unedited run:
+The entire task prompt is one sentence: *"This is Fantasy Westward Journey
+mobile. Create a character, then complete the new-player flow; skip whatever
+can be skipped."* Highlights cut from a single unedited run:
 [full 5:50 video](https://qirabot.com/#demos) ·
 [script](examples/game/ios_appium_mmorpg.py)
 
