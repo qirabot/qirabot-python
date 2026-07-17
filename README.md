@@ -10,16 +10,15 @@ Run it standalone (`bot.open()` launches a browser for you; Android / iOS / Wind
 
 ## See it work
 
-<!-- TODO: hero video — drag a <10MB mp4 into the GitHub web editor here so it
-     plays inline (github.com user-attachments; external mp4 URLs don't render). -->
+https://github.com/user-attachments/assets/649ea80c-63e7-4c85-9ee8-3c8fe17e5ef4
 
-Real, unedited runs — the AI sees only pixels. Click a poster to watch
-([all demos →](https://qirabot.com/#demos)):
-
-[![Play an MMORPG from zero to level 15, hands-free](https://assets.qirabot.com/demos/mhxy_zero_to_15.poster.webp)](https://qirabot.com/#demos)
-
-**Play an MMORPG from zero to level 15, hands-free** — iOS real device ·
+**Play an MMORPG from zero to level 15, hands-free** — iOS real device.
+Highlights cut from a single unedited run:
+[full 5:50 video](https://qirabot.com/#demos) ·
 [script](examples/game/ios_appium_mmorpg.py)
+
+More real, unedited runs — the AI sees only pixels. Click a poster to watch
+([all demos →](https://qirabot.com/#demos)):
 
 <table>
   <tr>
