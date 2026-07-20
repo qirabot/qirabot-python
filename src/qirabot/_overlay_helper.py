@@ -26,7 +26,7 @@ import sys
 import threading
 import time
 
-_WIDTH, _HEIGHT, _MARGIN = 340, 64, 24
+_WIDTH, _HEIGHT, _MARGIN = 340, 88, 24
 
 
 def _read_stdin(on_text):

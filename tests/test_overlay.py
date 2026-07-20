@@ -204,7 +204,8 @@ def test_format_step_clips_long_text():
     )
     head, decision = text.split("\n")
     assert len(head) <= 60 and head.endswith("…")
-    assert len(decision) <= 60 and decision.endswith("…")
+    # The decision gets two wrapped lines' worth of budget.
+    assert len(decision) <= 120 and decision.endswith("…")
 
 
 def test_format_step_type_text_and_scroll():

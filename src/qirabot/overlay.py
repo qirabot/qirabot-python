@@ -41,7 +41,9 @@ def _format_step(step: Any) -> str:
     lines = [_clip(" · ".join(str(p) for p in head_parts))]
     decision = getattr(step, "decision", "")
     if decision:
-        lines.append(_clip(decision))
+        # The window is three text lines tall: one for the action head,
+        # two for the decision (it word-wraps inside the label).
+        lines.append(_clip(decision, 2 * _MAX_LINE))
     return "\n".join(lines)
 
 
