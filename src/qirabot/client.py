@@ -180,6 +180,46 @@ class ExtractResult(str):
         )
 
 
+@dataclass
+class LocateResult:
+    """Result of bot.locate(): the resolved element coordinates.
+
+    ``x``/``y`` are in the adapter's screenshot pixel space — window-relative
+    client pixels on the Windows window backend, physical screen pixels on
+    pyautogui, device pixels on mobile backends. They match what you see in
+    the report screenshots and what the same adapter's own actions use, but
+    are not necessarily OS-global coordinates.
+
+    Supports tuple unpacking: ``x, y = bot.locate(...)``.
+
+    WARNING: the vision resolver returns coordinates even when the element is
+    absent from the screen — such coordinates are meaningless. Gate with
+    ``timeout=`` (auto-wait) or :meth:`Qirabot.verify`/:meth:`Qirabot.wait_for`
+    when presence is not guaranteed.
+    """
+
+    x: int
+    y: int
+    input_tokens: int = 0
+    output_tokens: int = 0
+    thinking_tokens: int = 0
+
+    def __iter__(self) -> Iterator[int]:
+        yield self.x
+        yield self.y
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LocateResult:
+        params = data.get("params") or {}
+        return cls(
+            x=int(round(float(params.get("x", 0)))),
+            y=int(round(float(params.get("y", 0)))),
+            input_tokens=data.get("inputTokens", 0),
+            output_tokens=data.get("outputTokens", 0),
+            thinking_tokens=data.get("thinkingTokens", 0),
+        )
+
+
 # How a bot.ai() run ended. "max_steps" matches the server's task-level
 # max_steps event name; the server itself records the command as plain
 # "failed", so this is the SDK's finer-grained local view.
@@ -914,6 +954,48 @@ class Qirabot:
         )
         self._accumulate_stats(result)
         return VerifyResult.from_dict(result)
+
+    def locate(
+        self,
+        target: Any,
+        locate: str,
+        *,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> LocateResult:
+        """Resolve an element description to coordinates without acting.
+
+        Returns a :class:`LocateResult` whose ``x``/``y`` are in the adapter's
+        screenshot pixel space (window-relative on the Windows window backend,
+        physical screen pixels on pyautogui, device pixels on mobile). Supports
+        tuple unpacking: ``x, y = bot.locate(page, "the OK button")``. Nothing
+        is clicked or typed — feed the coordinates to your own framework calls.
+
+        When ``timeout > 0``, auto-waits until the element looks present before
+        locating, with the same semantics as :meth:`click` (``wait`` overrides
+        the polled assertion; each poll is an LLM verify call and billed as
+        such). The locate itself is a single vision call.
+
+        WARNING: the resolver returns coordinates even for elements that are
+        not on screen, and those coordinates are unreliable. Pass ``timeout``
+        or check with :meth:`verify`/:meth:`wait_for` first when presence is
+        not guaranteed.
+        """
+        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        result = self._ai_action(
+            target,
+            action={"type": "locate", "params": {"locate": locate}},
+            model_alias=model_alias,
+            language=language,
+            execute_result=False,
+            retry=retry,
+        )
+        self._accumulate_stats(result)
+        return LocateResult.from_dict(result)
 
     def _accumulate_stats(self, result: dict[str, Any]) -> None:
         """Fold a one-shot /act result's usage into the run stats.

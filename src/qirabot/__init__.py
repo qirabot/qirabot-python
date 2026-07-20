@@ -11,6 +11,7 @@ from qirabot.wda import WdaClient
 from qirabot.windows import Window
 from qirabot.client import (
     ExtractResult,
+    LocateResult,
     Qirabot,
     RunResult,
     RunStatus,
@@ -54,6 +55,7 @@ __all__ = [
     "ExtractResult",
     "ScreenshotConfig",
     "InsufficientBalanceError",
+    "LocateResult",
     "MissingDependencyError",
     "MjpegStreamRecorder",
     "Qirabot",

@@ -9,6 +9,7 @@ import pytest
 from qirabot.adapters.base import DeviceAdapter, DeviceInfo, ScreenshotConfig
 from qirabot.client import (
     ExtractResult,
+    LocateResult,
     Qirabot,
     StepResult,
     RunResult,
@@ -144,6 +145,80 @@ class TestExtractResult:
         assert r == ""
         assert r.input_tokens == 0
         assert r.output_tokens == 0
+
+
+class TestLocateResult:
+    def test_from_dict(self):
+        r = LocateResult.from_dict({
+            "params": {"locate": "OK button", "x": 100.6, "y": 200},
+            "inputTokens": 10,
+            "outputTokens": 5,
+            "thinkingTokens": 2,
+        })
+        assert r.x == 101
+        assert r.y == 200
+        assert isinstance(r.x, int)
+        assert r.input_tokens == 10
+        assert r.output_tokens == 5
+        assert r.thinking_tokens == 2
+
+    def test_from_dict_empty(self):
+        r = LocateResult.from_dict({})
+        assert r.x == 0
+        assert r.y == 0
+        assert r.input_tokens == 0
+
+    def test_tuple_unpacking(self):
+        x, y = LocateResult(x=10, y=20)
+        assert (x, y) == (10, 20)
+
+
+class TestQirabotLocate:
+    def _make_mocked_bot(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        bot._get_adapter = MagicMock(return_value=MagicMock())
+        bot._ai_action = MagicMock(return_value={
+            "success": True,
+            "actionType": "locate",
+            "params": {"locate": "OK button", "x": 100, "y": 200},
+            "finished": True,
+            "inputTokens": 0,
+            "outputTokens": 0,
+        })
+        return bot
+
+    def test_builds_locate_action_and_skips_execution(self):
+        bot = self._make_mocked_bot()
+        bot.locate("target", "OK button")
+        ca = bot._ai_action.call_args
+        action = ca.kwargs.get("action") or ca[1].get("action") or ca[0][1]
+        assert action["type"] == "locate"
+        assert action["params"] == {"locate": "OK button"}
+        assert ca.kwargs.get("execute_result") is False
+        bot.close()
+
+    def test_returns_coords(self):
+        bot = self._make_mocked_bot()
+        r = bot.locate("target", "OK button")
+        assert isinstance(r, LocateResult)
+        assert (r.x, r.y) == (100, 200)
+        x, y = bot.locate("target", "OK button")
+        assert (x, y) == (100, 200)
+        bot.close()
+
+    def test_timeout_polls_wait_for(self):
+        bot = self._make_mocked_bot()
+        bot.wait_for = MagicMock()
+        bot.locate("target", "OK button", timeout=5, interval=1)
+        assert bot.wait_for.call_count == 1
+        bot.close()
+
+    def test_no_timeout_skips_wait_for(self):
+        bot = self._make_mocked_bot()
+        bot.wait_for = MagicMock()
+        bot.locate("target", "OK button")
+        bot.wait_for.assert_not_called()
+        bot.close()
 
 
 class TestRunResult:

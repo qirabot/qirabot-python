@@ -130,7 +130,9 @@ bot.close()
 
 Prefer to drive each step yourself? The same natural-language targeting works
 as single-step calls — `bot.click(page, "Login button")`,
-`bot.extract(...)`, `bot.verify(...)` — with your code in control.
+`bot.extract(...)`, `bot.verify(...)` — with your code in control. Need just
+the coordinates? `x, y = bot.locate(page, "the OK button")` resolves an
+element without acting, so you can feed them to your own framework calls.
 
 ## Bolt onto your existing stack
 

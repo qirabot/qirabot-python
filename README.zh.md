@@ -146,7 +146,7 @@ print(f"Result: {result.output}")
 bot.close()
 ```
 
-想自己控制每一步？同样的自然语言定位也能按单步调用——`bot.click(page, "登录按钮")`、`bot.extract(...)`、`bot.verify(...)`——流程由你的代码掌控。
+想自己控制每一步？同样的自然语言定位也能按单步调用——`bot.click(page, "登录按钮")`、`bot.extract(...)`、`bot.verify(...)`——流程由你的代码掌控。只想要坐标？`x, y = bot.locate(page, "确定按钮")` 只定位不执行，坐标可直接喂给你自己的框架调用。
 
 也无需重写任何代码：将现有的 `page` / `driver` / 设备对象直接传入，即可在原有选择器脚本中混用 AI 步骤（视觉断言、动态控件、逐步脚本化过于繁琐的流程）——Playwright / Selenium / Appium / pyautogui 及内置设备后端均适用，详见[框架集成文档](https://qirabot.com/docs/zh/frameworks/playwright.html)。
 

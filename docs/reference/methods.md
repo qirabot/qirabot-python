@@ -1,6 +1,6 @@
 ---
 title: Method Reference — Signatures, Parameters & Returns
-description: Full signature of every Qirabot method - click, type_text, extract, verify, wait_for, ai, open, bind, press_key, scroll, recording and lifecycle calls, and the result objects with token usage fields.
+description: Full signature of every Qirabot method - click, type_text, extract, verify, locate, wait_for, ai, open, bind, press_key, scroll, recording and lifecycle calls, and the result objects with token usage fields.
 ---
 
 # Method Reference
@@ -200,6 +200,38 @@ Visual assertion. A failed check doesn't raise — the result
 [is truthy/falsy](#verifyresult) with a `.reason`; transport/server errors
 still raise.
 
+### locate()
+
+```python
+locate(target, locate, *, timeout=0.0, interval=2.0, wait="",
+       retry=None, model_alias="", language="") -> LocateResult
+```
+
+Resolves a natural-language element description to coordinates **without
+acting** — nothing is clicked or typed. Returns a
+[`LocateResult`](#locateresult) that unpacks as a tuple:
+
+```python
+x, y = bot.locate(page, "the OK button")
+page.mouse.click(x, y)   # drive your own framework with the coordinates
+```
+
+Coordinates are in the **adapter's screenshot pixel space**: window-relative
+client pixels on the Windows window backend, physical screen pixels on
+pyautogui, device pixels on mobile — the same space the bot's own actions
+use, and what you see in the report screenshots, but not necessarily
+OS-global coordinates.
+
+Billing: the locate itself is a single vision call (no LLM tokens). With
+`timeout > 0` it auto-waits first, same semantics as `click()` — each poll
+is an LLM verify call and billed as such.
+
+::: warning Absent elements
+The vision resolver returns coordinates even when the element is **not on
+screen**, and those coordinates are unreliable. When presence isn't
+guaranteed, pass `timeout=` or check with `verify()` / `wait_for()` first.
+:::
+
 ### wait_for()
 
 ```python
@@ -323,3 +355,13 @@ Returned by `verify()` — truthy when the assertion holds, so it drops
 straight into `assert` / `if`. Fields: `passed` (`bool`), `reason` (the
 model's explanation — worth logging when an assertion fails unexpectedly),
 and the same three token fields as `ExtractResult`.
+
+### LocateResult
+
+Returned by [`locate()`](#locate). Unpacks as a tuple:
+`x, y = bot.locate(...)`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `x` / `y` | `int` | Resolved coordinates, in the adapter's screenshot pixel space |
+| `input_tokens` / `output_tokens` / `thinking_tokens` | `int` | LLM token usage — currently `0` (locate bills as one vision call) |

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable
 if TYPE_CHECKING:
     from qirabot.client import (
         ExtractResult,
+        LocateResult,
         Qirabot,
         RunResult,
         StepResult,
@@ -218,6 +219,28 @@ class _BoundQirabot:
     ) -> VerifyResult:
         return self._bot.verify(
             self._target, assertion, retry=retry, model_alias=model_alias, language=language
+        )
+
+    def locate(
+        self,
+        locate: str,
+        *,
+        timeout: float = 0.0,
+        interval: float = 2.0,
+        wait: str = "",
+        retry: int | None = None,
+        model_alias: str = "",
+        language: str = "",
+    ) -> LocateResult:
+        return self._bot.locate(
+            self._target,
+            locate,
+            timeout=timeout,
+            interval=interval,
+            wait=wait,
+            retry=retry,
+            model_alias=model_alias,
+            language=language,
         )
 
     def wait_for(
