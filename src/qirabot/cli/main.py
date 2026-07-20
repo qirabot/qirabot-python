@@ -62,6 +62,7 @@ def _make_bot(
     record_device: bool = False,
     record_window: bool = False,
     task_name: str = "",
+    overlay: bool = False,
 ) -> Any:
     from qirabot import Qirabot
 
@@ -83,6 +84,7 @@ def _make_bot(
             record_mjpeg_url=record_mjpeg_url or None,
             record_device=record_device,
             record_window=record_window,
+            overlay=overlay,
         )
     except Exception as e:
         # No special-casing needed: Transport already maps connection failures to
@@ -1023,6 +1025,7 @@ def _run_direct(
     record_device: bool = False,
     record_window: bool = False,
     knowledge: str = "",
+    overlay: bool = False,
 ) -> None:
     """Shared direct-engine body: build the bot, connect the device, run.
 
@@ -1039,7 +1042,7 @@ def _run_direct(
         ctx, model=model, language=language, report=report, report_dir=report_dir,
         annotate=annotate, record=record, record_mjpeg_url=record_mjpeg_url,
         record_device=record_device, record_window=record_window,
-        task_name=name or _default_task_name(instruction),
+        task_name=name or _default_task_name(instruction), overlay=overlay,
     )
     try:
         try:
@@ -1291,9 +1294,10 @@ def _launch_desktop_app(app: str, app_wait: float) -> None:
 # Desktop — app launch
 @_option("--app", group="Desktop options", default="", help="Launch/activate an app before the task. macOS: app name (\"WeChat\") or bundle id; Windows: exe path, registered name, or UWP AppUserModelID; Linux: executable.")
 @_option("--app-wait", group="Desktop options", default=2.0, type=float, help="Seconds to wait after --app launch for the window to appear")
+@_option("--overlay", group="Desktop options", is_flag=True, help="Show task progress in a small bottom-right window — excluded from screenshots, click-through (macOS/Windows)")
 @_debug_options()
 @click.pass_context
-def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, window_title: str, hwnd: int, app: str, app_wait: float, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
+def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, window_title: str, hwnd: int, app: str, app_wait: float, overlay: bool, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
     """Run an AI task on the desktop (pyautogui; --window-title/--hwnd for one Windows window).
 
     \b
@@ -1339,7 +1343,7 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
         _run_direct(
             ctx, instruction, name, model, language, max_steps, connect,
             report, report_dir, annotate, record=record, record_window=True,
-            knowledge=knowledge,
+            knowledge=knowledge, overlay=overlay,
         )
         return
 
@@ -1355,6 +1359,7 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
     bot = _make_bot(
         ctx, model=model, language=language, report=report, report_dir=report_dir,
         annotate=annotate, record=record, task_name=name or _default_task_name(instruction),
+        overlay=overlay,
     )
     try:
         _run_local(

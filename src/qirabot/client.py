@@ -35,6 +35,7 @@ from qirabot.exceptions import (
     TaskTerminatedError,
     _is_retryable,
 )
+from qirabot.overlay import Overlay
 
 logger = logging.getLogger("qirabot")
 
@@ -289,6 +290,7 @@ class Qirabot:
         record_device: bool = False,
         heartbeat: bool = True,
         sync_local_steps: bool = True,
+        overlay: bool = False,
     ):
         # Same last-resort fallback as the CLI: the `qirabot login` config file.
         # Explicit param and env var stay ahead of it, so nothing changes for
@@ -315,6 +317,9 @@ class Qirabot:
         self._task_name = task_name
         self._external_task = bool(task_id)
         self._closed = False
+        # On-screen progress window (capture-excluded, click-through); a no-op
+        # on unsupported platforms, so gating here is on intent alone.
+        self._overlay: Overlay | None = Overlay() if overlay else None
         # Set once a terminal status has been reported to the server (success via
         # close() or failure via fail()), so close()'s default success-complete
         # never overrides an already-reported failure.
@@ -1085,6 +1090,8 @@ class Qirabot:
         if runs > 1:
             section = f"{section} #{runs}"
         self._current_section = section
+        if self._overlay is not None:
+            self._overlay.set_text(f"▶ {instruction}")
         try:
             result = self._ai_loop(
                 target,
@@ -1281,6 +1288,8 @@ class Qirabot:
             self._stats["step_duration_ms"] += step_result.step_duration_ms
             self._stats["llm_decision_duration_ms"] += step_result.llm_decision_duration_ms
 
+            if self._overlay is not None:
+                self._overlay.step(step_result)
             if on_step:
                 on_step(step_result)
 
@@ -2169,6 +2178,10 @@ class Qirabot:
         if self._closed:
             return
         self._closed = True
+        # Take the progress window down first — it should vanish the moment
+        # the run is over, not linger through report/recording teardown.
+        if self._overlay is not None:
+            self._overlay.close()
         # Stop the heartbeat first so no beat is in flight when the transport
         # closes below; the thread is a daemon, so a stuck request can only
         # cost the 2s join grace, never hang shutdown.

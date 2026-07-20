@@ -18,6 +18,7 @@ from qirabot.client import (
     StepResult,
     VerifyResult,
 )
+from qirabot.overlay import Overlay
 from qirabot.exceptions import (
     ActionError,
     AuthenticationError,
@@ -58,6 +59,7 @@ __all__ = [
     "LocateResult",
     "MissingDependencyError",
     "MjpegStreamRecorder",
+    "Overlay",
     "Qirabot",
     "QirabotConnectionError",
     "QirabotError",
