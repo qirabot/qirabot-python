@@ -42,7 +42,12 @@ Issues = "https://github.com/qirabot/qirabot-python/issues"
 
 [project.optional-dependencies]
 browser = ["playwright>=1.40,<2.0"]
-desktop = ["pyautogui>=0.9.54", "pyperclip>=1.8"]
+desktop = [
+    "pyautogui>=0.9.54",
+    "pyperclip>=1.8",
+    # The progress overlay window on macOS (Windows uses stdlib tkinter).
+    "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
+]
 appium = ["Appium-Python-Client>=4.0"]
 agent = ["uvicorn>=0.30", "starlette>=0.37"]
 all = ["qirabot[browser,desktop,appium]"]

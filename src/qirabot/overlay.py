@@ -123,6 +123,12 @@ class Overlay:
         """``on_step``-compatible: render a StepResult into the window."""
         self.set_text(_format_step(step))
 
+    def finish(self, success: bool, message: str = "") -> None:
+        """Show the run's final outcome; stays up until close()."""
+        glyph = "✓" if success else "✗"
+        text = f"{glyph} {_clip(message, 2 * _MAX_LINE)}" if message else glyph
+        self.set_text(text)
+
     def wrap(
         self, on_step: Callable[[Any], None] | None
     ) -> Callable[[Any], None]:
@@ -136,13 +142,17 @@ class Overlay:
 
         return chained
 
-    def close(self) -> None:
+    def close(self, linger: float = 0.0) -> None:
+        """Tear the window down; ``linger`` keeps it up that many seconds
+        first, so a final finish() text is readable before it vanishes."""
         proc, self._proc = self._proc, None
         if proc is None:
             return
         if proc.stdin is not None:
             try:
-                proc.stdin.write(b'{"cmd": "close"}\n')
+                proc.stdin.write(
+                    (json.dumps({"cmd": "close", "linger": linger}) + "\n").encode()
+                )
                 proc.stdin.flush()
             except Exception:
                 pass
@@ -155,7 +165,7 @@ class Overlay:
                 except Exception:
                     pass
         try:
-            proc.wait(timeout=2)
+            proc.wait(timeout=linger + 2)
         except Exception:
             try:
                 proc.kill()

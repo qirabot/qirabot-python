@@ -6,8 +6,9 @@ the GUI to own the process main thread, which the user's script already
 occupies — a thread cannot host AppKit, a child process can.
 
 Protocol: one JSON object per stdin line.
-    {"text": "..."}   replace the window text
-    {"cmd": "close"}  exit
+    {"text": "..."}                  replace the window text
+    {"cmd": "close", "linger": 1.5}  exit after `linger` seconds (default 0),
+                                     so the final ✓/✗ text is readable
 stdin EOF also exits, so a dying parent can never leave the window behind.
 
 The window is excluded from screen capture (macOS: NSWindowSharingNone,
@@ -23,20 +24,30 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 
 _WIDTH, _HEIGHT, _MARGIN = 340, 64, 24
 
 
-def _messages():
-    """Yield parsed stdin messages until EOF or an explicit close command."""
+def _read_stdin(on_text):
+    """Feed stdin texts to ``on_text``; return the close command's linger
+    seconds (0.0 on EOF or a malformed value)."""
     for raw in sys.stdin:
         try:
             msg = json.loads(raw)
         except ValueError:
             continue
-        if not isinstance(msg, dict) or msg.get("cmd") == "close":
-            return
-        yield msg
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("cmd") == "close":
+            try:
+                return max(0.0, float(msg.get("linger", 0)))
+            except (TypeError, ValueError):
+                return 0.0
+        text = msg.get("text")
+        if text is not None:
+            on_text(str(text))
+    return 0.0
 
 
 def _run_macos() -> int:
@@ -105,12 +116,13 @@ def _run_macos() -> int:
     bridge = _Bridge.alloc().init()
 
     def reader() -> None:
-        for msg in _messages():
-            text = msg.get("text")
-            if text is not None:
-                bridge.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "update:", str(text), False
-                )
+        linger = _read_stdin(
+            lambda text: bridge.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "update:", text, False
+            )
+        )
+        if linger:
+            time.sleep(linger)
         bridge.performSelectorOnMainThread_withObject_waitUntilDone_(
             "quit:", None, False
         )
@@ -167,23 +179,20 @@ def _run_windows() -> int:
     )
 
     q: queue.Queue = queue.Queue()
-    _CLOSE = object()
+    _CLOSE = "close"
 
     def reader() -> None:
-        for msg in _messages():
-            text = msg.get("text")
-            if text is not None:
-                q.put(str(text))
-        q.put(_CLOSE)
+        linger = _read_stdin(lambda text: q.put(("text", text)))
+        q.put((_CLOSE, linger))
 
     def poll() -> None:
         try:
             while True:
-                item = q.get_nowait()
-                if item is _CLOSE:
-                    root.destroy()
+                kind, value = q.get_nowait()
+                if kind is _CLOSE:
+                    root.after(int(value * 1000), root.destroy)
                     return
-                label.config(text=item)
+                label.config(text=value)
         except queue.Empty:
             pass
         root.after(100, poll)

@@ -102,7 +102,7 @@ def test_close_sends_command_and_closes_stdin(fake_spawn):
     ov.set_text("x")
     ov.close()
     proc = fake_spawn[0]
-    assert _sent_lines(proc)[-1] == {"cmd": "close"}
+    assert _sent_lines(proc)[-1] == {"cmd": "close", "linger": 0.0}
     assert proc.stdin.closed
     # Close is idempotent and post-close sends must not respawn silently
     # against a dead handle.
@@ -160,6 +160,22 @@ def test_spawn_failure_degrades_to_noop(monkeypatch):
     assert len(calls) == 1  # failed once, then stopped trying
 
 
+def test_finish_shows_outcome(fake_spawn):
+    ov = Overlay()
+    ov.finish(True, "Note created")
+    ov.finish(False, "")
+    lines = _sent_lines(fake_spawn[0])
+    assert lines[0] == {"text": "✓ Note created"}
+    assert lines[1] == {"text": "✗"}
+
+
+def test_close_forwards_linger(fake_spawn):
+    ov = Overlay()
+    ov.set_text("x")
+    ov.close(linger=1.5)
+    assert _sent_lines(fake_spawn[0])[-1] == {"cmd": "close", "linger": 1.5}
+
+
 def test_wrap_chains_user_callback(fake_spawn):
     ov = Overlay()
     seen = []
@@ -179,7 +195,7 @@ def test_context_manager_spawns_and_closes(fake_spawn):
     with Overlay() as ov:
         ov.set_text("running")
     proc = fake_spawn[0]
-    assert _sent_lines(proc)[-1] == {"cmd": "close"}
+    assert _sent_lines(proc)[-1] == {"cmd": "close", "linger": 0.0}
 
 
 def test_format_step_clips_long_text():

@@ -1107,6 +1107,8 @@ class Qirabot:
             self._section_outcomes[self._current_section] = result.status
             self._last_ai_status = result.status
             self._last_ai_error = result.output if result.status == "error" else ""
+            if self._overlay is not None:
+                self._overlay.finish(result.success, result.output or result.status)
             return result
         except Exception as e:
             # Any exception on the way out — ActionError, timeout, adapter
@@ -1114,6 +1116,8 @@ class Qirabot:
             self._section_outcomes[self._current_section] = "error"
             self._last_ai_status = "error"
             self._last_ai_error = str(e)
+            if self._overlay is not None:
+                self._overlay.finish(False, str(e))
             raise
         finally:
             self._current_section = prev_section
@@ -2178,10 +2182,11 @@ class Qirabot:
         if self._closed:
             return
         self._closed = True
-        # Take the progress window down first — it should vanish the moment
-        # the run is over, not linger through report/recording teardown.
+        # Take the progress window down first, leaving the final ✓/✗ text up
+        # briefly — without the linger the outcome would flash for only the
+        # milliseconds between ai() returning and close() running.
         if self._overlay is not None:
-            self._overlay.close()
+            self._overlay.close(linger=1.5)
         # Stop the heartbeat first so no beat is in flight when the transport
         # closes below; the thread is a daemon, so a stuck request can only
         # cost the 2s join grace, never hang shutdown.

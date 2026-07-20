@@ -1294,7 +1294,7 @@ def _launch_desktop_app(app: str, app_wait: float) -> None:
 # Desktop — app launch
 @_option("--app", group="Desktop options", default="", help="Launch/activate an app before the task. macOS: app name (\"WeChat\") or bundle id; Windows: exe path, registered name, or UWP AppUserModelID; Linux: executable.")
 @_option("--app-wait", group="Desktop options", default=2.0, type=float, help="Seconds to wait after --app launch for the window to appear")
-@_option("--overlay", group="Desktop options", is_flag=True, help="Show task progress in a small bottom-right window — excluded from screenshots, click-through (macOS/Windows)")
+@_option("--overlay/--no-overlay", group="Desktop options", default=True, help="Show task progress in a small bottom-right window — excluded from screenshots, click-through (macOS/Windows; no-op elsewhere)")
 @_debug_options()
 @click.pass_context
 def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, window_title: str, hwnd: int, app: str, app_wait: float, overlay: bool, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
