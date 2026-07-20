@@ -139,12 +139,22 @@ def _run_windows() -> int:
     try:
         import tkinter as tk
     except ImportError:
+        # e.g. a Microsoft Store / embedded Python without tcl-tk.
         return 3
+
+    # Per-monitor DPI awareness, before any window exists: without it the
+    # process is scaled by the system and the bottom-right placement lands
+    # away from the corner on >100% displays. Best-effort (needs Win 8.1+).
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        pass
 
     root = tk.Tk()
     root.overrideredirect(True)
     root.attributes("-topmost", True)
-    root.attributes("-alpha", 0.88)
+    root.attributes("-alpha", 0.88)  # also makes the window WS_EX_LAYERED,
+    # which WDA_EXCLUDEFROMCAPTURE requires
     root.configure(bg="#141414")
     label = tk.Label(
         root, text="qirabot", fg="white", bg="#141414",
@@ -159,6 +169,21 @@ def _run_windows() -> int:
     root.update_idletasks()
 
     user32 = ctypes.windll.user32
+    HWND = ctypes.c_void_p  # pointer-sized, so 64-bit handles don't truncate
+    user32.GetAncestor.argtypes = [HWND, ctypes.c_uint]
+    user32.GetAncestor.restype = HWND
+    user32.SetWindowDisplayAffinity.argtypes = [HWND, ctypes.c_uint]
+    # 32-bit user32 doesn't export the *Ptr variants (they're macros there);
+    # ex-style values fit in 32 bits either way.
+    get_long = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+    set_long = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+    get_long.argtypes = [HWND, ctypes.c_int]
+    set_long.argtypes = [HWND, ctypes.c_int, ctypes.c_long]
+    user32.SetWindowPos.argtypes = [
+        HWND, HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+        ctypes.c_uint,
+    ]
+
     # winfo_id() is a Tk child window; the display affinity and the
     # click-through styles must go on the top-level ancestor.
     hwnd = user32.GetAncestor(root.winfo_id(), 2)  # GA_ROOT
@@ -171,11 +196,20 @@ def _run_windows() -> int:
     WS_EX_TOOLWINDOW = 0x00000080  # no taskbar / Alt-Tab entry
     WS_EX_LAYERED = 0x00080000
     WS_EX_NOACTIVATE = 0x08000000  # never steals focus from the target app
-    ex_style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
-    user32.SetWindowLongPtrW(
+    ex_style = get_long(hwnd, GWL_EXSTYLE)
+    set_long(
         hwnd,
         GWL_EXSTYLE,
         ex_style | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+    )
+    # SetWindowLong alone doesn't reliably apply style changes to a window
+    # that is already visible; SWP_FRAMECHANGED forces the recalculation.
+    HWND_TOPMOST = HWND(-1)
+    SWP_NOSIZE, SWP_NOMOVE = 0x0001, 0x0002
+    SWP_NOACTIVATE, SWP_FRAMECHANGED = 0x0010, 0x0020
+    user32.SetWindowPos(
+        hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+        SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
     )
 
     q: queue.Queue = queue.Queue()
