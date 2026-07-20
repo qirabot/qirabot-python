@@ -292,6 +292,7 @@ def _debug_options(record: bool = True) -> Callable[[_FC], _FC]:
     def wrap(f: _FC) -> _FC:
         if record:
             f = _option("--record", group=_DEBUG_GROUP, is_flag=True, help="Record the screen to report-dir/recording.mp4 (requires ffmpeg)")(f)
+        f = _option("--overlay/--no-overlay", group=_DEBUG_GROUP, default=True, help="Show task progress in a small bottom-right on-screen window — excluded from screenshots, click-through (macOS/Windows; no-op elsewhere)")(f)
         f = _option("--annotate/--no-annotate", group=_DEBUG_GROUP, default=True, help="Annotate saved screenshots with click coordinates")(f)
         f = _option("--report-dir", group=_DEBUG_GROUP, default="", help="Report output root (env QIRA_REPORT_DIR; default ./qira_runs/<date>/<run>/)")(f)
         f = _option("--report/--no-report", group=_DEBUG_GROUP, default=True, help="Write an HTML run report to --report-dir")(f)
@@ -907,6 +908,7 @@ def browser(
     user_data_dir: str,
     browser_arg: tuple[str, ...],
     cdp_url: str,
+    overlay: bool,
     report: bool,
     report_dir: str,
     annotate: bool,
@@ -922,6 +924,7 @@ def browser(
     bot = _make_bot(
         ctx, model=model, language=language, report=report, report_dir=report_dir,
         annotate=annotate, record=record, task_name=name or _default_task_name(instruction),
+        overlay=overlay,
     )
     try:
         page = bot.open(
@@ -968,6 +971,7 @@ def _run_appium(
     annotate: bool,
     record: bool = False,
     knowledge: str = "",
+    overlay: bool = False,
 ) -> None:
     """Shared android/ios body: build the bot, open an Appium session, run.
 
@@ -983,7 +987,7 @@ def _run_appium(
     bot = _make_bot(
         ctx, model=model, language=language, report=report, report_dir=report_dir,
         annotate=annotate, record=record, record_device=record,
-        task_name=name or _default_task_name(instruction),
+        task_name=name or _default_task_name(instruction), overlay=overlay,
     )
     try:
         try:
@@ -1094,7 +1098,7 @@ def _adb_launch_app(dev: Any, package: str, activity: str) -> None:
 @_option("--record", group="Android options", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (direct engine: adb screenrecord, ffmpeg merges runs over 3 min; Appium engine: Appium's recording API)")
 @_debug_options(record=False)
 @click.pass_context
-def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, report: bool, report_dir: str, annotate: bool) -> None:
+def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, overlay: bool, report: bool, report_dir: str, annotate: bool) -> None:
     """Run an AI task on an Android device (direct over adb; --appium-url for Appium).
 
     \b
@@ -1127,6 +1131,7 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
         _run_appium(
             ctx, instruction, name, model, language, max_steps, appium_url, options,
             report, report_dir, annotate, record=record, knowledge=knowledge,
+            overlay=overlay,
         )
         return
 
@@ -1146,6 +1151,7 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
         ctx, instruction, name, model, language, max_steps, connect,
         report, report_dir, annotate,
         record=record, record_device=record, knowledge=knowledge,
+        overlay=overlay,
     )
 
 
@@ -1212,7 +1218,7 @@ def _check_mjpeg_ready(mjpeg_url: str) -> None:
 @_option("--mjpeg-url", group="iOS options", default="", help="WDA MJPEG stream URL for --record (default: --wda-url's host on port 9100; direct engine only)")
 @_debug_options(record=False)
 @click.pass_context
-def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, report: bool, report_dir: str, annotate: bool) -> None:
+def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, overlay: bool, report: bool, report_dir: str, annotate: bool) -> None:
     """Run an AI task on an iOS device (direct via WDA; --appium-url/--device for Appium).
 
     \b
@@ -1248,6 +1254,7 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
         _run_appium(
             ctx, instruction, name, model, language, max_steps, appium_url, options,
             report, report_dir, annotate, record=record, knowledge=knowledge,
+            overlay=overlay,
         )
         return
 
@@ -1272,6 +1279,7 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
         ctx, instruction, name, model, language, max_steps, connect,
         report, report_dir, annotate,
         record=record, record_mjpeg_url=record_mjpeg_url, knowledge=knowledge,
+        overlay=overlay,
     )
 
 
@@ -1294,7 +1302,6 @@ def _launch_desktop_app(app: str, app_wait: float) -> None:
 # Desktop — app launch
 @_option("--app", group="Desktop options", default="", help="Launch/activate an app before the task. macOS: app name (\"WeChat\") or bundle id; Windows: exe path, registered name, or UWP AppUserModelID; Linux: executable.")
 @_option("--app-wait", group="Desktop options", default=2.0, type=float, help="Seconds to wait after --app launch for the window to appear")
-@_option("--overlay/--no-overlay", group="Desktop options", default=True, help="Show task progress in a small bottom-right window — excluded from screenshots, click-through (macOS/Windows; no-op elsewhere)")
 @_debug_options()
 @click.pass_context
 def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, window_title: str, hwnd: int, app: str, app_wait: float, overlay: bool, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
