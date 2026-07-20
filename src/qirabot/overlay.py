@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 from typing import Any, Callable
@@ -78,11 +79,14 @@ class Overlay:
             logger.debug("overlay: unsupported platform %s", sys.platform)
             return
         try:
+            # QIRA_OVERLAY_DEBUG=1 lets the helper's stderr through, to
+            # diagnose why the window doesn't appear (missing pyobjc, etc.).
+            debug = os.environ.get("QIRA_OVERLAY_DEBUG", "") not in ("", "0")
             self._proc = subprocess.Popen(
                 [sys.executable, "-m", "qirabot._overlay_helper"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=None if debug else subprocess.DEVNULL,
             )
         except Exception:
             self._failed = True
@@ -102,6 +106,13 @@ class Overlay:
             # Helper died (e.g. exit 3 on a missing GUI dep): stop trying.
             self._failed = True
             self._proc = None
+            # Close the pipe under our own guard — a buffered writer left
+            # open would flush again at interpreter shutdown and print an
+            # unhandled "Exception ignored" BrokenPipeError traceback.
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
             logger.debug("overlay: helper write failed", exc_info=True)
 
     def set_text(self, text: str) -> None:
@@ -129,11 +140,21 @@ class Overlay:
         proc, self._proc = self._proc, None
         if proc is None:
             return
-        try:
-            if proc.stdin is not None:
+        if proc.stdin is not None:
+            try:
                 proc.stdin.write(b'{"cmd": "close"}\n')
                 proc.stdin.flush()
-                proc.stdin.close()
+            except Exception:
+                pass
+            finally:
+                # Always close, even after a failed write: an open buffered
+                # writer re-flushes at interpreter shutdown and prints an
+                # "Exception ignored" BrokenPipeError traceback.
+                try:
+                    proc.stdin.close()
+                except Exception:
+                    pass
+        try:
             proc.wait(timeout=2)
         except Exception:
             try:

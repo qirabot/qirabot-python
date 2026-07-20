@@ -139,6 +139,10 @@ def test_helper_death_degrades_to_noop(monkeypatch):
     ov.set_text("and must not respawn")
     ov.close()
     assert len(procs) == 1
+    # The pipe must be closed on failure, or the buffered writer would
+    # re-flush at interpreter shutdown and print an "Exception ignored"
+    # BrokenPipeError traceback.
+    assert procs[0].stdin.closed
 
 
 def test_spawn_failure_degrades_to_noop(monkeypatch):
