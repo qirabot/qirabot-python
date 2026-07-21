@@ -171,26 +171,36 @@ class WindowsAdapter(DeviceAdapter):
         # foreground: the down event went to whichever window had focus, so
         # the next pointer action must re-press the held keys.
         self._held_undelivered = False
-        self._ime_prepared = False
+        self._ime_warned = False
 
-    def _ensure_english_ime(self) -> None:
-        """Once, before the first injected input: force the US English IME.
+    def _assert_english_ime(self) -> bool:
+        """Before each injected keystroke batch: force the US English IME on
+        the focused control. True when the scancode path is safe to use.
 
         An active CJK IME swallows injected scancode letters into its
         composition window instead of the game — part of the same "input must
-        actually arrive" contract as ensure_foreground. Lazy so constructing
-        the adapter never forces window resolution; Window(english_ime=False)
-        opts out; best-effort because IME state must never block input.
+        actually arrive" contract as ensure_foreground. IME state lives on the
+        focused control's input context and is re-activated on every focus
+        change, so this runs before every keystroke batch (after the window is
+        fronted and the target control focused), never just once.
+        Window(english_ime=False) opts out; best-effort because IME state must
+        never block input — a False return steers text delivery to the paste
+        path, which bypasses IME composition.
         """
-        if self._ime_prepared:
-            return
-        self._ime_prepared = True
         if not getattr(self._window, "english_ime", True):
-            return
+            return True  # opted out: the caller manages IME state themselves
         try:
-            win.set_english_ime(self._window.hwnd)
+            if win.ensure_english_input(self._window.hwnd):
+                return True
         except Exception:
-            logger.warning("could not switch the window to the English IME")
+            pass
+        if not self._ime_warned:
+            self._ime_warned = True
+            logger.warning(
+                "could not switch the window to the English IME; "
+                "text will be delivered via the paste fallback"
+            )
+        return False
 
     @classmethod
     def accepts(cls, target: Any) -> bool:
@@ -294,7 +304,6 @@ class WindowsAdapter(DeviceAdapter):
         ``_reassert_held_keys``). Otherwise front the window (whose ALT-tap
         unlock may release a held ALT) and re-press whatever is held.
         """
-        self._ensure_english_ime()
         if win.is_foreground(self._window.hwnd):
             if self._held_undelivered:
                 self._reassert_held_keys()
@@ -427,7 +436,6 @@ class WindowsAdapter(DeviceAdapter):
         sc = self._scancode_for(key)
         if sc is None:
             raise NotImplementedError(f"no scancode for key {key!r}")
-        self._ensure_english_ime()
         if not win.ensure_foreground(self._window.hwnd):
             # Keyboard input follows focus, not coordinates: this down event is
             # about to land in whatever window IS focused. Surface it — the
@@ -440,6 +448,7 @@ class WindowsAdapter(DeviceAdapter):
                 "the key press may go to another window",
                 key, self._window.hwnd,
             )
+        self._assert_english_ime()
         win.send_inputs([win.key_scancode_event(sc[0], sc[1], False)])
         self._held_keys.append(sc)
 
@@ -472,9 +481,9 @@ class WindowsAdapter(DeviceAdapter):
     def press_key(self, key: str) -> None:
         mods, base = split_combo(key)
         codes = [self._scancode_for(k) for k in mods + [base]]
-        self._ensure_english_ime()
         if all(c is not None for c in codes):
             win.ensure_foreground(self._window.hwnd)
+            self._assert_english_ime()
             *mod_codes, base_code = codes
             # Hold mods around the base, release in reverse; pace with KEY_HOLD
             # so frame-polling apps sample the mods as held before the base
@@ -505,17 +514,22 @@ class WindowsAdapter(DeviceAdapter):
 
     def type_focused(self, text: str) -> None:
         # Prefer scancodes so games receive the text; any unmappable char
-        # (CJK, emoji, non-US symbols) switches the WHOLE string to one
-        # fallback path so ordering holds.
+        # (CJK, emoji, non-US symbols) — or a window that refuses to give up
+        # its CJK IME — switches the WHOLE string to one fallback path so
+        # ordering holds. The IME assert runs here, after the focusing click
+        # has landed: IME state belongs to the focused control's input
+        # context, so asserting any earlier is undone the moment the text box
+        # takes focus.
+        if not text:
+            return
         codes = []
         for ch in text:
             m = char_scancode(ch)
             if m is None:
                 break
             codes.append(m)
-        self._ensure_english_ime()
         win.ensure_foreground(self._window.hwnd)
-        if text and len(codes) == len(text):
+        if len(codes) == len(text) and self._assert_english_ime():
             shift = SCANCODES["LSHIFT"]
             for needs_shift, name in codes:
                 code, ext = SCANCODES[name]
@@ -526,7 +540,7 @@ class WindowsAdapter(DeviceAdapter):
                     win.send_inputs([win.key_scancode_event(shift[0], shift[1], True)])
                 time.sleep(KEY_GAP)
             return
-        if text and os.environ.get("QIRA_TEXT_FALLBACK", "").strip().lower() != "unicode":
+        if os.environ.get("QIRA_TEXT_FALLBACK", "").strip().lower() != "unicode":
             self._paste_text(text)
             return
         for ch in text:
@@ -536,7 +550,11 @@ class WindowsAdapter(DeviceAdapter):
             time.sleep(KEY_GAP)
 
     def _paste_text(self, text: str) -> None:
-        """Deliver unmappable text via clipboard + Ctrl+V.
+        """Deliver text via clipboard + Ctrl+V — the IME-immune path.
+
+        Used for unmappable text (CJK, emoji) and for ASCII when the window
+        refused to drop its CJK IME (pasting bypasses IME composition, so the
+        text arrives verbatim either way).
 
         KEYEVENTF_UNICODE injects VK_PACKET events that only become text if
         the target's message loop runs them through TranslateMessage →

@@ -36,7 +36,14 @@ class FakeUser32:
         self.foreground = foreground
         self.rects = rects or {}  # hwnd -> (left, top, right, bottom)
         self.classes = classes or {}  # hwnd -> window class name
-        self.messages = []  # SendMessageW calls: (hwnd, msg, wparam, lparam)
+        self.messages = []  # SendMessage(Timeout)W calls: (hwnd, msg, wparam, lparam)
+        # Simulated IME state behind the default IME window: open + native
+        # (Chinese) until a set message lands. ime_stubborn models a
+        # TSF-managed window that ignores the set messages.
+        self.ime_open = 1
+        self.ime_conv = 1  # IME_CMODE_NATIVE
+        self.ime_stubborn = False
+        self.focus_hwnd = 0  # GetGUIThreadInfo's hwndFocus; 0 = no focus info
 
     def GetClassNameW(self, hwnd, buf, n):
         h = hwnd if isinstance(hwnd, int) else (hwnd or 0)
@@ -46,10 +53,31 @@ class FakeUser32:
     def LoadKeyboardLayoutW(self, layout, flags):
         return 0x04090409  # en-US HKL
 
+    def GetWindowThreadProcessId(self, hwnd, pid_ref):
+        return 7  # the window's UI thread id
+
+    def GetGUIThreadInfo(self, tid, info_ref):
+        info_ref._obj.hwndFocus = self.focus_hwnd or None
+        return 1
+
     def SendMessageW(self, hwnd, msg, wparam, lparam):
         h = hwnd.value if hasattr(hwnd, "value") else hwnd
         self.messages.append((h, msg, wparam, lparam))
         return 0
+
+    def SendMessageTimeoutW(self, hwnd, msg, wparam, lparam, flags, timeout, result_ref):
+        h = hwnd.value if hasattr(hwnd, "value") else hwnd
+        self.messages.append((h, msg, wparam, lparam))
+        if msg == 0x0283:  # WM_IME_CONTROL
+            if wparam == 0x0006 and not self.ime_stubborn:  # IMC_SETOPENSTATUS
+                self.ime_open = lparam or 0
+            elif wparam == 0x0002 and not self.ime_stubborn:  # IMC_SETCONVERSIONMODE
+                self.ime_conv = lparam or 0
+            elif wparam == 0x0005:  # IMC_GETOPENSTATUS
+                result_ref._obj.value = self.ime_open
+            elif wparam == 0x0001:  # IMC_GETCONVERSIONMODE
+                result_ref._obj.value = self.ime_conv
+        return 1
 
     def GetWindowRect(self, hwnd, rect_ref):
         h = hwnd.value if hasattr(hwnd, "value") else hwnd
@@ -296,27 +324,86 @@ class TestWindow:
 
 
 class TestEnglishIme:
-    def test_first_input_forces_english_ime_once(self, fake_env):
+    def test_every_keystroke_batch_reasserts_english_ime(self, fake_env):
+        # IME open/conversion state is per input context and comes back when
+        # an edit box takes focus — a one-shot switch shows English on the
+        # window but reverts to Chinese in the text box. Assert per call.
         adapter = WindowsAdapter(Window(hwnd=42))
+        adapter.press_key("esc")
         adapter.press_key("esc")
         msgs = fake_env["user32"].messages
         lang = [m for m in msgs if m[1] == win.WM_INPUTLANGCHANGEREQUEST]
-        assert [m[0] for m in lang] == [42]  # layout switch sent to the window
-        ime = [m for m in msgs if m[1] == 0x0283]  # WM_IME_CONTROL
-        assert [(m[0], m[2]) for m in ime] == [(999, 0x0006)]  # IMC_SETOPENSTATUS off
-        adapter.press_key("esc")  # second input: no re-switch
-        assert len([m for m in msgs if m[1] == win.WM_INPUTLANGCHANGEREQUEST]) == 1
+        assert [m[0] for m in lang] == [42, 42]
+
+    def test_ime_closed_and_conversion_set_to_alphanumeric(self, fake_env):
+        # Closing open status alone isn't enough for MS Pinyin, whose 中/英 is
+        # a conversion mode — both are forced on the default IME window.
+        WindowsAdapter(Window(hwnd=42)).press_key("esc")
+        ime = [
+            (m[0], m[2], m[3])
+            for m in fake_env["user32"].messages
+            if m[1] == 0x0283  # WM_IME_CONTROL
+        ]
+        assert (999, 0x0002, 0x0000) in ime  # IMC_SETCONVERSIONMODE alphanumeric
+        assert (999, 0x0006, 0) in ime  # IMC_SETOPENSTATUS off
+
+    def test_ime_messages_target_focused_control(self, fake_env):
+        # The layout switch must land on the control that HAS focus (the edit
+        # box), not the top-level window — its context is the one that counts.
+        fake_env["user32"].focus_hwnd = 77
+        WindowsAdapter(Window(hwnd=42)).type_focused("gm")
+        lang = [
+            m for m in fake_env["user32"].messages
+            if m[1] == win.WM_INPUTLANGCHANGEREQUEST
+        ]
+        assert [m[0] for m in lang] == [77]
+
+    def test_typing_happens_after_ime_assert(self, fake_env):
+        # type_focused asserts AFTER fronting/focus, then injects — never the
+        # other way around (the old bug: switch first, click steals it back).
+        WindowsAdapter(Window(hwnd=42)).type_focused("gm")
+        assert fake_env["user32"].messages, "no IME messages sent"
+        evs = key_events(fake_env["sent"])
+        assert [e.ki.wScan for e in evs[::2]] == [SCANCODES["G"][0], SCANCODES["M"][0]]
+
+    def test_stubborn_ime_falls_back_to_paste(self, fake_env):
+        # A window that ignores the switch (TSF-managed) fails verification:
+        # even pure-ASCII text must arrive via paste, which bypasses the IME,
+        # instead of scancode letters the composition window would swallow.
+        fake_env["user32"].ime_stubborn = True
+        WindowsAdapter(Window(hwnd=42)).type_focused("gm additem 1")
+        assert fake_env["clipboard"]["sets"][0] == "gm additem 1"
+        evs = key_events(fake_env["sent"])
+        scans = [e.ki.wScan for e in evs]
+        assert SCANCODES["V"][0] in scans  # Ctrl+V went over the wire
+        assert SCANCODES["G"][0] not in scans  # no per-letter scancodes
+
+    def test_stubborn_ime_warns_once(self, fake_env, caplog):
+        fake_env["user32"].ime_stubborn = True
+        adapter = WindowsAdapter(Window(hwnd=42))
+        with caplog.at_level("WARNING", logger="qirabot"):
+            adapter.type_focused("a")
+            adapter.type_focused("b")
+        ime_warnings = [r for r in caplog.records if "IME" in r.message]
+        assert len(ime_warnings) == 1
 
     def test_english_ime_opt_out(self, fake_env):
         adapter = WindowsAdapter(Window(hwnd=42, english_ime=False))
         adapter.press_key("esc")
         assert fake_env["user32"].messages == []
 
-    def test_pointer_action_also_prepares_ime(self, fake_env):
-        adapter = WindowsAdapter(Window(hwnd=42))
-        adapter.click(10, 10)
-        msgs = fake_env["user32"].messages
-        assert any(m[1] == win.WM_INPUTLANGCHANGEREQUEST for m in msgs)
+    def test_opt_out_keeps_scancode_typing(self, fake_env):
+        # english_ime=False means "trust the user's IME setup": ASCII still
+        # rides the scancode path, no paste detour.
+        WindowsAdapter(Window(hwnd=42, english_ime=False)).type_focused("gm")
+        assert fake_env["clipboard"]["sets"] == []
+        assert len(key_events(fake_env["sent"])) == 4  # g down/up, m down/up
+
+    def test_pointer_actions_leave_ime_alone(self, fake_env):
+        # Clicks don't compose text; the assert moved to the keystroke paths
+        # where it runs after focus lands.
+        WindowsAdapter(Window(hwnd=42)).click(10, 10)
+        assert fake_env["user32"].messages == []
 
 
 # ---------------------------------------------------------------------------

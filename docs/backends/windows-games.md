@@ -50,11 +50,16 @@ window = Window(title="MyGame · Cloud(Beta)", ambiguous="largest")
 window = Window(class_name="UnityWndClass", timeout=180)   # just-launched game
 ```
 
-Before the first input is injected, the backend switches the window's input
-language to US English and closes its IME — an active CJK IME would swallow
-injected letter keys into its composition window instead of the game. This is
-per-window state (Win+Space switches it back); pass
-`Window(..., english_ime=False)` to leave the IME alone.
+Before each typing/keypress call, the backend switches the focused control's
+input language to US English and closes its IME — an active CJK IME would
+swallow injected letter keys into its composition window instead of the game.
+The switch is re-asserted every time (IME state belongs to the focused
+control and comes back whenever a text box takes focus), and it is verified:
+a window that refuses to give up its IME gets text via clipboard paste, which
+bypasses IME composition entirely. Typing CJK text never needs a CJK IME —
+non-ASCII strings always travel the paste path, so forcing English input
+loses nothing. Only the target window is touched (Win+Space switches it
+back); pass `Window(..., english_ime=False)` to leave the IME alone.
 
 ## Game-grade input
 

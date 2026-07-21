@@ -179,10 +179,14 @@ class Window:
         timeout: seconds to keep polling (1s interval) for a matching window
             before giving up — for binding to a game that is still starting.
             0 (default) resolves exactly once.
-        english_ime: switch the window's input language to US English before
-            the first input is injected (default True). An active CJK IME
-            swallows injected letter keys into its composition window instead
-            of the game. Pass False to leave the window's IME alone.
+        english_ime: switch the focused control's input language to US
+            English before each injected keystroke batch (default True). An
+            active CJK IME swallows injected letter keys into its composition
+            window instead of the game, and IME state is re-activated per
+            focused control — so the switch is re-asserted before every
+            typing/keypress call, not once. When a window refuses the switch,
+            text falls back to clipboard paste, which bypasses the IME. Pass
+            False to leave the window's IME alone.
 
     ``hwnd`` alone, or any combination of ``title``/``title_re`` (mutually
     exclusive) and ``class_name``, selects the window. Whole-desktop
@@ -657,43 +661,119 @@ def ensure_foreground(hwnd: int) -> bool:
 
 WM_INPUTLANGCHANGEREQUEST = 0x0050
 _WM_IME_CONTROL = 0x0283
+_IMC_GETCONVERSIONMODE = 0x0001
+_IMC_SETCONVERSIONMODE = 0x0002
+_IMC_GETOPENSTATUS = 0x0005
 _IMC_SETOPENSTATUS = 0x0006
+_IME_CMODE_NATIVE = 0x0001
+_IME_CMODE_ALPHANUMERIC = 0x0000
 _KLF_ACTIVATE = 0x0001
 _EN_US_LAYOUT = "00000409"
+_SMTO_ABORTIFHUNG = 0x0002
+_SMTO_TIMEOUT_MS = 200
 
 
 def _imm32() -> Any:
     return _dll("imm32")
 
 
-def set_english_ime(hwnd: int) -> None:
-    """Switch ``hwnd``'s input language to US English and close its IME.
+class _GUITHREADINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_uint32),
+        ("flags", ctypes.c_uint32),
+        ("hwndActive", ctypes.c_void_p),
+        ("hwndFocus", ctypes.c_void_p),
+        ("hwndCapture", ctypes.c_void_p),
+        ("hwndMenuOwner", ctypes.c_void_p),
+        ("hwndMoveSize", ctypes.c_void_p),
+        ("hwndCaret", ctypes.c_void_p),
+        ("rcCaret", _RECT),
+    ]
 
-    An active CJK IME swallows injected scancode letters into its composition
-    window instead of delivering them to the game. Input language is
-    per-window state, so only the target window is touched (the user can
-    switch back with Win+Space). Best-effort: a window that ignores
-    WM_INPUTLANGCHANGEREQUEST keeps its layout.
+
+def focused_control(hwnd: int) -> int:
+    """The window with keyboard focus in ``hwnd``'s UI thread, or ``hwnd``.
+
+    IME open/conversion state lives on the input context the FOCUSED window
+    activates — an edit box focused after we touched the top-level window
+    brings its own context (still open, still CJK) right back. IME messages
+    must therefore target the focused child, not the top-level handle.
     """
     user32 = _user32()
     _set_types(
-        user32.LoadKeyboardLayoutW, ctypes.c_void_p, [ctypes.c_wchar_p, ctypes.c_uint32]
+        user32.GetWindowThreadProcessId, ctypes.c_uint32, [ctypes.c_void_p, ctypes.c_void_p]
     )
+    tid = user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), None)
+    if not tid:
+        return hwnd
+    info = _GUITHREADINFO()
+    info.cbSize = ctypes.sizeof(_GUITHREADINFO)
+    if user32.GetGUIThreadInfo(ctypes.c_uint32(tid), ctypes.byref(info)) and info.hwndFocus:
+        return int(info.hwndFocus)
+    return hwnd
+
+
+def _send_message_timeout(hwnd: Any, msg: int, wparam: int, lparam: Any) -> int | None:
+    """SendMessageTimeoutW wrapper: the message result, or None if it failed.
+
+    Plain SendMessageW blocks forever on a hung target — IME state is
+    best-effort and must never block input, so every cross-process message
+    here goes through the timeout variant.
+    """
+    user32 = _user32()
     _set_types(
-        user32.SendMessageW,
+        user32.SendMessageTimeoutW,
         ctypes.c_ssize_t,
-        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_size_t, ctypes.c_void_p],
+        [
+            ctypes.c_void_p, ctypes.c_uint32, ctypes.c_size_t, ctypes.c_void_p,
+            ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_size_t),
+        ],
+    )
+    result = ctypes.c_size_t(0)
+    ok = user32.SendMessageTimeoutW(
+        ctypes.c_void_p(hwnd), msg, wparam, lparam,
+        _SMTO_ABORTIFHUNG, _SMTO_TIMEOUT_MS, ctypes.byref(result),
+    )
+    return int(result.value) if ok else None
+
+
+def ensure_english_input(hwnd: int) -> bool:
+    """Force English input on ``hwnd``'s focused control; True when verified.
+
+    An active CJK IME swallows injected scancode letters into its composition
+    window instead of delivering them to the game. Three messages, all aimed
+    at the focused control (see :func:`focused_control`): switch the thread's
+    layout to US English, set the IME conversion mode to alphanumeric (the
+    中/英 toggle of e.g. Microsoft Pinyin), and close the IME. The state is
+    read back afterwards: a False return means the window kept its CJK IME
+    (TSF-managed apps can ignore all of this) and the caller should deliver
+    text through a path that bypasses composition, e.g. paste. Only the
+    target window is touched (the user can switch back with Win+Space).
+    """
+    user32 = _user32()
+    target = focused_control(hwnd)
+    _set_types(
+        user32.LoadKeyboardLayoutW, ctypes.c_void_p, [ctypes.c_wchar_p, ctypes.c_uint32]
     )
     hkl = user32.LoadKeyboardLayoutW(_EN_US_LAYOUT, _KLF_ACTIVATE)
     if hkl:
-        user32.SendMessageW(
-            ctypes.c_void_p(hwnd), WM_INPUTLANGCHANGEREQUEST, 0, ctypes.c_void_p(hkl)
-        )
+        _send_message_timeout(target, WM_INPUTLANGCHANGEREQUEST, 0, ctypes.c_void_p(hkl))
     imm32 = _imm32()
     _set_types(imm32.ImmGetDefaultIMEWnd, ctypes.c_void_p, [ctypes.c_void_p])
-    ime = imm32.ImmGetDefaultIMEWnd(ctypes.c_void_p(hwnd))
-    if ime:
-        user32.SendMessageW(ctypes.c_void_p(ime), _WM_IME_CONTROL, _IMC_SETOPENSTATUS, None)
+    ime = imm32.ImmGetDefaultIMEWnd(ctypes.c_void_p(target))
+    if not ime:
+        return True  # no IME attached to that thread: nothing swallows scancodes
+    _send_message_timeout(ime, _WM_IME_CONTROL, _IMC_SETCONVERSIONMODE, _IME_CMODE_ALPHANUMERIC)
+    _send_message_timeout(ime, _WM_IME_CONTROL, _IMC_SETOPENSTATUS, 0)
+    # Read back: IME closed, or open but in alphanumeric (英) mode, both mean
+    # scancode letters arrive untouched.
+    open_status = _send_message_timeout(ime, _WM_IME_CONTROL, _IMC_GETOPENSTATUS, 0)
+    if open_status is None:
+        return False
+    if not open_status:
+        return True
+    conv = _send_message_timeout(ime, _WM_IME_CONTROL, _IMC_GETCONVERSIONMODE, 0)
+    return conv is not None and not (conv & _IME_CMODE_NATIVE)
 
 
 # ---------------------------------------------------------------------------
