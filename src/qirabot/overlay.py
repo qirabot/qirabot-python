@@ -26,6 +26,11 @@ logger = logging.getLogger("qirabot")
 # labels truncate visually on top of this (CJK glyphs are wider per char
 # than these budgets assume).
 _TITLE_MAX = 80  # headline: the running instruction
+
+# Shown in the helper's top-center pill while the edge glow is on. Bilingual
+# on purpose: the helper has no locale, and the audience is whoever happens
+# to be at the machine being controlled.
+_EDGE_HINT = "Hold ESC to stop · 长按 ESC 中止"
 _HEAD_MAX = 70  # body line 1: step counter + action + params
 _LOCATE_MAX = 40  # the "locate" param inside the head line
 _TYPED_MAX = 30  # the "text" param inside the head line
@@ -184,14 +189,15 @@ class Overlay:
         (see ``abort_requested``).
         """
         self._abort_event.clear()  # a new run starts unaborted
-        self._send(
-            {
-                "title": _clip(str(instruction), _TITLE_MAX),
-                "state": "run",
-                "text": "",
-                "edge": bool(edge_glow),
-            }
-        )
+        payload: dict[str, Any] = {
+            "title": _clip(str(instruction), _TITLE_MAX),
+            "state": "run",
+            "text": "",
+            "edge": bool(edge_glow),
+        }
+        if edge_glow:
+            payload["hint"] = _EDGE_HINT
+        self._send(payload)
 
     def step(self, step: Any, total: int | None = None) -> None:
         """``on_step``-compatible: render a StepResult into the window.

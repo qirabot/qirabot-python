@@ -128,6 +128,9 @@ def test_begin_edge_glow_rides_the_run_message(fake_spawn):
     ov.begin("drive the desktop", edge_glow=True)
     (msg,) = _sent_lines(fake_spawn[0])
     assert msg["edge"] is True
+    # The kill-switch hint pill text rides along — an invisible abort key
+    # is an abort key nobody uses.
+    assert "ESC" in msg["hint"]
 
 
 def test_begin_clips_long_instruction(fake_spawn):

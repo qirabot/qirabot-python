@@ -10,11 +10,14 @@ Protocol: one JSON object per stdin line; keys combine freely.
     {"state": "run" | "ok" | "fail"} status glyph; "run" (re)starts the
                                      elapsed timer, "ok"/"fail" freeze it
     {"text": "..."}                  the body (current step + reasoning)
-    {"edge": true | false}           screen-edge "being controlled" glow:
-                                     a gradient band per screen border —
+    {"edge": true | false,           screen-edge "being controlled" glow:
+     "hint": "Hold ESC…"}            a gradient band per screen border —
                                      amber at the edge fading inward —
                                      slow-breathing while the bot owns the
-                                     real mouse/keyboard
+                                     real mouse/keyboard; "hint" (optional,
+                                     with edge:true) is shown in a small
+                                     top-center pill so the kill switch is
+                                     discoverable
     {"cmd": "close", "linger": 1.5}  exit after `linger` seconds (default 0),
                                      so the final ✓/✗ state is readable
 stdin EOF also exits, so a dying parent can never leave the window behind.
@@ -363,6 +366,53 @@ def _run_macos() -> int:
     except Exception:
         edges = []
 
+    # Kill-switch hint pill: top-center, shown only while the glow is on —
+    # an invisible abort key is an abort key nobody uses. Same recipe as
+    # everything else (capture-excluded, click-through, alpha-driven).
+    hint_panel: Any = None
+    hint_label: Any = None
+    try:
+        hint_w, hint_h = 300.0, 30.0
+        scr_w, scr_h = screen.size.width, screen.size.height
+        pill = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+            AppKit.NSMakeRect(
+                (scr_w - hint_w) / 2, scr_h - hint_h - 10, hint_w, hint_h
+            ),
+            style, AppKit.NSBackingStoreBuffered, False,
+        )
+        pill.setSharingType_(AppKit.NSWindowSharingNone)
+        pill.setOpaque_(False)
+        pill.setBackgroundColor_(AppKit.NSColor.clearColor())
+        pill.setLevel_(AppKit.NSStatusWindowLevel)
+        pill.setIgnoresMouseEvents_(True)
+        pill.setCollectionBehavior_(
+            AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+            | AppKit.NSWindowCollectionBehaviorStationary
+            | AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary
+        )
+        pill_content = pill.contentView()
+        pill_content.setWantsLayer_(True)
+        pill_content.layer().setCornerRadius_(hint_h / 2)
+        pill_content.layer().setBackgroundColor_(
+            AppKit.NSColor.colorWithCalibratedWhite_alpha_(0.08, 0.9).CGColor()
+        )
+        text = AppKit.NSTextField.alloc().initWithFrame_(
+            AppKit.NSMakeRect(10, 6, hint_w - 20, hint_h - 12)
+        )
+        text.setBezeled_(False)
+        text.setDrawsBackground_(False)
+        text.setEditable_(False)
+        text.setSelectable_(False)
+        text.setFont_(AppKit.NSFont.systemFontOfSize_(12))
+        text.setTextColor_(AppKit.NSColor.whiteColor())
+        text.setAlignment_(AppKit.NSTextAlignmentCenter)
+        pill_content.addSubview_(text)
+        pill.setAlphaValue_(0.0)
+        pill.orderFrontRegardless()
+        hint_panel, hint_label = pill, text
+    except Exception:
+        hint_panel = hint_label = None
+
     timer_state = _TimerState()
     edge_state = _EdgeState()
 
@@ -412,9 +462,13 @@ def _run_macos() -> int:
                 body.setStringValue_(str(msg["text"]))
             if "edge" in msg and edges:
                 want = bool(msg["edge"])
+                if want and msg.get("hint") and hint_label is not None:
+                    hint_label.setStringValue_(str(msg["hint"]))
                 if want != edge_state.on:
                     edge_state.on = want
                     edge_state.tick = 0
+                    if hint_panel is not None:
+                        hint_panel.setAlphaValue_(0.95 if want else 0.0)
                     if not want:
                         for strip in edges:
                             strip.setAlphaValue_(0.0)
@@ -620,6 +674,28 @@ def _run_windows() -> int:
                 pass
         edges = []
 
+    # Kill-switch hint pill: top-center, shown only while the glow is on.
+    # Edge-strip exclusion policy (no capture exclusion → no pill): a hint
+    # in every screenshot would confuse the model.
+    hint_win: "tk.Toplevel | None" = None
+    hint_label: "tk.Label | None" = None
+    try:
+        pill = tk.Toplevel(root)
+        pill.overrideredirect(True)
+        pill.attributes("-topmost", True)
+        pill.attributes("-alpha", 0.0)
+        pill.configure(bg=BG)
+        pill_label = tk.Label(pill, text="", bg=BG, fg="white", font=("Segoe UI", 10))
+        pill_label.pack(padx=14, pady=6)
+        pill.update_idletasks()
+        pill.geometry(f"+{(sw - pill.winfo_reqwidth()) // 2}+10")
+        if _shield(pill, require_exclude=True):
+            hint_win, hint_label = pill, pill_label
+        else:
+            pill.destroy()
+    except Exception:
+        hint_win = hint_label = None
+
     timer_state = _TimerState()
     edge_state = _EdgeState()
 
@@ -709,13 +785,21 @@ def _run_windows() -> int:
             body.config(text=str(msg["text"]))
         if "edge" in msg and edges:
             want = bool(msg["edge"])
+            if want and msg.get("hint") and hint_win is not None and hint_label is not None:
+                hint_label.config(text=str(msg["hint"]))
+                hint_win.update_idletasks()  # re-center: the text sets the width
+                hint_win.geometry(f"+{(sw - hint_win.winfo_reqwidth()) // 2}+10")
             if want and not edge_state.on:
                 edge_state.on = True
                 edge_state.tick = 0
                 edge_state.gen += 1
+                if hint_win is not None:
+                    hint_win.attributes("-alpha", 0.92)
                 root.after(_EDGE_TICK_MS, breathe, edge_state.gen)
             elif not want and edge_state.on:
                 edge_state.on = False
+                if hint_win is not None:
+                    hint_win.attributes("-alpha", 0.0)
                 for strip, _falloff in edges:
                     strip.attributes("-alpha", 0.0)
 

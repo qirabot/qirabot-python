@@ -242,7 +242,9 @@ Windows versions where exclusion isn't available it simply never shows —
 glowing bars in every screenshot would blind the bot. `--no-overlay` turns
 it off together with the window.
 
-While the glow is on, **hold ESC for about a second to abort the run**: the
+While the glow is on, a small pill at the top of the screen reads
+"Hold ESC to stop · 长按 ESC 中止" — **hold ESC for about a second to abort
+the run**: the
 bot stops at the next step boundary (a step may take a few seconds),
 releases every key and mouse button it was holding, and `bot.ai()` raises a
 `user_abort` error. Short ESC taps — yours or the bot's own — never trigger
