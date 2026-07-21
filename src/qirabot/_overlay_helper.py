@@ -21,6 +21,7 @@ Exit codes: 0 normal, 3 unsupported platform or missing GUI dependency.
 
 from __future__ import annotations
 
+import io
 import json
 import sys
 import threading
@@ -32,7 +33,11 @@ _WIDTH, _HEIGHT, _MARGIN = 340, 88, 24
 def _read_stdin(on_text):
     """Feed stdin texts to ``on_text``; return the close command's linger
     seconds (0.0 on EOF or a malformed value)."""
-    for raw in sys.stdin:
+    # Explicit UTF-8: sys.stdin's default pipe encoding follows the locale
+    # (GBK on Chinese Windows), which would garble any non-ASCII sender.
+    # The parent sends ASCII-escaped JSON, so this is belt and braces.
+    stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
+    for raw in stdin:
         try:
             msg = json.loads(raw)
         except ValueError:

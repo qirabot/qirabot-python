@@ -100,9 +100,10 @@ class Overlay:
         if proc is None or proc.stdin is None:
             return
         try:
-            proc.stdin.write(
-                (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
-            )
+            # ensure_ascii (the default) keeps the wire pure ASCII: the
+            # helper's stdin decoding can then never corrupt CJK text, no
+            # matter the locale (Windows pipes default to GBK/cp936 etc.).
+            proc.stdin.write((json.dumps(obj) + "\n").encode("ascii"))
             proc.stdin.flush()
         except Exception:
             # Helper died (e.g. exit 3 on a missing GUI dep): stop trying.

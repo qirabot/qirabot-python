@@ -79,6 +79,10 @@ def test_set_text_sends_one_json_line(fake_spawn):
     ov = Overlay()
     ov.set_text("hello 你好")
     assert _sent_lines(fake_spawn[0]) == [{"text": "hello 你好"}]
+    # The wire must stay pure ASCII (\uXXXX escapes): the helper's stdin
+    # decoding follows the OS locale (GBK on Chinese Windows), and raw UTF-8
+    # on the pipe came out as mojibake there.
+    assert fake_spawn[0].stdin.data.isascii()
 
 
 def test_start_is_lazy_and_idempotent(fake_spawn):
