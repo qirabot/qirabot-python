@@ -309,9 +309,28 @@ def _run_windows() -> int:
 
     timer_state = {"t0": None, "frozen": False}
 
+    import tkinter.font as tkfont
+
+    title_font = tkfont.Font(family="Segoe UI", size=10, weight="bold")
+
+    def _fit_title(text: str) -> str:
+        # tk labels clip at the pixel edge with no truncation cue, so a long
+        # instruction just looks complete; trim to the label's real width and
+        # add the ellipsis ourselves (macOS gets this for free from
+        # NSLineBreakByTruncatingTail). Pixel-based, so CJK/latin mixes trim
+        # correctly where a character-count budget could not.
+        width = title.winfo_width()
+        if width <= 1:  # first message can arrive before layout has run
+            width = _WIDTH - 110  # status + clock + paddings
+        if title_font.measure(text) <= width:
+            return text
+        while text and title_font.measure(text + "…") > width:
+            text = text[:-1]
+        return text + "…"
+
     def apply(msg: dict) -> None:
         if "title" in msg:
-            title.config(text=str(msg["title"]))
+            title.config(text=_fit_title(str(msg["title"])))
         state = msg.get("state")
         if state in _STATES:
             glyph, color = _STATES[state]
