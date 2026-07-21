@@ -1161,14 +1161,7 @@ class Qirabot:
         sent_tool_params = bool(tool_defs or exclude_tools)
 
         for step_num in range(1, max_steps + 1):
-            # The user held ESC while the edge glow was on (see Overlay's
-            # abort channel): stop before injecting anything else. Between
-            # steps only — one step of latency is the accepted v1 contract.
-            if self._overlay is not None and self._overlay.abort_requested:
-                raise QirabotError(
-                    "aborted by user (ESC held during desktop control)",
-                    code="user_abort",
-                )
+            self._raise_if_user_abort()
             # After save_note the device hasn't moved, so reuse the cached
             # screenshot on the server side and skip a redundant upload.
             if last_was_save_note:
@@ -1337,6 +1330,12 @@ class Qirabot:
                 )
 
             if action_type and action_type != "done":
+                # Second abort checkpoint, right before injection: ESC held
+                # while the model was thinking must stop THIS action, not
+                # the next one — "I hit the kill switch and it clicked once
+                # more anyway" is the worst version of a slow abort. The
+                # in-flight server call above is the only wait that remains.
+                self._raise_if_user_abort()
                 try:
                     if action_type in tool_handlers:
                         # Custom tool: run the user's handler instead of a
@@ -2110,6 +2109,19 @@ class Qirabot:
             self._execute_action(adapter, result)
 
         return result
+
+    def _raise_if_user_abort(self) -> None:
+        """End the run if the user hit the kill switch (ESC held while the
+        edge glow was on — see Overlay's abort channel).
+
+        Checked at every point the loop is about to spend time or inject
+        input: the top of each step and again right before the action runs.
+        """
+        if self._overlay is not None and self._overlay.abort_requested:
+            raise QirabotError(
+                "aborted by user (ESC held during desktop control)",
+                code="user_abort",
+            )
 
     def _pulse_edge_glow(self, adapter: DeviceAdapter) -> None:
         """A call is about to inject REAL mouse/keyboard input outside an

@@ -383,14 +383,15 @@ def test_client_aborts_between_steps_on_esc_hold(fake_spawn):
         def annotation_scale(self):
             return 1.0
 
+    executed = []
     bot = Qirabot(api_key="k", task_id="t", overlay=True)
     bot._get_adapter = lambda target: _FakeAdapter()
     bot._record_step = lambda *a, **k: None
-    bot._execute_action = lambda *a, **k: None
+    bot._execute_action = lambda *a, **k: executed.append(1)
     assert bot._overlay is not None
 
     def post(**kw):
-        # ESC held while this step was executing
+        # ESC held while the model was thinking
         bot._overlay._abort_event.set()
         return {"success": True, "finished": False, "actionType": "wait", "params": {}}
 
@@ -398,6 +399,9 @@ def test_client_aborts_between_steps_on_esc_hold(fake_spawn):
     with pytest.raises(QirabotError) as excinfo:
         bot.ai(object(), "drive the desktop", max_steps=5)
     assert getattr(excinfo.value, "code", "") == "user_abort"
+    # The action the model returned AFTER the abort must never be injected:
+    # "I hit the kill switch and it clicked once more" is not acceptable.
+    assert executed == []
     # The overlay shows the failed ending, glow off.
     last = _sent_lines(fake_spawn[0])[-1]
     assert last["state"] == "fail" and last["edge"] is False
