@@ -407,6 +407,41 @@ def test_client_aborts_between_steps_on_esc_hold(fake_spawn):
     # The overlay shows the failed ending, glow off.
     last = _sent_lines(fake_spawn[0])[-1]
     assert last["state"] == "fail" and last["edge"] is False
+    # Sticky: a script catching the exception must not re-take the machine
+    # with its next bot.ai() — it raises up front, no glow, no injection.
+    posts_before = len(_sent_lines(fake_spawn[0]))
+    with pytest.raises(QirabotError) as second:
+        bot.ai(object(), "next stage of the same script")
+    assert getattr(second.value, "code", "") == "user_abort"
+    assert executed == []
+    assert len(_sent_lines(fake_spawn[0])) == posts_before  # overlay untouched
+
+
+def test_clear_user_abort_re_allows_runs(fake_spawn):
+    from qirabot.client import Qirabot, RunResult
+
+    class _FakeAdapter:
+        controls_user_input = True
+
+        def release_all_inputs(self):
+            pass
+
+    loops = []
+    bot = Qirabot(api_key="k", task_id="t", overlay=True)
+    bot._get_adapter = lambda target: _FakeAdapter()
+    bot._ai_loop = lambda *a, **k: loops.append(1) or RunResult(success=True, output="ok")
+    bot._user_aborted = True  # as latched by an earlier ESC abort
+
+    from qirabot.exceptions import QirabotError
+
+    with pytest.raises(QirabotError):
+        bot.ai(object(), "blocked")
+    assert loops == [] and fake_spawn == []  # helper never even spawned
+
+    bot.clear_user_abort()  # the script's deliberate decision to continue
+    bot.ai(object(), "resumed")
+    assert loops == [1]
+    assert any(m.get("state") == "run" for m in _sent_lines(fake_spawn[0]))
 
 
 def test_edge_pulse_debounces_to_one_lit_stretch(fake_spawn):

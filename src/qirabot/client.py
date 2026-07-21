@@ -380,6 +380,12 @@ class Qirabot:
         # goal_failed/max_steps stay "completed" at task level — the command
         # ran; whether that fails the task is the script's call via fail().
         self._last_ai_status: str | None = None
+        # Latched by a user abort (ESC hold / mouse-to-corner): blocks every
+        # later ai() on this client until clear_user_abort(). ESC means
+        # "give me the machine back" — its scope is the script's autonomous
+        # control as a whole, not just the ai() call that happened to be
+        # running; a try/except around bot.ai() must not re-take control.
+        self._user_aborted = False
         self._last_ai_error = ""
         # Session-wide totals for the report header. Token/timing data rides in
         # each ai() step result, not in _log, so we accumulate it here as steps
@@ -1083,6 +1089,16 @@ class Qirabot:
         Hard limits (e.g. "GM may be used once") belong in the custom tool's
         handler code, not here — prompts persuade, code enforces.
         """
+        if self._user_aborted:
+            # A previous run on this client was aborted by the user. Don't
+            # light the glow, don't take a screenshot, don't touch the
+            # machine: continuing requires the script to acknowledge via
+            # clear_user_abort().
+            raise QirabotError(
+                "a previous run was aborted by the user; call "
+                "clear_user_abort() to allow further ai() runs",
+                code="user_abort",
+            )
         prev_section = self._current_section
         section = instruction or "ai"
         runs = self._section_runs.get(section, 0) + 1
@@ -1134,6 +1150,7 @@ class Qirabot:
                 self._section_outcomes[self._current_section] = "cancelled"
                 self._last_ai_status = "cancelled"
                 self._last_ai_error = str(e)
+                self._user_aborted = True  # sticky: see clear_user_abort()
                 self.cancel(str(e))
             else:
                 # Any other exception on the way out — ActionError, timeout,
@@ -2204,6 +2221,24 @@ class Qirabot:
                 )
             except Exception:
                 logger.debug("failed to report cancellation for task %s", self._task_id)
+
+    def clear_user_abort(self) -> None:
+        """Re-allow ai() runs after a user abort (ESC hold / mouse-to-corner).
+
+        An abort latches: every later :meth:`ai` on this client raises
+        ``user_abort`` immediately, so a ``try/except`` around one run can't
+        re-take the machine the user just reclaimed. Call this only when
+        continuing is a deliberate decision (e.g. after prompting the person
+        at the machine). Single-step calls (:meth:`click`, :meth:`press_key`,
+        …) are never blocked — they are the script's own explicit actions,
+        e.g. cleanup after the abort.
+
+        Note: the task's server-side terminal state was already recorded as
+        ``cancelled`` at the moment of the abort; clearing does not undo that.
+        """
+        self._user_aborted = False
+        if self._overlay is not None:
+            self._overlay._abort_event.clear()
 
     def report(self, path: str | None = None) -> Path | None:
         """Write the run report HTML now and return its path.
