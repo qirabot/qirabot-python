@@ -246,6 +246,42 @@ class TestWindow:
         monkeypatch.setattr(win, "_user32", lambda: user32)
         assert Window(title="Genshin", ambiguous="largest").hwnd == 5
 
+    def test_resolution_excludes_own_console_window(self, monkeypatch):
+        # The console hosting `qirabot ... --window-title "Genshin"` echoes
+        # the command line into its own title, so it matches the very pattern
+        # the user just typed. It must never be a candidate: with the game
+        # present the match stays unique instead of turning ambiguous.
+        user32 = FakeUser32(
+            windows=[
+                (1, 'cmd.exe - qirabot desktop "..." --window-title "Genshin"', True),
+                (2, "Genshin Impact · Cloud(LQA)", True),
+            ]
+        )
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        monkeypatch.setattr(win, "_own_console_hwnd", lambda: 1)
+        assert Window(title_re="Genshin").hwnd == 2
+
+    def test_console_only_match_is_not_found(self, monkeypatch):
+        # A pattern that matches nothing but the echoing console must fail
+        # loudly, not silently bind the bot to the console window.
+        user32 = FakeUser32(
+            windows=[(1, 'cmd.exe - qirabot desktop "..." --window-title "gggg"', True)]
+        )
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        monkeypatch.setattr(win, "_own_console_hwnd", lambda: 1)
+        with pytest.raises(QirabotError) as ei:
+            _ = Window(title_re="gggg").hwnd
+        assert ei.value.code == "windows.window_not_found"
+
+    def test_own_console_hwnd_is_zero_without_kernel32(self, monkeypatch):
+        # When the kernel32 shim raises (off-Windows, test fakes) the helper
+        # must degrade to 0 = "exclude nothing", never propagate.
+        def boom():
+            raise RuntimeError("no kernel32 here")
+
+        monkeypatch.setattr(win, "_kernel32", boom)
+        assert win._own_console_hwnd() == 0
+
     def test_class_name_matches_untitled_window(self, monkeypatch):
         # A game's renderer window may not have set its title yet — class
         # matching must still find it (title matching never can).

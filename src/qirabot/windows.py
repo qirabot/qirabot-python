@@ -56,6 +56,10 @@ def _gdi32() -> Any:
     return _dll("gdi32")
 
 
+def _kernel32() -> Any:
+    return _dll("kernel32")
+
+
 # ---------------------------------------------------------------------------
 # DPI awareness (shared with recording.window_region)
 # ---------------------------------------------------------------------------
@@ -131,6 +135,29 @@ def list_visible_windows() -> list[tuple[int, str]]:
     return results
 
 
+def _own_console_hwnd() -> int:
+    """This process's console window handle, or 0 (no console / off-Windows).
+
+    The console hosting a ``qirabot`` invocation echoes the full command line
+    into its own window title — including the --window-title/title_re= value —
+    so the console itself matches whatever pattern the user just typed. Title
+    and class resolution exclude it; an explicit ``hwnd=`` can still reach it.
+    Best-effort: under Windows Terminal this is the hidden ConPTY window (the
+    visible terminal belongs to another process and can't be identified here).
+    """
+    try:
+        fn = _kernel32().GetConsoleWindow
+        try:
+            # HWNDs are pointer-sized; the ctypes default c_int restype would
+            # sign-extend, breaking equality with enumerated (unsigned) hwnds.
+            fn.restype = ctypes.c_void_p
+        except Exception:
+            pass  # test fakes: bound methods reject attribute assignment
+        return int(fn() or 0)
+    except Exception:
+        return 0
+
+
 def _visible_windows_by_class(class_name: str) -> list[tuple[int, str]]:
     """Visible top-level windows whose class equals ``class_name``, as
     (hwnd, title). Unlike :func:`list_visible_windows`, untitled windows are
@@ -191,6 +218,11 @@ class Window:
     ``hwnd`` alone, or any combination of ``title``/``title_re`` (mutually
     exclusive) and ``class_name``, selects the window. Whole-desktop
     automation belongs to the pyautogui backend instead.
+
+    The process's own console window is never a title/class candidate: a
+    console echoes the qirabot command line — pattern included — into its own
+    title and would otherwise self-match. Pass ``hwnd=`` to target it
+    deliberately.
     """
 
     def __init__(
@@ -271,7 +303,12 @@ class Window:
                 windows = _visible_windows_by_class(self._class_name)
             else:
                 windows = list_visible_windows()
-            matches = [(h, t) for h, t in windows if pattern is None or pattern.search(t)]
+            console = _own_console_hwnd()
+            matches = [
+                (h, t)
+                for h, t in windows
+                if h != console and (pattern is None or pattern.search(t))
+            ]
             if matches:
                 break
             if time.monotonic() >= deadline:
@@ -290,8 +327,8 @@ class Window:
         listing = ", ".join(f"{t!r} (hwnd={h})" for h, t in matches[:10])
         raise QirabotError(
             f"{len(matches)} windows match {wanted}: {listing} — narrow the "
-            "pattern, pass hwnd=, or pass ambiguous='largest' to pick the "
-            "biggest matching window",
+            "pattern, pass hwnd= (CLI: --hwnd), or pass ambiguous='largest' "
+            "(CLI: --ambiguous largest) to pick the biggest matching window",
             code="windows.window_ambiguous",
         )
 
@@ -783,10 +820,6 @@ def ensure_english_input(hwnd: int) -> bool:
 
 CF_UNICODETEXT = 13
 _GMEM_MOVEABLE = 0x0002
-
-
-def _kernel32() -> Any:
-    return _dll("kernel32")
 
 
 def _set_types(fn: Any, restype: Any, argtypes: list[Any]) -> None:
