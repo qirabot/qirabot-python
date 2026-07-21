@@ -253,8 +253,9 @@ While the glow is on, a small pill at the top of the screen reads
 the run**: the
 bot stops at the next step boundary (a step may take a few seconds),
 releases every key and mouse button it was holding, and `bot.ai()` raises a
-`user_abort` error. Short ESC taps — yours or the bot's own — never trigger
-it. The kill switch rides the overlay, so it's off when the overlay is off;
+`user_abort` error; the task is recorded as **cancelled**, not failed, so
+deliberate aborts stay out of your failure metrics. Short ESC taps — yours
+or the bot's own — never trigger it. The kill switch rides the overlay, so it's off when the overlay is off;
 on the pyautogui backend, slamming the mouse into a screen corner and
 leaving it there also aborts (pyautogui's built-in failsafe), overlay or
 not. On macOS the ESC listener needs the Accessibility permission — the

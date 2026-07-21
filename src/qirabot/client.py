@@ -1120,11 +1120,28 @@ class Qirabot:
                 self._overlay.finish(result.success, result.output or result.status)
             return result
         except Exception as e:
-            # Any exception on the way out — ActionError, timeout, adapter
-            # failure — is an "error" ending, distinct from goal_failed.
-            self._section_outcomes[self._current_section] = "error"
-            self._last_ai_status = "error"
-            self._last_ai_error = str(e)
+            aborted = (
+                getattr(e, "code", "") == "user_abort"
+                or type(e).__name__ == "FailSafeException"
+            )
+            if aborted:
+                # A deliberate user abort (ESC hold, mouse-to-corner) is a
+                # cancellation, not a bot failure: record the server's
+                # distinct 'cancelled' terminal state — same bucket as a
+                # Ctrl+C routed through cancel(), kept out of failure
+                # metrics. cancel()'s terminalized guard also stops close()
+                # from re-recording the task as failed.
+                self._section_outcomes[self._current_section] = "cancelled"
+                self._last_ai_status = "cancelled"
+                self._last_ai_error = str(e)
+                self.cancel(str(e))
+            else:
+                # Any other exception on the way out — ActionError, timeout,
+                # adapter failure — is an "error" ending, distinct from
+                # goal_failed.
+                self._section_outcomes[self._current_section] = "error"
+                self._last_ai_status = "error"
+                self._last_ai_error = str(e)
             if self._overlay is not None:
                 self._overlay.finish(False, str(e))
             raise

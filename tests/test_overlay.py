@@ -402,6 +402,8 @@ def test_client_aborts_between_steps_on_esc_hold(fake_spawn):
     # The action the model returned AFTER the abort must never be injected:
     # "I hit the kill switch and it clicked once more" is not acceptable.
     assert executed == []
+    # Recorded as a user cancellation, not a bot failure.
+    assert bot._last_ai_status == "cancelled"
     # The overlay shows the failed ending, glow off.
     last = _sent_lines(fake_spawn[0])[-1]
     assert last["state"] == "fail" and last["edge"] is False

@@ -109,6 +109,37 @@ class TestCloseStatusFollowsLastAiOutcome:
         _, body = transport.completions()[0]
         assert body is None
 
+
+class TestUserAbortRecordsCancelled:
+    """A deliberate user abort (ESC hold, mouse-to-corner failsafe) is a
+    cancellation, not a bot failure: the server gets the distinct
+    'cancelled' terminal state — kept out of the failure bucket — and
+    close() must not re-record the task as failed afterwards."""
+
+    def test_failsafe_abort_reports_cancelled_not_failed(self):
+        class FailSafeException(Exception):  # matches pyautogui's, by name
+            pass
+
+        bot, transport = _bot_with_transport({
+            "success": True, "finished": False,
+            "actionType": "click", "params": {"x": 1, "y": 2},
+        })
+
+        def corner(adapter, result):
+            raise FailSafeException("mouse in a screen corner")
+
+        bot._execute_action = corner
+        with pytest.raises(FailSafeException):
+            bot.ai(object(), "task", max_steps=3)
+        bot.close()
+
+        completions = transport.completions()
+        assert len(completions) == 1  # cancel() won; close() didn't re-post
+        _, body = completions[0]
+        assert body["status"] == "cancelled"
+        assert "corner" in body["errorMessage"]
+        assert bot._last_ai_status == "cancelled"
+
     def test_goal_failed_still_completes(self):
         # goal_failed means the command ran cleanly but the goal was
         # unreachable; whether that fails the task is the script's call.

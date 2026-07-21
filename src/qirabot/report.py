@@ -189,6 +189,9 @@ _STATUS_KINDS = {
     "goal_failed": ("FAIL", "fail"),
     "max_steps": ("MAX STEPS", "warn"),
     "error": ("ERROR", "fail"),
+    # A deliberate user abort (ESC hold / mouse-to-corner / Ctrl+C via
+    # cancel()): amber, not red — the bot didn't fail, the user stopped it.
+    "cancelled": ("CANCELLED", "warn"),
 }
 
 
