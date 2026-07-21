@@ -45,6 +45,7 @@ const enSidebar = [
     text: 'Advanced',
     items: [
       { text: 'AI Tasks & Custom Tools', link: '/advanced/ai-tasks' },
+      { text: 'Progress Overlay & Kill Switch', link: '/advanced/overlay' },
       { text: 'Reports & Recording', link: '/advanced/reports' },
       { text: 'Configuration', link: '/advanced/configuration' },
       { text: 'Error Handling', link: '/advanced/error-handling' },
@@ -95,6 +96,7 @@ const zhSidebar = [
     text: '进阶',
     items: [
       { text: 'AI 任务与自定义工具', link: '/zh/advanced/ai-tasks' },
+      { text: '进度悬浮窗与急停', link: '/zh/advanced/overlay' },
       { text: '报告与录屏', link: '/zh/advanced/reports' },
       { text: '配置', link: '/zh/advanced/configuration' },
       { text: '错误处理', link: '/zh/advanced/error-handling' },

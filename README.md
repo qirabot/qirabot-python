@@ -228,81 +228,26 @@ Runnable examples: [custom_tool_gm.py](examples/game/custom_tool_gm.py) ·
 Every CLI task command shows a small always-on-top window in the screen's
 bottom-right corner: the running instruction, each step's action and
 reasoning, and the final ✓/✗ outcome. The window is **excluded from screen
-capture** (macOS `NSWindowSharingNone`, Windows `WDA_EXCLUDEFROMCAPTURE`) and
-click-through, so it never appears in the bot's own screenshots and never
-intercepts a click meant for the app below. Turn it off with `--no-overlay`.
-
-When a task drives the machine's **real mouse and keyboard** (the desktop
-backends: `Window`, pyautogui), a slow-breathing amber glow additionally
-lines the screen edges for the duration of the run — the "machine is being
-controlled, hands off" signal, the same visual language as a screen-sharing
-border. Remote-protocol targets (browser, Android, iOS) don't light it: your
-mouse stays yours there. The glow is capture-excluded like the window; on
-Windows versions where exclusion isn't available it simply never shows —
-glowing bars in every screenshot would blind the bot. `--no-overlay` turns
-it off together with the window.
-
-It isn't just `bot.ai()`: single-step calls (`bot.click`, `bot.press_key`,
-`bot.type_text`, …) on desktop backends inject real input too, so they
-light the glow as well — it comes on with the first call and fades a few
-seconds after the last, so a scripted burst reads as one controlled
-stretch rather than a flicker.
-
-While the glow is on, a small pill at the top of the screen reads
-"Hold ESC to stop · 长按 ESC 中止" — **hold ESC for about a second to abort
-the run**: the
-bot stops at the next step boundary (a step may take a few seconds),
-releases every key and mouse button it was holding, and `bot.ai()` raises a
-`user_abort` error; the task is recorded as **cancelled**, not failed, so
-deliberate aborts stay out of your failure metrics. The abort is sticky:
-every later `bot.ai()` on the same client raises immediately (no glow, no
-input), so a `try/except` around one run can't re-take the machine you just
-reclaimed — continuing requires an explicit `bot.clear_user_abort()`.
-Single-step calls stay available for cleanup. Short ESC taps — yours or the
-bot's own — never trigger it. The kill switch rides the overlay, so it's off when the overlay is off;
-on the pyautogui backend, slamming the mouse into a screen corner and
-leaving it there also aborts (pyautogui's built-in failsafe), overlay or
-not. On macOS the ESC listener needs the Accessibility permission — the
-same one desktop control already requires.
-
-In the SDK, one flag covers the common case — the bot runs the window for
-you: the instruction as the headline with a running-state dot and elapsed
-clock, each step as `step 3/20 · click · "…"` plus the model's reasoning,
-and the final ✓/✗ outcome:
+capture** and click-through — it never appears in the bot's own screenshots
+and never intercepts a click meant for the app below. Turn it off with
+`--no-overlay`; in the SDK it's one flag:
 
 ```python
 bot = Qirabot(overlay=True)   # every bot.ai() run reports to the window
 ```
 
-When your script is more than one `bot.ai()` call, hold the window yourself:
-a standalone `Overlay` displays whatever you tell it, whenever — your own
-phases included — and `ov.step` feeds it bot steps for just the AI part:
+When a task drives the machine's **real mouse and keyboard** (the desktop
+backends), a slow-breathing amber glow lines the screen edges — the "machine
+is being controlled, hands off" signal — and **holding ESC for about a
+second aborts the run**: the bot releases every key it was holding and the
+task is recorded as **cancelled**, not failed. Remote-protocol targets
+(browser, Android, iOS) light neither: your mouse stays yours there.
 
-```python
-from qirabot import Overlay
-
-with Overlay() as ov:
-    ov.begin("phase 1/3: downloading data…")
-    data = download_from_api()                    # your own code, no bot
-
-    ov.begin("phase 2/3: filling in the report system…",
-             edge_glow=True)                      # real mouse/keyboard ahead
-    bot.ai(pyautogui, "Import the data into the report system",
-           on_step=ov.step)                       # bot steps go to the window
-
-    ov.begin("phase 3/3: sending the summary mail…")
-    send_email(data)
-```
-
-(Already have an `on_step` callback of your own? `on_step=ov.wrap(my_cb)`
-chains both.)
-
-Platform notes: macOS support installs automatically with qirabot (pyobjc);
-Windows uses the standard library's tkinter — full capture exclusion needs
-Windows 10 2004+, older versions show a black box in captures instead of the
-window content. Everywhere else (Linux, CI, missing GUI) the overlay is a
-silent no-op: it can never break a run. Runnable example:
-[overlay_progress.py](examples/desktop/overlay_progress.py).
+A standalone `Overlay` also displays your own script's phases alongside the
+bot's steps. Details — abort semantics (`user_abort`, `clear_user_abort()`),
+the standalone API, platform notes and limits:
+[Progress Overlay & Kill Switch](https://qirabot.com/docs/advanced/overlay.html).
+Runnable example: [overlay_progress.py](examples/desktop/overlay_progress.py).
 
 ## Documentation
 
@@ -311,7 +256,7 @@ silent no-op: it can never break a run. Runnable example:
 | Getting started | [Installation](https://qirabot.com/docs/guide/installation.html) · [Quick Start](https://qirabot.com/docs/guide/quickstart.html) · [CLI Reference](https://qirabot.com/docs/guide/cli.html) |
 | Platforms | [Browser](https://qirabot.com/docs/backends/browser.html) · [Android (adb, no Appium)](https://qirabot.com/docs/backends/android.html) · [iOS (WDA, no Appium)](https://qirabot.com/docs/backends/ios.html) · [Windows & Games (DirectInput)](https://qirabot.com/docs/backends/windows-games.html) · [Desktop](https://qirabot.com/docs/backends/desktop.html) · [Custom Adapters](https://qirabot.com/docs/backends/custom-adapters.html) |
 | Integrations | [Playwright](https://qirabot.com/docs/frameworks/playwright.html) · [Selenium](https://qirabot.com/docs/frameworks/selenium.html) · [Appium](https://qirabot.com/docs/frameworks/appium.html) · [pytest](https://qirabot.com/docs/frameworks/pytest.html) |
-| Advanced | [AI Tasks & Custom Tools](https://qirabot.com/docs/advanced/ai-tasks.html) · [Reports & Recording](https://qirabot.com/docs/advanced/reports.html) · [Configuration](https://qirabot.com/docs/advanced/configuration.html) · [Error Handling](https://qirabot.com/docs/advanced/error-handling.html) |
+| Advanced | [AI Tasks & Custom Tools](https://qirabot.com/docs/advanced/ai-tasks.html) · [Progress Overlay & Kill Switch](https://qirabot.com/docs/advanced/overlay.html) · [Reports & Recording](https://qirabot.com/docs/advanced/reports.html) · [Configuration](https://qirabot.com/docs/advanced/configuration.html) · [Error Handling](https://qirabot.com/docs/advanced/error-handling.html) |
 | Reference | [API — Actions & Platform Matrix](https://qirabot.com/docs/reference/api.html) |
 
 ## Examples
