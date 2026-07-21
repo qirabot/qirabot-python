@@ -13,6 +13,7 @@ python -m pip install qirabot pyautogui pytest
 ```bash
 pytest examples/desktop/test_browser_automation.py
 pytest examples/desktop/test_native_app.py
+python examples/desktop/overlay_progress.py   # plain script: the progress overlay window
 ```
 
 > Note: requires a display. Won't work in headless CI environments.

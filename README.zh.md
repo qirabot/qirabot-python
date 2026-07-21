@@ -190,6 +190,47 @@ result = bot.ai(
 
 工具**在你的本地机器上执行**——服务端接触不到你的接口和凭据——返回值会作为模型下一步的观察结果。过去需要一整页胶水代码串联的跨系统流程（UI 操作、后端调用、人工介入），现在一句指令就能覆盖。更多细节（schema、错误处理、裁剪内置工具）见[AI 任务与自定义工具](https://qirabot.com/docs/zh/advanced/ai-tasks.html)；可运行示例：[custom_tool_gm.py](examples/game/custom_tool_gm.py) · [06_human_in_the_loop.py](examples/automation/06_human_in_the_loop.py)。
 
+## 进度悬浮窗
+
+CLI 的每个任务命令都会在屏幕右下角显示一个置顶小窗：当前指令、每一步的动作
+和模型思考、以及最终的 ✓/✗ 结果。这个窗口**不会被截图捕获**（macOS
+`NSWindowSharingNone`，Windows `WDA_EXCLUDEFROMCAPTURE`），且点击穿透——
+既不会出现在 bot 自己的截图里，也不会挡住要点给下层应用的点击。用
+`--no-overlay` 关闭。
+
+SDK 中常规用法一个参数——窗口由 bot 全自动驱动，从 `▶ 指令` 到每一步
+再到最终 ✓/✗，你的代码不需要碰它：
+
+```python
+bot = Qirabot(overlay=True)   # 每次 bot.ai() 的进度都会显示到窗口
+```
+
+当你的脚本不只有 `bot.ai()` 一件事时，可以自己持有窗口：standalone 的
+`Overlay` 想显示什么、什么时候显示都由你决定——自己的阶段也能上窗——
+AI 那一段则用 `ov.step` 喂入 bot 步骤：
+
+```python
+from qirabot import Overlay
+
+with Overlay() as ov:
+    ov.set_text("阶段 1/3：下载数据…")
+    data = download_from_api()                    # 与 bot 无关的自有代码
+
+    ov.set_text("阶段 2/3：AI 填写报表系统…")
+    bot.ai(pyautogui, "把数据导入报表系统",
+           on_step=ov.step)                       # bot 步骤显示到窗口
+
+    ov.set_text("阶段 3/3：发送汇总邮件…")
+    send_email(data)
+```
+
+（已经有自己的 `on_step` 回调？`on_step=ov.wrap(my_cb)` 两个都会调。）
+
+平台说明：macOS 支持随 qirabot 自动安装（pyobjc）；Windows 用标准库
+tkinter——完整的截图排除需要 Windows 10 2004+，更早的版本截图中显示黑块
+而非窗口内容。其余环境（Linux、CI、无 GUI）悬浮窗静默不生效，绝不会影响
+任务本身。可运行示例：[overlay_progress.py](examples/desktop/overlay_progress.py)。
+
 ## 文档
 
 | 主题 | |

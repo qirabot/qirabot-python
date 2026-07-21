@@ -223,6 +223,51 @@ Details (schemas, error handling, pruning built-in tools):
 Runnable examples: [custom_tool_gm.py](examples/game/custom_tool_gm.py) ·
 [06_human_in_the_loop.py](examples/automation/06_human_in_the_loop.py).
 
+## Progress overlay
+
+Every CLI task command shows a small always-on-top window in the screen's
+bottom-right corner: the running instruction, each step's action and
+reasoning, and the final ✓/✗ outcome. The window is **excluded from screen
+capture** (macOS `NSWindowSharingNone`, Windows `WDA_EXCLUDEFROMCAPTURE`) and
+click-through, so it never appears in the bot's own screenshots and never
+intercepts a click meant for the app below. Turn it off with `--no-overlay`.
+
+In the SDK, one flag covers the common case — the bot runs the window for
+you, from `▶ instruction` through each step to the final ✓/✗:
+
+```python
+bot = Qirabot(overlay=True)   # every bot.ai() run reports to the window
+```
+
+When your script is more than one `bot.ai()` call, hold the window yourself:
+a standalone `Overlay` displays whatever you tell it, whenever — your own
+phases included — and `ov.step` feeds it bot steps for just the AI part:
+
+```python
+from qirabot import Overlay
+
+with Overlay() as ov:
+    ov.set_text("phase 1/3: downloading data…")
+    data = download_from_api()                    # your own code, no bot
+
+    ov.set_text("phase 2/3: filling in the report system…")
+    bot.ai(pyautogui, "Import the data into the report system",
+           on_step=ov.step)                       # bot steps go to the window
+
+    ov.set_text("phase 3/3: sending the summary mail…")
+    send_email(data)
+```
+
+(Already have an `on_step` callback of your own? `on_step=ov.wrap(my_cb)`
+chains both.)
+
+Platform notes: macOS support installs automatically with qirabot (pyobjc);
+Windows uses the standard library's tkinter — full capture exclusion needs
+Windows 10 2004+, older versions show a black box in captures instead of the
+window content. Everywhere else (Linux, CI, missing GUI) the overlay is a
+silent no-op: it can never break a run. Runnable example:
+[overlay_progress.py](examples/desktop/overlay_progress.py).
+
 ## Documentation
 
 | Topic | |
