@@ -149,6 +149,17 @@ def _run_local(
         bot.cancel("aborted by user")
         console.print("\n[bold yellow]Cancelled[/bold yellow]")
         sys.exit(130)
+    except QirabotError as e:
+        if getattr(e, "code", "") == "user_abort":
+            # ESC-hold kill switch: the same deliberate cancel as Ctrl+C
+            # above, so it gets the same face — yellow, exit 130, never a
+            # red Error. ai() already routed it through cancel(), so the
+            # terminal state is recorded; no fail() here.
+            console.print("\n[bold yellow]Cancelled[/bold yellow] (ESC held)")
+            sys.exit(130)
+        bot.fail(str(e))
+        console.print(f"[bold red]Error:[/bold red] {escape(str(e))}")
+        sys.exit(1)
     except Exception as e:
         # Report the client-side abort so the task is recorded as failed; without
         # this the bot.close() in the caller's finally would complete the

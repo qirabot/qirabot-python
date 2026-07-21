@@ -1322,3 +1322,51 @@ class TestDoctor:
         out = self._flat(result)
         assert result.exit_code == 0, result.output  # browser still ready
         assert "platform-tools" in out
+
+
+class TestRunLocalUserAbort:
+    """The ESC-hold kill switch is the same deliberate cancel as Ctrl+C:
+    yellow Cancelled + exit 130, never a red Error + fail()."""
+
+    def _bot_raising(self, exc):
+        class _Bot:
+            task_id = None
+
+            def __init__(self):
+                self.failed = []
+                self.cancelled = []
+
+            def ai(self, *a, **k):
+                raise exc
+
+            def fail(self, msg=""):
+                self.failed.append(msg)
+
+            def cancel(self, msg=""):
+                self.cancelled.append(msg)
+
+        return _Bot()
+
+    def test_esc_abort_exits_130_without_fail(self, capsys):
+        from qirabot.cli import main as cli_main
+        from qirabot.exceptions import QirabotError
+
+        bot = self._bot_raising(
+            QirabotError("aborted by user (ESC held)", code="user_abort")
+        )
+        with pytest.raises(SystemExit) as exc:
+            cli_main._run_local(bot, object(), "task", max_steps=5)
+        assert exc.value.code == 130
+        assert bot.failed == []  # cancel() already ran inside ai()
+        assert "Cancelled" in capsys.readouterr().out
+
+    def test_other_qirabot_errors_stay_red_exit_1(self, capsys):
+        from qirabot.cli import main as cli_main
+        from qirabot.exceptions import QirabotError
+
+        bot = self._bot_raising(QirabotError("boom", code="windows.sendinput_failed"))
+        with pytest.raises(SystemExit) as exc:
+            cli_main._run_local(bot, object(), "task", max_steps=5)
+        assert exc.value.code == 1
+        assert len(bot.failed) == 1 and "boom" in bot.failed[0]
+        assert "Error" in capsys.readouterr().out
