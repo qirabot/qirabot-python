@@ -41,9 +41,11 @@ paste the title straight from the taskbar, parentheses and dots are safe),
 `UnrealWindow`; steadier than titles and combinable with `title`/`title_re`).
 If several windows match, resolution fails listing the candidates; when the
 duplicates are unavoidable — cloud-gaming clients and launcher overlays often
-share the main window's exact title — add `ambiguous="largest"` to pick the
-biggest window. `timeout=` keeps polling for the window while a game is still
-starting:
+share the main window's exact title — add `ambiguous="largest"` (CLI:
+`--ambiguous largest`) to pick the biggest window. The console window running
+qirabot is never a candidate: its title echoes the command line, pattern
+included, and would otherwise match itself. `timeout=` keeps polling for the
+window while a game is still starting:
 
 ```python
 window = Window(title="MyGame · Cloud(Beta)", ambiguous="largest")

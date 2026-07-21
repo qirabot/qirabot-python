@@ -38,7 +38,9 @@ bot.close()
 `UnityWndClass`、Unreal 是 `UnrealWindow`;比标题更稳定,可与
 `title`/`title_re` 组合缩小范围)。多个窗口同时匹配时默认报错并列出候选;
 如果重名不可避免——云游戏客户端、启动器悬浮窗常和主窗口标题完全相同——
-加 `ambiguous="largest"` 自动选面积最大的窗口。`timeout=` 会在窗口尚未
+加 `ambiguous="largest"`(CLI:`--ambiguous largest`)自动选面积最大的
+窗口。运行 qirabot 的控制台窗口永远不会成为候选:它的标题会回显完整命令行
+(连同你输入的匹配模式),否则会匹配到自己。`timeout=` 会在窗口尚未
 出现时持续轮询,适合刚启动还在加载的游戏:
 
 ```python

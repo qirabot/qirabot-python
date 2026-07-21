@@ -145,6 +145,7 @@ proceeds on success.
 | `--app-wait` | `2.0` | Seconds to wait for the window after `--app` |
 | `--window-title` | — | Bind to the window matching this title regex (Windows window backend) |
 | `--hwnd` | — | Bind to a window handle, decimal (Windows window backend) |
+| `--ambiguous` | `error` | When several windows match `--window-title`: `error` fails listing them; `largest` picks the biggest matching window |
 
 **`screenshot TASK_ID`** — `-s/--step` (0 = latest), `-o/--output`,
 `-f/--force` (overwrite).

@@ -304,6 +304,54 @@ class TestDesktopWindowsEngine:
         assert result.exit_code != 0
         assert "mutually exclusive" in result.output
 
+    def test_ambiguous_largest_picks_biggest_matching_window(self, run_local_spy, win_platform, monkeypatch):
+        import qirabot.windows as win_mod
+
+        monkeypatch.setattr(
+            win_mod, "list_visible_windows",
+            lambda: [(1, "Genshin Impact - Launcher"), (2, "Genshin Impact")],
+        )
+        monkeypatch.setattr(win_mod, "_window_area", lambda h: {1: 100, 2: 10_000}[h])
+
+        result = _invoke(
+            ["desktop", "do it", "--window-title", "Genshin Impact", "--ambiguous", "largest"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert run_local_spy["target"].hwnd == 2
+
+    def test_ambiguous_default_error_names_the_cli_flag(self, monkeypatch, win_platform):
+        # Without --ambiguous, several matches must fail — and the message
+        # must point at spellings that exist in the CLI, not just the SDK.
+        import qirabot.windows as win_mod
+        from qirabot.cli import main
+
+        bot = MagicMock(name="bot")
+        monkeypatch.setattr(main, "_make_bot", lambda *a, **k: bot)
+        monkeypatch.setattr(
+            win_mod, "list_visible_windows",
+            lambda: [(1, "Genshin Impact - Launcher"), (2, "Genshin Impact")],
+        )
+
+        result = _invoke(["desktop", "do it", "--window-title", "Genshin Impact"])
+
+        assert result.exit_code == 1
+        assert "--ambiguous largest" in result.output
+        assert "--hwnd" in result.output
+        bot.fail.assert_called_once()
+
+    def test_ambiguous_largest_requires_window_title(self, win_platform):
+        result = _invoke(["desktop", "do it", "--hwnd", "1234", "--ambiguous", "largest"])
+
+        assert result.exit_code != 0
+        assert "--window-title" in result.output
+
+    def test_ambiguous_rejects_unknown_value(self, win_platform):
+        result = _invoke(["desktop", "do it", "--window-title", "x", "--ambiguous", "biggest"])
+
+        assert result.exit_code != 0
+        assert "largest" in result.output  # click.Choice lists the valid values
+
     def test_rejected_on_non_windows_with_guidance(self, monkeypatch):
         # A Mac user passing --window-title is expected behavior: the error
         # must explain the platform boundary and the workable alternative.

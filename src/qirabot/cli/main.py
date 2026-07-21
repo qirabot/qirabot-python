@@ -1310,12 +1310,13 @@ def _launch_desktop_app(app: str, app_wait: float) -> None:
 @_task_options
 @_option("--window-title", group="Desktop options", default="", help="Bind to the window whose title matches this regex — selects the built-in Windows window backend (screenshots/coords become window-relative, input is game-readable scancodes, recording follows the window). Windows only.")
 @_option("--hwnd", group="Desktop options", default=0, type=int, help="Bind to a specific window handle — selects the built-in Windows window backend. Windows only.")
+@_option("--ambiguous", group="Desktop options", default="error", type=click.Choice(["error", "largest"]), help="What to do when several windows match --window-title: 'error' fails listing the candidates; 'largest' picks the biggest matching window — for games whose launcher/overlay windows share the main window's title.")
 # Desktop — app launch
 @_option("--app", group="Desktop options", default="", help="Launch/activate an app before the task. macOS: app name (\"WeChat\") or bundle id; Windows: exe path, registered name, or UWP AppUserModelID; Linux: executable.")
 @_option("--app-wait", group="Desktop options", default=2.0, type=float, help="Seconds to wait after --app launch for the window to appear")
 @_debug_options()
 @click.pass_context
-def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, window_title: str, hwnd: int, app: str, app_wait: float, overlay: bool, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
+def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, window_title: str, hwnd: int, ambiguous: str, app: str, app_wait: float, overlay: bool, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
     """Run an AI task on the desktop (pyautogui; --window-title/--hwnd for one Windows window).
 
     \b
@@ -1329,6 +1330,11 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
       qirabot desktop "..." --window-title "Genshin"
       qirabot desktop "..." --app "C:/game.exe" --app-wait 15 --window-title "..."
     """
+    if ambiguous != "error" and not window_title:
+        raise click.UsageError(
+            "--ambiguous largest only applies with --window-title "
+            "(--hwnd already names one window)"
+        )
     if window_title or hwnd:
         if window_title and hwnd:
             raise click.UsageError("--window-title and --hwnd are mutually exclusive")
@@ -1349,7 +1355,9 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
         if app:
             _launch_desktop_app(app, app_wait)
 
-        window = Window(hwnd=hwnd or None, title_re=window_title or None)
+        window = Window(
+            hwnd=hwnd or None, title_re=window_title or None, ambiguous=ambiguous,
+        )
 
         def connect() -> Any:
             window.hwnd  # noqa: B018 — resolve now for actionable errors
