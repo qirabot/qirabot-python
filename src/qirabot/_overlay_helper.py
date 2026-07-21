@@ -372,7 +372,7 @@ def _run_macos() -> int:
     hint_panel: Any = None
     hint_label: Any = None
     try:
-        hint_w, hint_h = 300.0, 30.0
+        hint_w, hint_h = 340.0, 36.0
         scr_w = screen.size.width
         # Hang the pill below visibleFrame's top edge, not the screen's: the
         # full frame's top-center is exactly where the camera notch sits on
@@ -400,16 +400,21 @@ def _run_macos() -> int:
         pill_content.setWantsLayer_(True)
         pill_content.layer().setCornerRadius_(hint_h / 2)
         pill_content.layer().setBackgroundColor_(
-            AppKit.NSColor.colorWithCalibratedWhite_alpha_(0.08, 0.9).CGColor()
+            AppKit.NSColor.colorWithCalibratedWhite_alpha_(0.08, 0.92).CGColor()
         )
+        # Amber ring, same color as the glow: ties the pill to the "being
+        # controlled" state and separates it from any wallpaper — a dark
+        # pill on a dark desktop was invisible.
+        pill_content.layer().setBorderWidth_(1.5)
+        pill_content.layer().setBorderColor_(_color(_EDGE_COLOR).CGColor())
         text = AppKit.NSTextField.alloc().initWithFrame_(
-            AppKit.NSMakeRect(10, 6, hint_w - 20, hint_h - 12)
+            AppKit.NSMakeRect(10, 8, hint_w - 20, hint_h - 16)
         )
         text.setBezeled_(False)
         text.setDrawsBackground_(False)
         text.setEditable_(False)
         text.setSelectable_(False)
-        text.setFont_(AppKit.NSFont.systemFontOfSize_(12))
+        text.setFont_(AppKit.NSFont.boldSystemFontOfSize_(13))
         text.setTextColor_(AppKit.NSColor.whiteColor())
         text.setAlignment_(AppKit.NSTextAlignmentCenter)
         pill_content.addSubview_(text)
@@ -690,9 +695,15 @@ def _run_windows() -> int:
         pill.overrideredirect(True)
         pill.attributes("-topmost", True)
         pill.attributes("-alpha", 0.0)
-        pill.configure(bg=BG)
-        pill_label = tk.Label(pill, text="", bg=BG, fg="white", font=("Segoe UI", 10))
-        pill_label.pack(padx=14, pady=6)
+        # Amber toplevel showing through as a 2px ring around the dark
+        # label: ties the pill to the glow and separates it from any
+        # wallpaper — a dark pill on a dark desktop was invisible.
+        pill.configure(bg=_EDGE_COLOR)
+        pill_label = tk.Label(
+            pill, text="", bg=BG, fg="white",
+            font=("Segoe UI", 11, "bold"), padx=14, pady=6,
+        )
+        pill_label.pack(padx=2, pady=2)
         pill.update_idletasks()
         pill.geometry(f"+{(sw - pill.winfo_reqwidth()) // 2}+10")
         if _shield(pill, require_exclude=True):
