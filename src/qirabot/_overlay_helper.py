@@ -234,17 +234,20 @@ def _run_macos() -> int:
     # Edge glow bands: same style/exclusion/click-through recipe as the
     # panel, one wide band per screen border, each holding a real gradient
     # (full amber at the screen border fading to clear inward — the
-    # screen-share-glow look, not a solid bar). Ordered front once,
-    # visibility driven purely by window alpha (0 = off) — no show/hide
-    # state to get wrong; the corners, where two gradients overlap, come
-    # out slightly brighter, which reads as a natural glow concentration.
-    # Failure to build them must never take down the progress window.
+    # screen-share-glow look, not a solid bar). Each band is clipped to a
+    # trapezoid with 45° mitered ends, so the four bands tile the frame
+    # exactly like a picture frame — no corner overlap, no double-bright
+    # corners. Ordered front once, visibility driven purely by window
+    # alpha (0 = off) — no show/hide state to get wrong. Failure to build
+    # them must never take down the progress window.
     edges: list[Any] = []
     try:
         span = 40.0  # points of gradient falloff — a tight glow, not a wash
         sw, sh = screen.size.width, screen.size.height
 
-        def _glow_band(rect: Any, angle: float, outer_first: bool) -> Any:
+        def _glow_band(
+            rect: Any, angle: float, outer_first: bool, clip: list[Any]
+        ) -> Any:
             band = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
                 rect, style, AppKit.NSBackingStoreBuffered, False
             )
@@ -261,6 +264,12 @@ def _run_macos() -> int:
             w, h = rect.size.width, rect.size.height
             img = AppKit.NSImage.alloc().initWithSize_(AppKit.NSMakeSize(w, h))
             img.lockFocus()
+            path = AppKit.NSBezierPath.bezierPath()
+            path.moveToPoint_(clip[0])
+            for pt in clip[1:]:
+                path.lineToPoint_(pt)
+            path.closePath()
+            path.addClip()
             outer, inner = _color(_EDGE_COLOR, 1.0), _color(_EDGE_COLOR, 0.0)
             start, end = (outer, inner) if outer_first else (inner, outer)
             AppKit.NSGradient.alloc().initWithStartingColor_endingColor_(
@@ -278,12 +287,27 @@ def _run_macos() -> int:
             return band
 
         # angle: NSGradient's start color sits at the angle's origin
-        # (90° = drawn bottom-to-top, 0° = left-to-right).
+        # (90° = drawn bottom-to-top, 0° = left-to-right). clip: the miter
+        # trapezoid in band-local coords — outer edge full length, inner
+        # edge inset by `span` at both ends (the 45° cut).
+        P = AppKit.NSMakePoint
         edges = [
-            _glow_band(AppKit.NSMakeRect(0, sh - span, sw, span), 90.0, False),  # top
-            _glow_band(AppKit.NSMakeRect(0, 0, sw, span), 90.0, True),     # bottom
-            _glow_band(AppKit.NSMakeRect(0, 0, span, sh), 0.0, True),      # left
-            _glow_band(AppKit.NSMakeRect(sw - span, 0, span, sh), 0.0, False),  # right
+            _glow_band(  # top: outer edge at local y=span
+                AppKit.NSMakeRect(0, sh - span, sw, span), 90.0, False,
+                [P(0, span), P(sw, span), P(sw - span, 0), P(span, 0)],
+            ),
+            _glow_band(  # bottom: outer edge at local y=0
+                AppKit.NSMakeRect(0, 0, sw, span), 90.0, True,
+                [P(0, 0), P(sw, 0), P(sw - span, span), P(span, span)],
+            ),
+            _glow_band(  # left: outer edge at local x=0
+                AppKit.NSMakeRect(0, 0, span, sh), 0.0, True,
+                [P(0, 0), P(0, sh), P(span, sh - span), P(span, span)],
+            ),
+            _glow_band(  # right: outer edge at local x=span
+                AppKit.NSMakeRect(sw - span, 0, span, sh), 0.0, False,
+                [P(span, 0), P(span, sh), P(0, sh - span), P(0, span)],
+            ),
         ]
     except Exception:
         edges = []
@@ -492,11 +516,14 @@ def _run_windows() -> int:
         for i in range(_EDGE_LAYERS):
             falloff = (1 - i / _EDGE_LAYERS) ** 1.5
             off = i * lt
+            # Each layer is inset by its own depth at both ends — a stepped
+            # 45° miter, so bands don't stack alpha in the corner squares
+            # (residual overlap shrinks to lt×lt per layer, invisible).
             for w, h, x0, y0 in (
-                (sw, lt, 0, off),            # top, stepping inward
-                (sw, lt, 0, sh - lt - off),  # bottom
-                (lt, sh, off, 0),            # left
-                (lt, sh, sw - lt - off, 0),  # right
+                (sw - 2 * off, lt, off, off),            # top, stepping inward
+                (sw - 2 * off, lt, off, sh - lt - off),  # bottom
+                (lt, sh - 2 * off, off, off),            # left
+                (lt, sh - 2 * off, sw - lt - off, off),  # right
             ):
                 strip = tk.Toplevel(root)
                 strip.overrideredirect(True)
