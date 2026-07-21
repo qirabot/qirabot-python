@@ -83,15 +83,23 @@ strict = true
 # The lint job installs the browser extra so the Playwright adapter + client get
 # real type-checking. The other backends (desktop/mobile/selenium) stay out of
 # CI — their stubs are poor/untyped and would only add noise — so their lazily
-# imported modules are ignored here.
+# imported modules are ignored here. AppKit (pyobjc, mac-only overlay helper)
+# is the same category.
 [[tool.mypy.overrides]]
 module = [
     "selenium.*",
     "appium.*",
     "pyautogui",
     "pyperclip",
+    "AppKit",
 ]
 ignore_missing_imports = true
+
+# The overlay helper subclasses AppKit.NSObject, which resolves to Any on the
+# linux lint runner (no pyobjc stubs); the rest of the file stays strict.
+[[tool.mypy.overrides]]
+module = ["qirabot._overlay_helper"]
+disallow_subclassing_any = false
 
 [tool.ruff]
 target-version = "py310"

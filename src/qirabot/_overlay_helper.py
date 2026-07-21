@@ -36,6 +36,8 @@ import json
 import sys
 import threading
 import time
+from collections.abc import Callable
+from typing import Any
 
 _WIDTH, _HEIGHT, _MARGIN = 340, 96, 24
 
@@ -47,7 +49,7 @@ _STATES = {
 }
 
 
-def _read_stdin(on_msg):
+def _read_stdin(on_msg: Callable[[dict[str, Any]], object]) -> float:
     """Feed parsed stdin messages to ``on_msg``; return the close command's
     linger seconds (0.0 on EOF or a malformed value)."""
     # Explicit UTF-8: sys.stdin's default pipe encoding follows the locale
@@ -75,6 +77,27 @@ def _fmt_elapsed(seconds: float) -> str:
     if s >= 3600:
         return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
     return f"{s // 60}:{s % 60:02d}"
+
+
+def _win_dll(name: str) -> Any:
+    """ctypes.WinDLL behind a platform guard — same trick as windows._dll:
+    typeshed only defines WinDLL under win32, and lint runs on linux."""
+    if sys.platform != "win32":
+        raise OSError("win32 only")
+    import ctypes
+
+    return ctypes.WinDLL(name)
+
+
+class _TimerState:
+    """Elapsed-clock state shared by the message handler and the 1s tick.
+
+    Both run on the GUI thread (performSelectorOnMainThread / Tk mainloop),
+    so plain attributes suffice — no locking.
+    """
+
+    t0: float | None = None
+    frozen: bool = False
 
 
 def _run_macos() -> int:
@@ -116,11 +139,11 @@ def _run_macos() -> int:
         AppKit.NSColor.colorWithCalibratedWhite_alpha_(0.08, 0.85).CGColor()
     )
 
-    def _color(hex_rgb: str):
+    def _color(hex_rgb: str) -> Any:
         r, g, b = (int(hex_rgb[i : i + 2], 16) / 255 for i in (1, 3, 5))
         return AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, 1.0)
 
-    def _label(frame, font, color=None):
+    def _label(frame: Any, font: Any, color: Any = None) -> Any:
         field = AppKit.NSTextField.alloc().initWithFrame_(frame)
         field.setBezeled_(False)
         field.setDrawsBackground_(False)
@@ -160,13 +183,13 @@ def _run_macos() -> int:
     body.cell().setTruncatesLastVisibleLine_(True)
     panel.orderFrontRegardless()
 
-    timer_state = {"t0": None, "frozen": False}
+    timer_state = _TimerState()
 
     # AppKit views may only be touched from the main thread, which app.run()
     # owns below — the stdin reader hands updates over with
     # performSelectorOnMainThread instead of calling the views directly.
     class _Bridge(AppKit.NSObject):
-        def apply_(self, msg):
+        def apply_(self, msg: Any) -> None:
             msg = dict(msg)
             if "title" in msg:
                 title.setStringValue_(str(msg["title"]))
@@ -176,20 +199,21 @@ def _run_macos() -> int:
                 status.setStringValue_(glyph)
                 status.setTextColor_(_color(hex_rgb))
                 if state == "run":
-                    timer_state.update(t0=time.monotonic(), frozen=False)
+                    timer_state.t0 = time.monotonic()
+                    timer_state.frozen = False
                     clock.setStringValue_("0:00")
                 else:
-                    timer_state["frozen"] = True
+                    timer_state.frozen = True
             if "text" in msg:
                 body.setStringValue_(str(msg["text"]))
 
-        def tick_(self, _timer):
-            if timer_state["t0"] is not None and not timer_state["frozen"]:
+        def tick_(self, _timer: Any) -> None:
+            if timer_state.t0 is not None and not timer_state.frozen:
                 clock.setStringValue_(
-                    _fmt_elapsed(time.monotonic() - timer_state["t0"])
+                    _fmt_elapsed(time.monotonic() - timer_state.t0)
                 )
 
-        def quit_(self, _sender):
+        def quit_(self, _sender: Any) -> None:
             app.terminate_(None)
 
     bridge = _Bridge.alloc().init()
@@ -228,7 +252,7 @@ def _run_windows() -> int:
     # process is scaled by the system and the bottom-right placement lands
     # away from the corner on >100% displays. Best-effort (needs Win 8.1+).
     try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        _win_dll("shcore").SetProcessDpiAwareness(2)
     except Exception:
         pass
 
@@ -263,7 +287,7 @@ def _run_windows() -> int:
     root.geometry(f"{_WIDTH}x{_HEIGHT}+{x}+{y}")
     root.update_idletasks()
 
-    user32 = ctypes.windll.user32
+    user32 = _win_dll("user32")
     HWND = ctypes.c_void_p  # pointer-sized, so 64-bit handles don't truncate
     user32.GetAncestor.argtypes = [HWND, ctypes.c_uint]
     user32.GetAncestor.restype = HWND
@@ -307,7 +331,7 @@ def _run_windows() -> int:
         SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
     )
 
-    timer_state = {"t0": None, "frozen": False}
+    timer_state = _TimerState()
 
     import tkinter.font as tkfont
 
@@ -328,7 +352,7 @@ def _run_windows() -> int:
             text = text[:-1]
         return text + "…"
 
-    def apply(msg: dict) -> None:
+    def apply(msg: dict[str, Any]) -> None:
         if "title" in msg:
             title.config(text=_fit_title(str(msg["title"])))
         state = msg.get("state")
@@ -336,19 +360,20 @@ def _run_windows() -> int:
             glyph, color = _STATES[state]
             status.config(text=glyph, fg=color)
             if state == "run":
-                timer_state.update(t0=time.monotonic(), frozen=False)
+                timer_state.t0 = time.monotonic()
+                timer_state.frozen = False
                 clock.config(text="0:00")
             else:
-                timer_state["frozen"] = True
+                timer_state.frozen = True
         if "text" in msg:
             body.config(text=str(msg["text"]))
 
     def tick() -> None:
-        if timer_state["t0"] is not None and not timer_state["frozen"]:
-            clock.config(text=_fmt_elapsed(time.monotonic() - timer_state["t0"]))
+        if timer_state.t0 is not None and not timer_state.frozen:
+            clock.config(text=_fmt_elapsed(time.monotonic() - timer_state.t0))
         root.after(1000, tick)
 
-    q: queue.Queue = queue.Queue()
+    q: queue.Queue[tuple[str, Any]] = queue.Queue()
     _CLOSE = "close"
 
     def reader() -> None:
