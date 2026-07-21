@@ -373,10 +373,16 @@ def _run_macos() -> int:
     hint_label: Any = None
     try:
         hint_w, hint_h = 300.0, 30.0
-        scr_w, scr_h = screen.size.width, screen.size.height
+        scr_w = screen.size.width
+        # Hang the pill below visibleFrame's top edge, not the screen's: the
+        # full frame's top-center is exactly where the camera notch sits on
+        # notched MacBooks (a hint hidden behind the notch is no hint), and
+        # visibleFrame's top also clears the menu bar on every Mac.
+        vf = AppKit.NSScreen.mainScreen().visibleFrame()
+        pill_top = vf.origin.y + vf.size.height
         pill = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             AppKit.NSMakeRect(
-                (scr_w - hint_w) / 2, scr_h - hint_h - 10, hint_w, hint_h
+                (scr_w - hint_w) / 2, pill_top - hint_h - 8, hint_w, hint_h
             ),
             style, AppKit.NSBackingStoreBuffered, False,
         )
