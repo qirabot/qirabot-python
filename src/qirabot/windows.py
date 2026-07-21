@@ -142,8 +142,9 @@ def _own_console_hwnd() -> int:
     into its own window title — including the --window-title/title_re= value —
     so the console itself matches whatever pattern the user just typed. Title
     and class resolution exclude it; an explicit ``hwnd=`` can still reach it.
-    Best-effort: under Windows Terminal this is the hidden ConPTY window (the
-    visible terminal belongs to another process and can't be identified here).
+    Covers classic conhost only: under Windows Terminal this is the hidden
+    ConPTY window, and the visible terminal is caught by the console-title +
+    ancestor-process check in :meth:`Window._resolve` instead.
     """
     try:
         fn = _kernel32().GetConsoleWindow
@@ -156,6 +157,88 @@ def _own_console_hwnd() -> int:
         return int(fn() or 0)
     except Exception:
         return 0
+
+
+def _console_title() -> str:
+    """Title of the console this process is attached to ("" if none).
+
+    Under Windows Terminal the visible terminal window mirrors this string as
+    its own title, which is how _resolve recognizes it — GetConsoleWindow()
+    only reaches the hidden ConPTY host there.
+    """
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        if _kernel32().GetConsoleTitleW(buf, 1024):
+            return buf.value
+        return ""
+    except Exception:
+        return ""
+
+
+def _window_pid(hwnd: int) -> int:
+    """Owner process id of ``hwnd`` (0 on failure)."""
+    try:
+        pid = ctypes.c_ulong(0)
+        _user32().GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(pid))
+        return int(pid.value)
+    except Exception:
+        return 0
+
+
+class _PROCESSENTRY32W(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", ctypes.c_ulong),
+        ("cntUsage", ctypes.c_ulong),
+        ("th32ProcessID", ctypes.c_ulong),
+        ("th32DefaultHeapID", ctypes.c_void_p),
+        ("th32ModuleID", ctypes.c_ulong),
+        ("cntThreads", ctypes.c_ulong),
+        ("th32ParentProcessID", ctypes.c_ulong),
+        ("pcPriClassBase", ctypes.c_long),
+        ("dwFlags", ctypes.c_ulong),
+        ("szExeFile", ctypes.c_wchar * 260),
+    ]
+
+
+def _ancestor_pids() -> set[int]:
+    """PIDs of this process and its ancestors (empty set on any failure).
+
+    Walked via a Toolhelp snapshot: qirabot → cmd/powershell →
+    WindowsTerminal. Identifies the terminal window hosting this run even
+    though it lives in a foreign process. Depth-capped against ppid cycles
+    (PID reuse can make the chain loop).
+    """
+    try:
+        import os
+
+        k32 = _kernel32()
+        fn = k32.CreateToolhelp32Snapshot
+        try:
+            fn.restype = ctypes.c_void_p  # HANDLE; c_int would truncate
+        except Exception:
+            pass
+        snap = fn(0x00000002, 0)  # TH32CS_SNAPPROCESS
+        if not snap or snap == ctypes.c_void_p(-1).value:  # INVALID_HANDLE_VALUE
+            return set()
+        try:
+            ppid: dict[int, int] = {}
+            entry = _PROCESSENTRY32W()
+            entry.dwSize = ctypes.sizeof(_PROCESSENTRY32W)
+            ok = k32.Process32FirstW(ctypes.c_void_p(snap), ctypes.byref(entry))
+            while ok:
+                ppid[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+                ok = k32.Process32NextW(ctypes.c_void_p(snap), ctypes.byref(entry))
+        finally:
+            k32.CloseHandle(ctypes.c_void_p(snap))
+        pids: set[int] = set()
+        pid = os.getpid()
+        while pid and pid not in pids and len(pids) < 64:
+            pids.add(pid)
+            pid = ppid.get(pid, 0)
+        pids.discard(0)
+        return pids
+    except Exception:
+        return set()
 
 
 def _visible_windows_by_class(class_name: str) -> list[tuple[int, str]]:
@@ -219,9 +302,12 @@ class Window:
     exclusive) and ``class_name``, selects the window. Whole-desktop
     automation belongs to the pyautogui backend instead.
 
-    The process's own console window is never a title/class candidate: a
-    console echoes the qirabot command line — pattern included — into its own
-    title and would otherwise self-match. Pass ``hwnd=`` to target it
+    The console/terminal window hosting this process is never a title/class
+    candidate: it echoes the qirabot command line — pattern included — into
+    its own title and would otherwise self-match. Both hosts are covered:
+    classic conhost (the console window itself) and Windows Terminal (a
+    foreign-process window recognized by mirroring this console's title while
+    belonging to an ancestor process). Pass ``hwnd=`` to target it
     deliberately.
     """
 
@@ -297,17 +383,37 @@ class Window:
             wanted_parts.insert(0, f"class {self._class_name!r}")
         wanted = " + ".join(wanted_parts)
 
+        console_hwnd = _own_console_hwnd()
+        console_title = _console_title()
+        ancestors: set[int] | None = None
+
+        def own_terminal(h: int, t: str) -> bool:
+            # The window this run's console lives in. Classic conhost: the
+            # console window itself (hwnd match). Windows Terminal (Win11's
+            # default host, even for plain cmd.exe): GetConsoleWindow() only
+            # reaches the hidden ConPTY host, but the visible terminal mirrors
+            # our console title — require its owner to also be an ancestor
+            # process (qirabot → cmd → WindowsTerminal), so an unrelated
+            # window that merely shares the title is never excluded.
+            nonlocal ancestors
+            if h == console_hwnd:
+                return True
+            if not console_title or t != console_title:
+                return False
+            if ancestors is None:
+                ancestors = _ancestor_pids()
+            return _window_pid(h) in ancestors
+
         deadline = time.monotonic() + self._timeout
         while True:
             if self._class_name is not None:
                 windows = _visible_windows_by_class(self._class_name)
             else:
                 windows = list_visible_windows()
-            console = _own_console_hwnd()
             matches = [
                 (h, t)
                 for h, t in windows
-                if h != console and (pattern is None or pattern.search(t))
+                if (pattern is None or pattern.search(t)) and not own_terminal(h, t)
             ]
             if matches:
                 break

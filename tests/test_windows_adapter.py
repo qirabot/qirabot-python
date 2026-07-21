@@ -273,6 +273,35 @@ class TestWindow:
             _ = Window(title_re="gggg").hwnd
         assert ei.value.code == "windows.window_not_found"
 
+    def test_resolution_excludes_windows_terminal_window(self, monkeypatch):
+        # Windows Terminal (Win11's default host, even for plain cmd.exe):
+        # GetConsoleWindow() only reaches the hidden ConPTY host, so the hwnd
+        # check can't see the visible terminal. It's recognized instead by
+        # mirroring our console title while belonging to an ancestor process
+        # (qirabot → cmd → WindowsTerminal).
+        echoed = 'cmd.exe - qirabot desktop "..." --window-title "Genshin"'
+        user32 = FakeUser32(
+            windows=[(1, echoed, True), (2, "Genshin Impact · Cloud(LQA)", True)]
+        )
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        monkeypatch.setattr(win, "_own_console_hwnd", lambda: 0)  # hidden ConPTY
+        monkeypatch.setattr(win, "_console_title", lambda: echoed)
+        monkeypatch.setattr(win, "_ancestor_pids", lambda: {100, 200, 300})
+        monkeypatch.setattr(win, "_window_pid", lambda h: {1: 300, 2: 4242}[h])
+        assert Window(title_re="Genshin").hwnd == 2
+
+    def test_console_title_lookalike_not_owned_by_ancestor_stays(self, monkeypatch):
+        # A window that merely shares our console's title but is NOT owned by
+        # an ancestor process (say, a second cmd window the user wants to
+        # automate) must stay a candidate — exclusion needs both signals.
+        user32 = FakeUser32(windows=[(5, "Command Prompt", True)])
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        monkeypatch.setattr(win, "_own_console_hwnd", lambda: 0)
+        monkeypatch.setattr(win, "_console_title", lambda: "Command Prompt")
+        monkeypatch.setattr(win, "_ancestor_pids", lambda: {100, 200})
+        monkeypatch.setattr(win, "_window_pid", lambda h: 999)  # foreign process
+        assert Window(title="Command Prompt").hwnd == 5
+
     def test_own_console_hwnd_is_zero_without_kernel32(self, monkeypatch):
         # When the kernel32 shim raises (off-Windows, test fakes) the helper
         # must degrade to 0 = "exclude nothing", never propagate.
