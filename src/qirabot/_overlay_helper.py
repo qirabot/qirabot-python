@@ -19,6 +19,13 @@ Protocol: one JSON object per stdin line; keys combine freely.
                                      so the final ✓/✗ state is readable
 stdin EOF also exits, so a dying parent can never leave the window behind.
 
+The reverse direction (helper → parent, one JSON line on stdout) carries
+user-intent events: {"event": "abort"} when the user holds ESC for
+~_ESC_HOLD_SECONDS while the edge glow is on — the parent ends the run
+between steps. The hold threshold doubles as the injected-input filter: the
+bot's own ESC presses are short taps and never reach it (Windows
+additionally drops LLKHF_INJECTED events).
+
 Layout — title row (status glyph · title · elapsed clock) over a wrapping
 body. The parent clips every field to a hard character budget before
 sending; the labels additionally truncate visually, so oversized CJK text
@@ -66,6 +73,11 @@ _EDGE_ALPHA_LO, _EDGE_ALPHA_HI = 0.40, 1.0
 _EDGE_PERIOD = 1.8  # seconds per breath
 _EDGE_TICK_MS = 66  # ~15 fps; only ticks while the glow is on (Windows)
 _EDGE_LAYERS = 5  # Windows gradient approximation: strips per edge
+
+# Hold ESC this long (while the glow is on) to abort the run. Long enough
+# that the bot's own injected ESC taps can never trip it, short enough to
+# feel like a kill switch.
+_ESC_HOLD_SECONDS = 1.0
 
 # state -> (glyph, color as #rgb hex, also mapped to NSColor on macOS)
 _STATES = {
@@ -146,6 +158,45 @@ def _edge_alpha(tick: int) -> float:
     return _EDGE_ALPHA_LO + (_EDGE_ALPHA_HI - _EDGE_ALPHA_LO) * 0.5 * (
         1 - math.cos(2 * math.pi * phase)
     )
+
+
+class _LongPress:
+    """Held-key detector fed by down/up events plus periodic expiry polls.
+
+    down() on key repeats does NOT reset the clock (the first press wins);
+    expired() latches — it fires once per press, and the key must be
+    released and pressed again to fire a second time. Injected key taps
+    (the bot pressing ESC as a task action) are short, so the hold
+    threshold filters them without inspecting the event source.
+    """
+
+    def __init__(self, threshold: float) -> None:
+        self._threshold = threshold
+        self._t0: float | None = None
+
+    def down(self, now: float) -> None:
+        if self._t0 is None:
+            self._t0 = now
+
+    def up(self) -> None:
+        self._t0 = None
+
+    def expired(self, now: float) -> bool:
+        if self._t0 is not None and now - self._t0 >= self._threshold:
+            self._t0 = None  # latch: one fire per press
+            return True
+        return False
+
+
+def _emit_abort() -> None:
+    """Tell the parent the user held ESC: one JSON line on stdout — the
+    reverse direction of the stdin protocol. Best-effort; a closed pipe
+    (parent already gone) must not kill the GUI."""
+    try:
+        sys.stdout.write(json.dumps({"event": "abort"}) + "\n")
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
 def _run_macos() -> int:
@@ -315,6 +366,29 @@ def _run_macos() -> int:
     timer_state = _TimerState()
     edge_state = _EdgeState()
 
+    # ESC-hold abort: a global key monitor feeds the detector; the breathe
+    # timer polls expiry (it only matters while the glow is on, exactly when
+    # that timer is doing work). Needs the Accessibility permission — the
+    # same one pyautogui desktop control already requires — and silently
+    # degrades to "no kill switch" without it.
+    esc = _LongPress(_ESC_HOLD_SECONDS)
+    try:
+        _ESC_KEYCODE = 53
+
+        def _on_key(event: Any) -> None:
+            if event.keyCode() != _ESC_KEYCODE:
+                return
+            if event.type() == AppKit.NSEventTypeKeyDown:
+                esc.down(time.monotonic())
+            else:
+                esc.up()
+
+        AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
+            AppKit.NSEventMaskKeyDown | AppKit.NSEventMaskKeyUp, _on_key
+        )
+    except Exception:
+        pass
+
     # AppKit views may only be touched from the main thread, which app.run()
     # owns below — the stdin reader hands updates over with
     # performSelectorOnMainThread instead of calling the views directly.
@@ -354,6 +428,8 @@ def _run_macos() -> int:
         def breathe_(self, _timer: Any) -> None:
             if not edge_state.on:
                 return
+            if esc.expired(time.monotonic()):
+                _emit_abort()
             edge_state.tick += 1
             a = _edge_alpha(edge_state.tick)
             for strip in edges:
@@ -547,6 +623,56 @@ def _run_windows() -> int:
     timer_state = _TimerState()
     edge_state = _EdgeState()
 
+    # ESC-hold abort: a WH_KEYBOARD_LL hook feeds the detector (Tk's
+    # mainloop pumps the messages that deliver hook callbacks); the breathe
+    # loop polls expiry — it only matters while the glow is on, exactly
+    # when that loop runs. The hook observes and passes through
+    # (CallNextHookEx always); it must never eat or delay a keystroke.
+    esc = _LongPress(_ESC_HOLD_SECONDS)
+    _hook_alive: list[Any] = []  # the callback must outlive this scope
+    try:
+
+        class _KBDLLHOOKSTRUCT(ctypes.Structure):
+            _fields_ = [
+                ("vkCode", ctypes.c_uint32),
+                ("scanCode", ctypes.c_uint32),
+                ("flags", ctypes.c_uint32),
+                ("time", ctypes.c_uint32),
+                ("dwExtraInfo", ctypes.c_size_t),
+            ]
+
+        _WM_KEYDOWN, _WM_SYSKEYDOWN = 0x0100, 0x0104
+        _WM_KEYUP, _WM_SYSKEYUP = 0x0101, 0x0105
+        _VK_ESCAPE, _LLKHF_INJECTED = 0x1B, 0x10
+        user32.CallNextHookEx.restype = ctypes.c_ssize_t
+
+        _winfunctype = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)
+
+        def _kb_hook_py(n_code: int, w_param: int, l_param: Any) -> int:
+            try:
+                if n_code >= 0:
+                    kb = ctypes.cast(
+                        l_param, ctypes.POINTER(_KBDLLHOOKSTRUCT)
+                    ).contents
+                    # LLKHF_INJECTED: the bot's own SendInput ESC taps must
+                    # never count as the user asking to abort.
+                    if kb.vkCode == _VK_ESCAPE and not kb.flags & _LLKHF_INJECTED:
+                        if w_param in (_WM_KEYDOWN, _WM_SYSKEYDOWN):
+                            esc.down(time.monotonic())
+                        elif w_param in (_WM_KEYUP, _WM_SYSKEYUP):
+                            esc.up()
+            except Exception:
+                pass
+            return int(user32.CallNextHookEx(None, n_code, w_param, l_param))
+
+        _kb_hook = _winfunctype(
+            ctypes.c_ssize_t, ctypes.c_int, ctypes.c_size_t, ctypes.c_void_p
+        )(_kb_hook_py)
+        if user32.SetWindowsHookExW(13, _kb_hook, None, 0):  # WH_KEYBOARD_LL
+            _hook_alive.append(_kb_hook)
+    except Exception:
+        pass
+
     import tkinter.font as tkfont
 
     title_font = tkfont.Font(family="Segoe UI", size=10, weight="bold")
@@ -598,6 +724,8 @@ def _run_windows() -> int:
         # loops run the animation at double rate.
         if not edge_state.on or gen != edge_state.gen:
             return
+        if esc.expired(time.monotonic()):
+            _emit_abort()
         edge_state.tick += 1
         a = _edge_alpha(edge_state.tick)
         for strip, falloff in edges:

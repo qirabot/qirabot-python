@@ -233,6 +233,55 @@ class TestRunResult:
         assert r.steps == []
 
 
+class TestUserAbortViaFailSafe:
+    """pyautogui's corner kill switch (FailSafeException) is a USER abort: it
+    must end the run, not be fed back to the model as a recoverable action
+    error — the model's recovery move is exactly what would defeat it."""
+
+    def _bot(self):
+        bot = Qirabot(api_key="k", task_id="t")
+        bot._get_adapter = lambda target: _SettleFakeAdapter()
+        bot._record_step = lambda *a, **k: None
+        return bot
+
+    def test_failsafe_exception_ends_the_run(self):
+        class FailSafeException(Exception):  # matches pyautogui's, by name
+            pass
+
+        bot = self._bot()
+        bot._post_act_retrying = lambda **kw: {
+            "success": True, "finished": False,
+            "actionType": "click", "params": {"x": 1, "y": 2},
+        }
+
+        def corner(adapter, result):
+            raise FailSafeException("mouse in a screen corner")
+
+        bot._execute_action = corner
+        with pytest.raises(FailSafeException):
+            bot.ai(object(), "task", max_steps=3)
+
+    def test_ordinary_action_errors_still_recover(self):
+        # Regression guard for the feed-back-and-continue contract: only the
+        # failsafe bypasses it, everything else still lets the model retry.
+        bot = self._bot()
+        responses = [
+            {"success": True, "finished": False,
+             "actionType": "click", "params": {"x": 1, "y": 2}},
+            {"success": True, "finished": True, "actionType": "done",
+             "params": {"result": "ok", "success": True}, "output": "ok"},
+        ]
+        bot._post_act_retrying = lambda **kw: responses.pop(0)
+
+        def flaky(adapter, result):
+            if result.get("actionType") == "click":
+                raise ValueError("transient")
+
+        bot._execute_action = flaky
+        result = bot.ai(object(), "task", max_steps=3)
+        assert result.success is True  # the loop survived the failed action
+
+
 class TestAiLoopFinish:
     """The done action's success flag drives RunResult.success: a clean run that
     concludes the goal is unreachable (success:false) is a failure, not a pass.

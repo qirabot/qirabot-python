@@ -242,6 +242,16 @@ Windows versions where exclusion isn't available it simply never shows —
 glowing bars in every screenshot would blind the bot. `--no-overlay` turns
 it off together with the window.
 
+While the glow is on, **hold ESC for about a second to abort the run**: the
+bot stops at the next step boundary (a step may take a few seconds),
+releases every key and mouse button it was holding, and `bot.ai()` raises a
+`user_abort` error. Short ESC taps — yours or the bot's own — never trigger
+it. The kill switch rides the overlay, so it's off when the overlay is off;
+on the pyautogui backend, slamming the mouse into a screen corner and
+leaving it there also aborts (pyautogui's built-in failsafe), overlay or
+not. On macOS the ESC listener needs the Accessibility permission — the
+same one desktop control already requires.
+
 In the SDK, one flag covers the common case — the bot runs the window for
 you: the instruction as the headline with a running-state dot and elapsed
 clock, each step as `step 3/20 · click · "…"` plus the model's reasoning,

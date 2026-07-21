@@ -1161,6 +1161,14 @@ class Qirabot:
         sent_tool_params = bool(tool_defs or exclude_tools)
 
         for step_num in range(1, max_steps + 1):
+            # The user held ESC while the edge glow was on (see Overlay's
+            # abort channel): stop before injecting anything else. Between
+            # steps only — one step of latency is the accepted v1 contract.
+            if self._overlay is not None and self._overlay.abort_requested:
+                raise QirabotError(
+                    "aborted by user (ESC held during desktop control)",
+                    code="user_abort",
+                )
             # After save_note the device hasn't moved, so reuse the cached
             # screenshot on the server side and skip a redundant upload.
             if last_was_save_note:
@@ -1344,6 +1352,16 @@ class Qirabot:
                         self._execute_action(adapter, result)
                         last_action_result = "ok"
                 except Exception as e:
+                    if type(e).__name__ == "FailSafeException":
+                        # pyautogui's corner kill switch: the USER slammed the
+                        # mouse into a screen corner to abort. Feeding it back
+                        # as a recoverable action error would have the model
+                        # retry — moving the mouse out of the corner and
+                        # defeating the abort. Propagate: ai()'s finally
+                        # releases held inputs and the run ends here. (Name
+                        # check, not isinstance: pyautogui is an optional
+                        # dependency this module never imports.)
+                        raise
                     last_action_result = f"ERROR: {e}"
                     # The step's screenshot/decision were recorded before this
                     # action ran, so its outcome only surfaces now. Backfill the

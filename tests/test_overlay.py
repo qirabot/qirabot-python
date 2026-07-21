@@ -38,8 +38,11 @@ class _FakeStdin:
 
 
 class _FakeProc:
-    def __init__(self, fail: bool = False):
+    def __init__(self, fail: bool = False, stdout: bytes = b""):
+        import io
+
         self.stdin = _FakeStdin(fail=fail)
+        self.stdout = io.BytesIO(stdout)  # helper->parent event stream
         self.killed = False
 
     def wait(self, timeout: float | None = None) -> int:
@@ -321,6 +324,80 @@ def test_client_edge_glow_follows_adapter_input_control(fake_spawn):
     ends = [m for m in lines if m.get("state") in ("ok", "fail")]
     assert [m["edge"] for m in runs] == [True, False]
     assert all(m["edge"] is False for m in ends)
+
+
+def test_esc_abort_event_sets_flag_and_begin_resets(monkeypatch):
+    import time as _time
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    proc = _FakeProc(stdout=b'not json\n{"event": "abort"}\n')
+    monkeypatch.setattr("qirabot.overlay.subprocess.Popen", lambda *a, **k: proc)
+    ov = Overlay()
+    ov.start()
+    deadline = _time.time() + 2.0
+    while _time.time() < deadline and not ov.abort_requested:
+        _time.sleep(0.005)
+    assert ov.abort_requested
+    ov.begin("next run")  # a new run must start unaborted
+    assert not ov.abort_requested
+
+
+def test_long_press_state_machine():
+    from qirabot._overlay_helper import _LongPress
+
+    lp = _LongPress(1.0)
+    assert not lp.expired(0.0)  # nothing pressed
+    lp.down(10.0)
+    lp.down(10.5)  # OS key-repeat: must NOT reset the clock
+    assert not lp.expired(10.9)
+    assert lp.expired(11.0)  # held past the threshold
+    assert not lp.expired(12.0)  # latched: one fire per press
+    lp.down(20.0)
+    lp.up()
+    assert not lp.expired(25.0)  # released in time: a tap, not a hold
+
+
+def test_client_aborts_between_steps_on_esc_hold(fake_spawn):
+    # The reader thread latches abort while a step runs; the loop must end
+    # the run at the next step boundary instead of injecting more input.
+    from qirabot.client import Qirabot
+    from qirabot.exceptions import QirabotError
+
+    class _FakeAdapter:
+        controls_user_input = True
+
+        def release_all_inputs(self):
+            pass
+
+        def screenshot(self, config=None):
+            return b"png"
+
+        def device_info(self):
+            from qirabot.adapters.base import DeviceInfo
+
+            return DeviceInfo(platform="desktop", width=10, height=10)
+
+        def annotation_scale(self):
+            return 1.0
+
+    bot = Qirabot(api_key="k", task_id="t", overlay=True)
+    bot._get_adapter = lambda target: _FakeAdapter()
+    bot._record_step = lambda *a, **k: None
+    bot._execute_action = lambda *a, **k: None
+    assert bot._overlay is not None
+
+    def post(**kw):
+        # ESC held while this step was executing
+        bot._overlay._abort_event.set()
+        return {"success": True, "finished": False, "actionType": "wait", "params": {}}
+
+    bot._post_act_retrying = post
+    with pytest.raises(QirabotError) as excinfo:
+        bot.ai(object(), "drive the desktop", max_steps=5)
+    assert getattr(excinfo.value, "code", "") == "user_abort"
+    # The overlay shows the failed ending, glow off.
+    last = _sent_lines(fake_spawn[0])[-1]
+    assert last["state"] == "fail" and last["edge"] is False
 
 
 @pytest.mark.skipif(

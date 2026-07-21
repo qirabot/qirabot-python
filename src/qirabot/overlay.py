@@ -13,6 +13,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 from typing import Any, Callable
 
 logger = logging.getLogger("qirabot")
@@ -77,6 +78,9 @@ class Overlay:
     def __init__(self) -> None:
         self._proc: subprocess.Popen[bytes] | None = None
         self._failed = False
+        # Set by the helper's {"event": "abort"} (user held ESC during
+        # desktop control); read by the client between steps.
+        self._abort_event = threading.Event()
 
     @staticmethod
     def supported() -> bool:
@@ -95,15 +99,47 @@ class Overlay:
             # QIRA_OVERLAY_DEBUG=1 lets the helper's stderr through, to
             # diagnose why the window doesn't appear (missing pyobjc, etc.).
             debug = os.environ.get("QIRA_OVERLAY_DEBUG", "") not in ("", "0")
+            # stdout carries helper->parent events (ESC-hold abort); a
+            # daemon thread drains it so the pipe can never fill up.
             self._proc = subprocess.Popen(
                 [sys.executable, "-m", "qirabot._overlay_helper"],
                 stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=None if debug else subprocess.DEVNULL,
             )
+            threading.Thread(
+                target=self._read_events, args=(self._proc,), daemon=True
+            ).start()
         except Exception:
             self._failed = True
             logger.debug("overlay: helper failed to start", exc_info=True)
+
+    def _read_events(self, proc: subprocess.Popen[bytes]) -> None:
+        """Drain helper→parent events from stdout (daemon thread).
+
+        Any failure just ends event delivery — it must never break the run;
+        EOF (helper exit) ends the thread naturally.
+        """
+        try:
+            assert proc.stdout is not None
+            for raw in proc.stdout:
+                try:
+                    msg = json.loads(raw)
+                except ValueError:
+                    continue
+                if isinstance(msg, dict) and msg.get("event") == "abort":
+                    self._abort_event.set()
+        except Exception:
+            pass
+
+    @property
+    def abort_requested(self) -> bool:
+        """True once the user held ESC during desktop control (edge glow on).
+
+        Latched until the next begin(); the client polls this between steps
+        and ends the run.
+        """
+        return self._abort_event.is_set()
 
     def _send(self, obj: dict[str, Any]) -> None:
         self.start()
@@ -143,8 +179,11 @@ class Overlay:
         (desktop backends); remote-protocol runs would send a false signal.
         The glow is capture-excluded like the window, and on platforms where
         exclusion isn't available it simply never shows (a glowing frame in
-        every screenshot would blind the bot).
+        every screenshot would blind the bot). While the glow is on, the
+        helper listens for a held ESC (~1s) and reports it as an abort event
+        (see ``abort_requested``).
         """
+        self._abort_event.clear()  # a new run starts unaborted
         self._send(
             {
                 "title": _clip(str(instruction), _TITLE_MAX),
