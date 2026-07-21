@@ -242,7 +242,7 @@ def _run_macos() -> int:
     # them must never take down the progress window.
     edges: list[Any] = []
     try:
-        span = 40.0  # points of gradient falloff — a tight glow, not a wash
+        span = 30.0  # points of gradient falloff — a tight glow, not a wash
         sw, sh = screen.size.width, screen.size.height
 
         def _glow_band(
@@ -509,7 +509,7 @@ def _run_windows() -> int:
     # Windows refusing WDA_EXCLUDEFROMCAPTURE — drops the strips, never
     # the window.
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    span = max(25, sh // 27)  # ~40px at 1080p, scales with physical pixels
+    span = max(20, sh // 36)  # ~30px at 1080p, scales with physical pixels
     edges: list[tuple[tk.Toplevel, float]] = []  # (strip, falloff 0..1)
     try:
         lt = max(2, span // _EDGE_LAYERS)  # per-layer thickness
