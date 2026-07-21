@@ -46,7 +46,7 @@ class FakeUser32:
         self.focus_hwnd = 0  # GetGUIThreadInfo's hwndFocus; 0 = no focus info
 
     def GetClassNameW(self, hwnd, buf, n):
-        h = hwnd if isinstance(hwnd, int) else (hwnd or 0)
+        h = hwnd.value if hasattr(hwnd, "value") else (hwnd or 0)
         buf.value = self.classes.get(h, "")[: n - 1]
         return len(buf.value)
 
@@ -301,6 +301,22 @@ class TestWindow:
         monkeypatch.setattr(win, "_ancestor_pids", lambda: {100, 200})
         monkeypatch.setattr(win, "_window_pid", lambda h: 999)  # foreign process
         assert Window(title="Command Prompt").hwnd == 5
+
+    def test_conhost_window_with_our_console_title_is_excluded(self, monkeypatch):
+        # Belt and braces: even if GetConsoleWindow() disagrees with the
+        # enumerated handle, a ConsoleWindowClass window whose title equals
+        # our console title IS our console.
+        echoed = 'cmd.exe - qirabot desktop "..." --window-title "ssadasd"'
+        user32 = FakeUser32(
+            windows=[(1, echoed, True), (2, "Notepad", True)],
+            classes={1: "ConsoleWindowClass"},
+        )
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        monkeypatch.setattr(win, "_own_console_hwnd", lambda: 0)  # disagrees
+        monkeypatch.setattr(win, "_console_title", lambda: echoed)
+        with pytest.raises(QirabotError) as ei:
+            _ = Window(title_re="ssadasd").hwnd
+        assert ei.value.code == "windows.window_not_found"
 
     def test_own_console_hwnd_is_zero_without_kernel32(self, monkeypatch):
         # When the kernel32 shim raises (off-Windows, test fakes) the helper
