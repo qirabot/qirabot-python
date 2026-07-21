@@ -11,9 +11,10 @@ Protocol: one JSON object per stdin line; keys combine freely.
                                      elapsed timer, "ok"/"fail" freeze it
     {"text": "..."}                  the body (current step + reasoning)
     {"edge": true | false}           screen-edge "being controlled" glow:
-                                     four thin strips slow-breathing along
-                                     the screen borders while the bot owns
-                                     the real mouse/keyboard
+                                     a gradient band per screen border —
+                                     amber at the edge fading inward —
+                                     slow-breathing while the bot owns the
+                                     real mouse/keyboard
     {"cmd": "close", "linger": 1.5}  exit after `linger` seconds (default 0),
                                      so the final ✓/✗ state is readable
 stdin EOF also exits, so a dying parent can never leave the window behind.
@@ -52,14 +53,19 @@ from typing import Any
 
 _WIDTH, _HEIGHT, _MARGIN = 340, 96, 24
 
-# Edge glow: slow breathe, never a flash — it runs for the whole task and a
-# blink rate would be hostile. The wide alpha swing is what makes it read
-# from the corner of the eye (motion beats brightness); the strips only
-# cover the outermost edge pixels, so a strong ceiling costs no legibility.
+# Edge glow: a soft GRADIENT band per screen edge — strongest at the border,
+# fading to nothing inward (the screen-share-glow look) — breathing slowly,
+# never flashing: it runs for the whole task and a blink rate would be
+# hostile. The wide alpha swing is what makes it read from the corner of the
+# eye (motion beats brightness); the gradient already fades to zero inward,
+# so a full-strength ceiling costs no legibility. macOS draws a real
+# NSGradient; tkinter has no per-pixel alpha, so Windows approximates with
+# _EDGE_LAYERS nested strips on a falloff curve.
 _EDGE_COLOR = "#f5c542"  # the same amber as the "run" state dot
-_EDGE_ALPHA_LO, _EDGE_ALPHA_HI = 0.35, 0.85
+_EDGE_ALPHA_LO, _EDGE_ALPHA_HI = 0.40, 1.0
 _EDGE_PERIOD = 1.8  # seconds per breath
 _EDGE_TICK_MS = 66  # ~15 fps; only ticks while the glow is on (Windows)
+_EDGE_LAYERS = 5  # Windows gradient approximation: strips per edge
 
 # state -> (glyph, color as #rgb hex, also mapped to NSColor on macOS)
 _STATES = {
@@ -181,9 +187,9 @@ def _run_macos() -> int:
         AppKit.NSColor.colorWithCalibratedWhite_alpha_(0.08, 0.85).CGColor()
     )
 
-    def _color(hex_rgb: str) -> Any:
+    def _color(hex_rgb: str, alpha: float = 1.0) -> Any:
         r, g, b = (int(hex_rgb[i : i + 2], 16) / 255 for i in (1, 3, 5))
-        return AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, 1.0)
+        return AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, alpha)
 
     def _label(frame: Any, font: Any, color: Any = None) -> Any:
         field = AppKit.NSTextField.alloc().initWithFrame_(frame)
@@ -225,36 +231,60 @@ def _run_macos() -> int:
     body.cell().setTruncatesLastVisibleLine_(True)
     panel.orderFrontRegardless()
 
-    # Edge glow strips: same style/exclusion/click-through recipe as the
-    # panel, one per screen border. Ordered front once, visibility driven
-    # purely by alpha (0 = off) — no show/hide state to get wrong. Failure
-    # to build them must never take down the progress window.
+    # Edge glow bands: same style/exclusion/click-through recipe as the
+    # panel, one wide band per screen border, each holding a real gradient
+    # (full amber at the screen border fading to clear inward — the
+    # screen-share-glow look, not a solid bar). Ordered front once,
+    # visibility driven purely by window alpha (0 = off) — no show/hide
+    # state to get wrong; the corners, where two gradients overlap, come
+    # out slightly brighter, which reads as a natural glow concentration.
+    # Failure to build them must never take down the progress window.
     edges: list[Any] = []
     try:
-        et = 12.0  # points; thick enough to register in peripheral vision
+        span = 80.0  # points of gradient falloff — a glow, not a line
         sw, sh = screen.size.width, screen.size.height
-        for rect in (
-            AppKit.NSMakeRect(0, sh - et, sw, et),  # top
-            AppKit.NSMakeRect(0, 0, sw, et),        # bottom
-            AppKit.NSMakeRect(0, 0, et, sh),        # left
-            AppKit.NSMakeRect(sw - et, 0, et, sh),  # right
-        ):
-            strip = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+
+        def _glow_band(rect: Any, angle: float, outer_first: bool) -> Any:
+            band = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
                 rect, style, AppKit.NSBackingStoreBuffered, False
             )
-            strip.setSharingType_(AppKit.NSWindowSharingNone)
-            strip.setOpaque_(False)
-            strip.setBackgroundColor_(_color(_EDGE_COLOR))
-            strip.setLevel_(AppKit.NSStatusWindowLevel)
-            strip.setIgnoresMouseEvents_(True)
-            strip.setCollectionBehavior_(
+            band.setSharingType_(AppKit.NSWindowSharingNone)
+            band.setOpaque_(False)
+            band.setBackgroundColor_(AppKit.NSColor.clearColor())
+            band.setLevel_(AppKit.NSStatusWindowLevel)
+            band.setIgnoresMouseEvents_(True)
+            band.setCollectionBehavior_(
                 AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
                 | AppKit.NSWindowCollectionBehaviorStationary
                 | AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary
             )
-            strip.setAlphaValue_(0.0)
-            strip.orderFrontRegardless()
-            edges.append(strip)
+            w, h = rect.size.width, rect.size.height
+            img = AppKit.NSImage.alloc().initWithSize_(AppKit.NSMakeSize(w, h))
+            img.lockFocus()
+            outer, inner = _color(_EDGE_COLOR, 1.0), _color(_EDGE_COLOR, 0.0)
+            start, end = (outer, inner) if outer_first else (inner, outer)
+            AppKit.NSGradient.alloc().initWithStartingColor_endingColor_(
+                start, end
+            ).drawInRect_angle_(AppKit.NSMakeRect(0, 0, w, h), angle)
+            img.unlockFocus()
+            view = AppKit.NSImageView.alloc().initWithFrame_(
+                AppKit.NSMakeRect(0, 0, w, h)
+            )
+            view.setImage_(img)
+            view.setImageScaling_(AppKit.NSImageScaleAxesIndependently)
+            band.contentView().addSubview_(view)
+            band.setAlphaValue_(0.0)
+            band.orderFrontRegardless()
+            return band
+
+        # angle: NSGradient's start color sits at the angle's origin
+        # (90° = drawn bottom-to-top, 0° = left-to-right).
+        edges = [
+            _glow_band(AppKit.NSMakeRect(0, sh - span, sw, span), 90.0, False),  # top
+            _glow_band(AppKit.NSMakeRect(0, 0, sw, span), 90.0, True),     # bottom
+            _glow_band(AppKit.NSMakeRect(0, 0, span, sh), 0.0, True),      # left
+            _glow_band(AppKit.NSMakeRect(sw - span, 0, span, sh), 0.0, False),  # right
+        ]
     except Exception:
         edges = []
 
@@ -446,33 +476,41 @@ def _run_windows() -> int:
 
     _shield(root, require_exclude=False)
 
-    # Edge glow strips: like the mac path, always mapped, visibility driven
-    # purely by alpha. -alpha also makes them WS_EX_LAYERED, which the
-    # display affinity requires. Any failure — including a pre-2004 Windows
-    # refusing WDA_EXCLUDEFROMCAPTURE — drops the strips, never the window.
+    # Edge glow bands: tkinter has no per-pixel alpha, so the mac path's
+    # real gradient is approximated with _EDGE_LAYERS nested strips per
+    # edge on a falloff curve — full amber at the border stepping down to
+    # near-clear inward. Like the mac path: always mapped, visibility
+    # driven purely by alpha (which also makes them WS_EX_LAYERED, as the
+    # display affinity requires). Any failure — including a pre-2004
+    # Windows refusing WDA_EXCLUDEFROMCAPTURE — drops the strips, never
+    # the window.
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    et = max(10, sh // 90)  # ~12px at 1080p, scales with physical pixels
-    edges: list[tk.Toplevel] = []
+    span = max(50, sh // 14)  # ~77px at 1080p, scales with physical pixels
+    edges: list[tuple[tk.Toplevel, float]] = []  # (strip, falloff 0..1)
     try:
-        for w, h, x0, y0 in (
-            (sw, et, 0, 0),        # top
-            (sw, et, 0, sh - et),  # bottom
-            (et, sh, 0, 0),        # left
-            (et, sh, sw - et, 0),  # right
-        ):
-            strip = tk.Toplevel(root)
-            strip.overrideredirect(True)
-            strip.attributes("-topmost", True)
-            strip.attributes("-alpha", 0.0)
-            strip.configure(bg=_EDGE_COLOR)
-            strip.geometry(f"{w}x{h}+{x0}+{y0}")
-            edges.append(strip)
+        lt = max(2, span // _EDGE_LAYERS)  # per-layer thickness
+        for i in range(_EDGE_LAYERS):
+            falloff = (1 - i / _EDGE_LAYERS) ** 1.5
+            off = i * lt
+            for w, h, x0, y0 in (
+                (sw, lt, 0, off),            # top, stepping inward
+                (sw, lt, 0, sh - lt - off),  # bottom
+                (lt, sh, off, 0),            # left
+                (lt, sh, sw - lt - off, 0),  # right
+            ):
+                strip = tk.Toplevel(root)
+                strip.overrideredirect(True)
+                strip.attributes("-topmost", True)
+                strip.attributes("-alpha", 0.0)
+                strip.configure(bg=_EDGE_COLOR)
+                strip.geometry(f"{w}x{h}+{x0}+{y0}")
+                edges.append((strip, falloff))
         root.update_idletasks()
-        for strip in edges:
+        for strip, _falloff in edges:
             if not _shield(strip, require_exclude=True):
                 raise OSError("capture exclusion unavailable for edge strips")
     except Exception:
-        for strip in edges:
+        for strip, _falloff in edges:
             try:
                 strip.destroy()
             except Exception:
@@ -525,7 +563,7 @@ def _run_windows() -> int:
                 root.after(_EDGE_TICK_MS, breathe, edge_state.gen)
             elif not want and edge_state.on:
                 edge_state.on = False
-                for strip in edges:
+                for strip, _falloff in edges:
                     strip.attributes("-alpha", 0.0)
 
     def breathe(gen: int) -> None:
@@ -535,8 +573,8 @@ def _run_windows() -> int:
             return
         edge_state.tick += 1
         a = _edge_alpha(edge_state.tick)
-        for strip in edges:
-            strip.attributes("-alpha", a)
+        for strip, falloff in edges:
+            strip.attributes("-alpha", a * falloff)
         root.after(_EDGE_TICK_MS, breathe, gen)
 
     def tick() -> None:
