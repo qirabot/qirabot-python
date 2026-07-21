@@ -233,7 +233,9 @@ click-through, so it never appears in the bot's own screenshots and never
 intercepts a click meant for the app below. Turn it off with `--no-overlay`.
 
 In the SDK, one flag covers the common case — the bot runs the window for
-you, from `▶ instruction` through each step to the final ✓/✗:
+you: the instruction as the headline with a running-state dot and elapsed
+clock, each step as `step 3/20 · click · "…"` plus the model's reasoning,
+and the final ✓/✗ outcome:
 
 ```python
 bot = Qirabot(overlay=True)   # every bot.ai() run reports to the window
@@ -247,14 +249,14 @@ phases included — and `ov.step` feeds it bot steps for just the AI part:
 from qirabot import Overlay
 
 with Overlay() as ov:
-    ov.set_text("phase 1/3: downloading data…")
+    ov.begin("phase 1/3: downloading data…")
     data = download_from_api()                    # your own code, no bot
 
-    ov.set_text("phase 2/3: filling in the report system…")
+    ov.begin("phase 2/3: filling in the report system…")
     bot.ai(pyautogui, "Import the data into the report system",
            on_step=ov.step)                       # bot steps go to the window
 
-    ov.set_text("phase 3/3: sending the summary mail…")
+    ov.begin("phase 3/3: sending the summary mail…")
     send_email(data)
 ```
 

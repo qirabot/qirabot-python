@@ -17,33 +17,44 @@ from typing import Any, Callable
 
 logger = logging.getLogger("qirabot")
 
-# Keep the text within what the fixed-size helper window can show.
-_MAX_LINE = 60
+# Character budgets, sized to the fixed helper window. Instructions, locate
+# descriptions, typed text, and model decisions are all unbounded user/model
+# content — every field is clipped on its own before composing, so one long
+# field can never crowd out the others, and the composed line is clipped
+# again so the pipe message stays bounded no matter what. The helper's
+# labels truncate visually on top of this (CJK glyphs are wider per char
+# than these budgets assume).
+_TITLE_MAX = 80  # headline: the running instruction
+_HEAD_MAX = 70  # body line 1: step counter + action + params
+_LOCATE_MAX = 40  # the "locate" param inside the head line
+_TYPED_MAX = 30  # the "text" param inside the head line
+_BODY_MAX = 160  # body lines 2-3: the model's decision / final outcome
 
 
-def _clip(text: str, limit: int = _MAX_LINE) -> str:
+def _clip(text: str, limit: int) -> str:
     text = " ".join(text.split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _format_step(step: Any) -> str:
-    """Two lines: what the bot is doing, then why (the model's decision)."""
+def _format_step(step: Any, total: int | None = None) -> str:
+    """Body text: what the bot is doing, then why (the model's decision)."""
     params = getattr(step, "params", None) or {}
-    head_parts = [f"step {step.step}", step.action_type or "…"]
+    counter = f"step {step.step}" + (f"/{total}" if total else "")
+    head_parts = [counter, step.action_type or "…"]
     if "locate" in params:
-        head_parts.append(f'"{params["locate"]}"')
+        head_parts.append(f'"{_clip(str(params["locate"]), _LOCATE_MAX)}"')
     if "text" in params:
-        head_parts.append(f'← "{params["text"]}"')
+        head_parts.append(f'← "{_clip(str(params["text"]), _TYPED_MAX)}"')
     if "direction" in params:
         head_parts.append(
             f"{params['direction']} {params.get('amount', '')}".rstrip()
         )
-    lines = [_clip(" · ".join(str(p) for p in head_parts))]
+    lines = [_clip(" · ".join(str(p) for p in head_parts), _HEAD_MAX)]
     decision = getattr(step, "decision", "")
     if decision:
-        # The window is three text lines tall: one for the action head,
-        # two for the decision (it word-wraps inside the label).
-        lines.append(_clip(decision, 2 * _MAX_LINE))
+        # The body is three text lines tall: one for the action head, two
+        # for the decision (it word-wraps inside the label).
+        lines.append(_clip(str(decision), _BODY_MAX))
     return "\n".join(lines)
 
 
@@ -119,18 +130,29 @@ class Overlay:
             logger.debug("overlay: helper write failed", exc_info=True)
 
     def set_text(self, text: str) -> None:
-        """Replace the window text (multi-line ok, keep it short)."""
+        """Replace the window's body text (multi-line ok, keep it short)."""
         self._send({"text": text})
 
-    def step(self, step: Any) -> None:
-        """``on_step``-compatible: render a StepResult into the window."""
-        self.set_text(_format_step(step))
+    def begin(self, instruction: str) -> None:
+        """Start of a run: headline the instruction, show the amber running
+        dot, and (re)start the elapsed clock. Clears leftover body text."""
+        self._send(
+            {"title": _clip(str(instruction), _TITLE_MAX), "state": "run", "text": ""}
+        )
+
+    def step(self, step: Any, total: int | None = None) -> None:
+        """``on_step``-compatible: render a StepResult into the window.
+        ``total`` adds the max-steps denominator ("step 3/20")."""
+        self.set_text(_format_step(step, total))
 
     def finish(self, success: bool, message: str = "") -> None:
-        """Show the run's final outcome; stays up until close()."""
-        glyph = "✓" if success else "✗"
-        text = f"{glyph} {_clip(message, 2 * _MAX_LINE)}" if message else glyph
-        self.set_text(text)
+        """Show the run's final outcome (✓/✗ glyph, frozen clock); stays up
+        until close()."""
+        payload: dict[str, Any] = {"state": "ok" if success else "fail"}
+        message = _clip(str(message), _BODY_MAX)
+        if message:
+            payload["text"] = message
+        self._send(payload)
 
     def wrap(
         self, on_step: Callable[[Any], None] | None

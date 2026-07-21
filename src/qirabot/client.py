@@ -1091,7 +1091,7 @@ class Qirabot:
             section = f"{section} #{runs}"
         self._current_section = section
         if self._overlay is not None:
-            self._overlay.set_text(f"▶ {instruction}")
+            self._overlay.begin(instruction)
         try:
             result = self._ai_loop(
                 target,
@@ -1293,7 +1293,7 @@ class Qirabot:
             self._stats["llm_decision_duration_ms"] += step_result.llm_decision_duration_ms
 
             if self._overlay is not None:
-                self._overlay.step(step_result)
+                self._overlay.step(step_result, max_steps)
             if on_step:
                 on_step(step_result)
 

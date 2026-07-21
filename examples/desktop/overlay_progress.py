@@ -43,10 +43,10 @@ def my_on_step(step):
 
 
 with Overlay() as ov:
-    ov.set_text("phase 1/2: pretending to fetch data…")
+    ov.begin("phase 1/2: pretending to fetch data…")
     time.sleep(2)  # stands in for your own non-bot work (API calls, files…)
 
-    ov.set_text("phase 2/2: AI cleans up…")
+    ov.begin("phase 2/2: AI cleans up…")
     bot = Qirabot(task_name="overlay-manual")
     # ov.wrap() chains the window update in front of your own on_step;
     # use on_step=ov.step when you don't have a callback of your own.

@@ -101,6 +101,27 @@ def test_step_renders_action_and_decision(fake_spawn):
     assert msg["text"] == 'step 3 · click · "Login button"\nneed to sign in'
 
 
+def test_step_with_total_shows_denominator(fake_spawn):
+    ov = Overlay()
+    ov.step(_step(), total=20)
+    (msg,) = _sent_lines(fake_spawn[0])
+    assert msg["text"].startswith("step 3/20 · click")
+
+
+def test_begin_sets_title_state_and_clears_body(fake_spawn):
+    ov = Overlay()
+    ov.begin("打开备忘录并新建一条笔记")
+    (msg,) = _sent_lines(fake_spawn[0])
+    assert msg == {"title": "打开备忘录并新建一条笔记", "state": "run", "text": ""}
+
+
+def test_begin_clips_long_instruction(fake_spawn):
+    ov = Overlay()
+    ov.begin("x" * 500)
+    (msg,) = _sent_lines(fake_spawn[0])
+    assert len(msg["title"]) == 80 and msg["title"].endswith("…")
+
+
 def test_close_sends_command_and_closes_stdin(fake_spawn):
     ov = Overlay()
     ov.set_text("x")
@@ -169,8 +190,9 @@ def test_finish_shows_outcome(fake_spawn):
     ov.finish(True, "Note created")
     ov.finish(False, "")
     lines = _sent_lines(fake_spawn[0])
-    assert lines[0] == {"text": "✓ Note created"}
-    assert lines[1] == {"text": "✗"}
+    assert lines[0] == {"state": "ok", "text": "Note created"}
+    # No message: state only, so the last step stays visible in the body.
+    assert lines[1] == {"state": "fail"}
 
 
 def test_close_forwards_linger(fake_spawn):
@@ -202,14 +224,24 @@ def test_context_manager_spawns_and_closes(fake_spawn):
     assert _sent_lines(proc)[-1] == {"cmd": "close", "linger": 0.0}
 
 
-def test_format_step_clips_long_text():
+def test_format_step_clips_every_field_independently():
+    # Every unbounded field at once: the locate description, the typed
+    # text, and the decision must each be clipped on its own, so no single
+    # field can crowd the others out of the fixed-size window.
     text = _format_step(
-        _step(params={"locate": "x" * 200}, decision="d" * 200)
+        _step(params={"locate": "L" * 300, "text": "T" * 300}, decision="d" * 500)
     )
     head, decision = text.split("\n")
-    assert len(head) <= 60 and head.endswith("…")
-    # The decision gets two wrapped lines' worth of budget.
-    assert len(decision) <= 120 and decision.endswith("…")
+    assert len(head) <= 70
+    assert '"L' in head and "← \"T" in head  # both params survived clipping
+    assert len(decision) <= 160 and decision.endswith("…")
+
+
+def test_format_step_clips_head_and_decision():
+    text = _format_step(_step(params={"locate": "x" * 200}, decision="d" * 200))
+    head, decision = text.split("\n")
+    assert len(head) <= 70 and head.endswith('…"')
+    assert len(decision) <= 160 and decision.endswith("…")
 
 
 def test_format_step_type_text_and_scroll():
@@ -223,6 +255,14 @@ def test_format_step_type_text_and_scroll():
         )
         == "step 3 · scroll · down 300"
     )
+
+
+def test_fmt_elapsed():
+    from qirabot._overlay_helper import _fmt_elapsed
+
+    assert _fmt_elapsed(7) == "0:07"
+    assert _fmt_elapsed(131) == "2:11"
+    assert _fmt_elapsed(3661) == "1:01:01"
 
 
 @pytest.mark.skipif(
