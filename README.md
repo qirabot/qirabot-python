@@ -232,6 +232,16 @@ capture** (macOS `NSWindowSharingNone`, Windows `WDA_EXCLUDEFROMCAPTURE`) and
 click-through, so it never appears in the bot's own screenshots and never
 intercepts a click meant for the app below. Turn it off with `--no-overlay`.
 
+When a task drives the machine's **real mouse and keyboard** (the desktop
+backends: `Window`, pyautogui), a slow-breathing amber glow additionally
+lines the screen edges for the duration of the run — the "machine is being
+controlled, hands off" signal, the same visual language as a screen-sharing
+border. Remote-protocol targets (browser, Android, iOS) don't light it: your
+mouse stays yours there. The glow is capture-excluded like the window; on
+Windows versions where exclusion isn't available it simply never shows —
+glowing bars in every screenshot would blind the bot. `--no-overlay` turns
+it off together with the window.
+
 In the SDK, one flag covers the common case — the bot runs the window for
 you: the instruction as the headline with a running-state dot and elapsed
 clock, each step as `step 3/20 · click · "…"` plus the model's reasoning,
@@ -252,7 +262,8 @@ with Overlay() as ov:
     ov.begin("phase 1/3: downloading data…")
     data = download_from_api()                    # your own code, no bot
 
-    ov.begin("phase 2/3: filling in the report system…")
+    ov.begin("phase 2/3: filling in the report system…",
+             edge_glow=True)                      # real mouse/keyboard ahead
     bot.ai(pyautogui, "Import the data into the report system",
            on_step=ov.step)                       # bot steps go to the window
 

@@ -112,7 +112,19 @@ def test_begin_sets_title_state_and_clears_body(fake_spawn):
     ov = Overlay()
     ov.begin("打开备忘录并新建一条笔记")
     (msg,) = _sent_lines(fake_spawn[0])
-    assert msg == {"title": "打开备忘录并新建一条笔记", "state": "run", "text": ""}
+    assert msg == {
+        "title": "打开备忘录并新建一条笔记",
+        "state": "run",
+        "text": "",
+        "edge": False,
+    }
+
+
+def test_begin_edge_glow_rides_the_run_message(fake_spawn):
+    ov = Overlay()
+    ov.begin("drive the desktop", edge_glow=True)
+    (msg,) = _sent_lines(fake_spawn[0])
+    assert msg["edge"] is True
 
 
 def test_begin_clips_long_instruction(fake_spawn):
@@ -190,9 +202,11 @@ def test_finish_shows_outcome(fake_spawn):
     ov.finish(True, "Note created")
     ov.finish(False, "")
     lines = _sent_lines(fake_spawn[0])
-    assert lines[0] == {"state": "ok", "text": "Note created"}
+    # edge always rides along as False: control has ended, and an unpaired
+    # begin(edge_glow=True) must never leave the glow breathing forever.
+    assert lines[0] == {"state": "ok", "text": "Note created", "edge": False}
     # No message: state only, so the last step stays visible in the body.
-    assert lines[1] == {"state": "fail"}
+    assert lines[1] == {"state": "fail", "edge": False}
 
 
 def test_close_forwards_linger(fake_spawn):
@@ -263,6 +277,50 @@ def test_fmt_elapsed():
     assert _fmt_elapsed(7) == "0:07"
     assert _fmt_elapsed(131) == "2:11"
     assert _fmt_elapsed(3661) == "1:01:01"
+
+
+def test_edge_alpha_breathes_within_bounds():
+    from qirabot._overlay_helper import (
+        _EDGE_ALPHA_HI,
+        _EDGE_ALPHA_LO,
+        _EDGE_PERIOD,
+        _EDGE_TICK_MS,
+        _edge_alpha,
+    )
+
+    ticks_per_period = int(_EDGE_PERIOD * 1000 / _EDGE_TICK_MS)
+    values = [_edge_alpha(t) for t in range(3 * ticks_per_period)]
+    assert all(_EDGE_ALPHA_LO <= v <= _EDGE_ALPHA_HI for v in values)
+    # It actually breathes: starts at the floor, reaches (near) the ceiling.
+    assert _edge_alpha(0) == pytest.approx(_EDGE_ALPHA_LO)
+    assert max(values) == pytest.approx(_EDGE_ALPHA_HI, abs=0.01)
+
+
+def test_client_edge_glow_follows_adapter_input_control(fake_spawn):
+    # Desktop backends (real mouse/keyboard) light the glow; remote-protocol
+    # backends must not — the "hands off" signal would be a lie there.
+    from qirabot.client import Qirabot, RunResult
+
+    class _FakeAdapter:
+        controls_user_input = True
+
+        def release_all_inputs(self):
+            pass
+
+    adapter = _FakeAdapter()
+    bot = Qirabot(api_key="k", task_id="t", overlay=True)
+    bot._get_adapter = lambda target: adapter
+    bot._ai_loop = lambda *a, **k: RunResult(success=True, output="done")
+
+    bot.ai(object(), "drive the desktop")
+    adapter.controls_user_input = False
+    bot.ai(object(), "drive a browser")
+
+    lines = _sent_lines(fake_spawn[0])
+    runs = [m for m in lines if m.get("state") == "run"]
+    ends = [m for m in lines if m.get("state") in ("ok", "fail")]
+    assert [m["edge"] for m in runs] == [True, False]
+    assert all(m["edge"] is False for m in ends)
 
 
 @pytest.mark.skipif(

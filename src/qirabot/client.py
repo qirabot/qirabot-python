@@ -1091,7 +1091,16 @@ class Qirabot:
             section = f"{section} #{runs}"
         self._current_section = section
         if self._overlay is not None:
-            self._overlay.begin(instruction)
+            # Edge glow only when the run takes over the REAL mouse/keyboard
+            # (desktop backends): the "hands off" signal would be a lie for
+            # remote-protocol targets. Adapter resolution can fail for a bad
+            # target — the loop below surfaces that; the overlay never does.
+            edge_glow = False
+            try:
+                edge_glow = bool(self._get_adapter(target).controls_user_input)
+            except Exception:
+                pass
+            self._overlay.begin(instruction, edge_glow=edge_glow)
         try:
             result = self._ai_loop(
                 target,

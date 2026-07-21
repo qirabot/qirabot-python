@@ -133,11 +133,25 @@ class Overlay:
         """Replace the window's body text (multi-line ok, keep it short)."""
         self._send({"text": text})
 
-    def begin(self, instruction: str) -> None:
+    def begin(self, instruction: str, edge_glow: bool = False) -> None:
         """Start of a run: headline the instruction, show the amber running
-        dot, and (re)start the elapsed clock. Clears leftover body text."""
+        dot, and (re)start the elapsed clock. Clears leftover body text.
+
+        ``edge_glow=True`` additionally lights a slow-breathing glow along
+        the screen edges — the "machine is being controlled, hands off"
+        signal. Only pass it when the run drives the REAL mouse/keyboard
+        (desktop backends); remote-protocol runs would send a false signal.
+        The glow is capture-excluded like the window, and on platforms where
+        exclusion isn't available it simply never shows (a glowing frame in
+        every screenshot would blind the bot).
+        """
         self._send(
-            {"title": _clip(str(instruction), _TITLE_MAX), "state": "run", "text": ""}
+            {
+                "title": _clip(str(instruction), _TITLE_MAX),
+                "state": "run",
+                "text": "",
+                "edge": bool(edge_glow),
+            }
         )
 
     def step(self, step: Any, total: int | None = None) -> None:
@@ -147,8 +161,8 @@ class Overlay:
 
     def finish(self, success: bool, message: str = "") -> None:
         """Show the run's final outcome (✓/✗ glyph, frozen clock); stays up
-        until close()."""
-        payload: dict[str, Any] = {"state": "ok" if success else "fail"}
+        until close(). Always turns the edge glow off — control has ended."""
+        payload: dict[str, Any] = {"state": "ok" if success else "fail", "edge": False}
         message = _clip(str(message), _BODY_MAX)
         if message:
             payload["text"] = message

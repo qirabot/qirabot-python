@@ -89,6 +89,12 @@ class DeviceAdapter(ABC):
     # next screenshot needs no settle delay after them.
     _NO_SETTLE: frozenset[str] = frozenset()
 
+    # True when the adapter drives the machine's REAL input devices (global
+    # mouse/keyboard) — the user must keep their hands off while a task runs.
+    # The client uses this to light the screen-edge "being controlled" glow;
+    # remote-protocol backends (browser/adb/wda) leave it False.
+    controls_user_input: bool = False
+
     # Per-instance override of ``_SETTLE_SECONDS``; set by the client when the user
     # passes ``settle_seconds``. ``None`` falls back to the class default.
     _settle_override: float | None = None

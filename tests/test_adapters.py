@@ -73,6 +73,27 @@ class FakeAdapter(DeviceAdapter):
         return DeviceInfo(platform="test", width=100, height=100)
 
 
+class TestControlsUserInput:
+    """Only backends that drive the REAL mouse/keyboard flag themselves —
+    the client keys the screen-edge "being controlled" glow off this."""
+
+    def test_real_input_backends_flag_true(self):
+        from qirabot.adapters.pyautogui_adapter import PyAutoGuiAdapter
+        from qirabot.adapters.windows_adapter import WindowsAdapter
+
+        assert PyAutoGuiAdapter.controls_user_input is True
+        assert WindowsAdapter.controls_user_input is True
+
+    def test_remote_protocol_backends_default_false(self):
+        from qirabot.adapters.adb_adapter import AdbAdapter
+        from qirabot.adapters.base import DeviceAdapter
+        from qirabot.adapters.playwright_adapter import PlaywrightAdapter
+
+        assert DeviceAdapter.controls_user_input is False
+        assert PlaywrightAdapter.controls_user_input is False
+        assert AdbAdapter.controls_user_input is False
+
+
 class TestExecuteDispatch:
     def test_click(self):
         a = FakeAdapter()

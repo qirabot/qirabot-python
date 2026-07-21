@@ -46,7 +46,10 @@ with Overlay() as ov:
     ov.begin("phase 1/2: pretending to fetch data…")
     time.sleep(2)  # stands in for your own non-bot work (API calls, files…)
 
-    ov.begin("phase 2/2: AI cleans up…")
+    # edge_glow: the screen-edge "being controlled" breathing glow, for
+    # phases that take over the real mouse/keyboard. The next begin() (or
+    # finish()) without it turns the glow back off.
+    ov.begin("phase 2/2: AI cleans up…", edge_glow=True)
     bot = Qirabot(task_name="overlay-manual")
     # ov.wrap() chains the window update in front of your own on_step;
     # use on_step=ov.step when you don't have a callback of your own.

@@ -10,6 +10,10 @@ Protocol: one JSON object per stdin line; keys combine freely.
     {"state": "run" | "ok" | "fail"} status glyph; "run" (re)starts the
                                      elapsed timer, "ok"/"fail" freeze it
     {"text": "..."}                  the body (current step + reasoning)
+    {"edge": true | false}           screen-edge "being controlled" glow:
+                                     four thin strips slow-breathing along
+                                     the screen borders while the bot owns
+                                     the real mouse/keyboard
     {"cmd": "close", "linger": 1.5}  exit after `linger` seconds (default 0),
                                      so the final ✓/✗ state is readable
 stdin EOF also exits, so a dying parent can never leave the window behind.
@@ -26,6 +30,12 @@ verified against the pyautogui/`screencapture` path; Windows:
 WDA_EXCLUDEFROMCAPTURE) and is click-through and non-activating, so it
 neither appears in bot screenshots nor interferes with input.
 
+The edge strips inherit all of that, with one deliberate difference: on
+Windows they REFUSE the WDA_MONITOR fallback the corner window uses. The
+corner window degrades to a small black box in captures — tolerable; edge
+strips would degrade to black bars framing every screenshot, blinding the
+vision loop. No exclusion, no glow.
+
 Exit codes: 0 normal, 3 unsupported platform or missing GUI dependency.
 """
 
@@ -33,6 +43,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import sys
 import threading
 import time
@@ -40,6 +51,14 @@ from collections.abc import Callable
 from typing import Any
 
 _WIDTH, _HEIGHT, _MARGIN = 340, 96, 24
+
+# Edge glow: slow breathe, never a flash — it runs for the whole task and a
+# blink rate would be hostile. Low alpha ceiling keeps screen content
+# readable straight through the strips.
+_EDGE_COLOR = "#f5c542"  # the same amber as the "run" state dot
+_EDGE_ALPHA_LO, _EDGE_ALPHA_HI = 0.25, 0.45
+_EDGE_PERIOD = 1.8  # seconds per breath
+_EDGE_TICK_MS = 66  # ~15 fps; only ticks while the glow is on (Windows)
 
 # state -> (glyph, color as #rgb hex, also mapped to NSColor on macOS)
 _STATES = {
@@ -98,6 +117,28 @@ class _TimerState:
 
     t0: float | None = None
     frozen: bool = False
+
+
+class _EdgeState:
+    """Edge-glow state; GUI-thread only, like :class:`_TimerState`.
+
+    ``gen`` guards the Windows breathe loop against doubling: a fast
+    off→on flip while the old after-callback is still pending would
+    otherwise leave two loops running (double-rate breathing).
+    """
+
+    on: bool = False
+    tick: int = 0
+    gen: int = 0
+
+
+def _edge_alpha(tick: int) -> float:
+    """Breathing alpha for the ``tick``-th _EDGE_TICK_MS step: a sine ease
+    between _EDGE_ALPHA_LO and _EDGE_ALPHA_HI with period _EDGE_PERIOD."""
+    phase = (tick * _EDGE_TICK_MS / 1000.0) % _EDGE_PERIOD / _EDGE_PERIOD
+    return _EDGE_ALPHA_LO + (_EDGE_ALPHA_HI - _EDGE_ALPHA_LO) * 0.5 * (
+        1 - math.cos(2 * math.pi * phase)
+    )
 
 
 def _run_macos() -> int:
@@ -183,7 +224,41 @@ def _run_macos() -> int:
     body.cell().setTruncatesLastVisibleLine_(True)
     panel.orderFrontRegardless()
 
+    # Edge glow strips: same style/exclusion/click-through recipe as the
+    # panel, one per screen border. Ordered front once, visibility driven
+    # purely by alpha (0 = off) — no show/hide state to get wrong. Failure
+    # to build them must never take down the progress window.
+    edges: list[Any] = []
+    try:
+        et = 5.0
+        sw, sh = screen.size.width, screen.size.height
+        for rect in (
+            AppKit.NSMakeRect(0, sh - et, sw, et),  # top
+            AppKit.NSMakeRect(0, 0, sw, et),        # bottom
+            AppKit.NSMakeRect(0, 0, et, sh),        # left
+            AppKit.NSMakeRect(sw - et, 0, et, sh),  # right
+        ):
+            strip = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+                rect, style, AppKit.NSBackingStoreBuffered, False
+            )
+            strip.setSharingType_(AppKit.NSWindowSharingNone)
+            strip.setOpaque_(False)
+            strip.setBackgroundColor_(_color(_EDGE_COLOR))
+            strip.setLevel_(AppKit.NSStatusWindowLevel)
+            strip.setIgnoresMouseEvents_(True)
+            strip.setCollectionBehavior_(
+                AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+                | AppKit.NSWindowCollectionBehaviorStationary
+                | AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary
+            )
+            strip.setAlphaValue_(0.0)
+            strip.orderFrontRegardless()
+            edges.append(strip)
+    except Exception:
+        edges = []
+
     timer_state = _TimerState()
+    edge_state = _EdgeState()
 
     # AppKit views may only be touched from the main thread, which app.run()
     # owns below — the stdin reader hands updates over with
@@ -206,12 +281,28 @@ def _run_macos() -> int:
                     timer_state.frozen = True
             if "text" in msg:
                 body.setStringValue_(str(msg["text"]))
+            if "edge" in msg and edges:
+                want = bool(msg["edge"])
+                if want != edge_state.on:
+                    edge_state.on = want
+                    edge_state.tick = 0
+                    if not want:
+                        for strip in edges:
+                            strip.setAlphaValue_(0.0)
 
         def tick_(self, _timer: Any) -> None:
             if timer_state.t0 is not None and not timer_state.frozen:
                 clock.setStringValue_(
                     _fmt_elapsed(time.monotonic() - timer_state.t0)
                 )
+
+        def breathe_(self, _timer: Any) -> None:
+            if not edge_state.on:
+                return
+            edge_state.tick += 1
+            a = _edge_alpha(edge_state.tick)
+            for strip in edges:
+                strip.setAlphaValue_(a)
 
         def quit_(self, _sender: Any) -> None:
             app.terminate_(None)
@@ -220,6 +311,12 @@ def _run_macos() -> int:
     AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
         1.0, bridge, "tick:", None, True
     )
+    if edges:
+        # Repeating 15fps timer with an early return while off: cheaper to
+        # reason about than start/stop churn, and macOS coalesces idle fires.
+        AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            _EDGE_TICK_MS / 1000.0, bridge, "breathe:", None, True
+        )
 
     def reader() -> None:
         linger = _read_stdin(
@@ -303,35 +400,86 @@ def _run_windows() -> int:
         ctypes.c_uint,
     ]
 
-    # winfo_id() is a Tk child window; the display affinity and the
-    # click-through styles must go on the top-level ancestor.
-    hwnd = user32.GetAncestor(root.winfo_id(), 2)  # GA_ROOT
     WDA_EXCLUDEFROMCAPTURE = 0x11  # Win10 2004+
     WDA_MONITOR = 0x01  # older fallback: black box in captures, never content
-    if not user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE):
-        user32.SetWindowDisplayAffinity(hwnd, WDA_MONITOR)
     GWL_EXSTYLE = -20
     WS_EX_TRANSPARENT = 0x00000020  # clicks pass through to what's below
     WS_EX_TOOLWINDOW = 0x00000080  # no taskbar / Alt-Tab entry
     WS_EX_LAYERED = 0x00080000
     WS_EX_NOACTIVATE = 0x08000000  # never steals focus from the target app
-    ex_style = get_long(hwnd, GWL_EXSTYLE)
-    set_long(
-        hwnd,
-        GWL_EXSTYLE,
-        ex_style | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
-    )
-    # SetWindowLong alone doesn't reliably apply style changes to a window
-    # that is already visible; SWP_FRAMECHANGED forces the recalculation.
     HWND_TOPMOST = HWND(-1)
     SWP_NOSIZE, SWP_NOMOVE = 0x0001, 0x0002
     SWP_NOACTIVATE, SWP_FRAMECHANGED = 0x0010, 0x0020
-    user32.SetWindowPos(
-        hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-        SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-    )
+
+    def _shield(widget: "tk.Misc", require_exclude: bool) -> bool:
+        """Capture-exclude + click-through + no-activate ``widget``'s window.
+
+        winfo_id() is a Tk child window; the display affinity and the
+        click-through styles must go on the top-level ancestor.
+
+        ``require_exclude`` refuses the WDA_MONITOR fallback: the corner
+        window degrades to a small black box in captures (tolerable), but a
+        caller building edge strips must get False back and not show them
+        at all — black bars framing every capture would blind the bot.
+        """
+        hwnd = user32.GetAncestor(widget.winfo_id(), 2)  # GA_ROOT
+        if not user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE):
+            if require_exclude:
+                return False
+            user32.SetWindowDisplayAffinity(hwnd, WDA_MONITOR)
+        ex_style = get_long(hwnd, GWL_EXSTYLE)
+        set_long(
+            hwnd,
+            GWL_EXSTYLE,
+            ex_style | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED
+            | WS_EX_NOACTIVATE,
+        )
+        # SetWindowLong alone doesn't reliably apply style changes to a
+        # window that is already visible; SWP_FRAMECHANGED forces the
+        # recalculation.
+        user32.SetWindowPos(
+            hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+            SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
+        return True
+
+    _shield(root, require_exclude=False)
+
+    # Edge glow strips: like the mac path, always mapped, visibility driven
+    # purely by alpha. -alpha also makes them WS_EX_LAYERED, which the
+    # display affinity requires. Any failure — including a pre-2004 Windows
+    # refusing WDA_EXCLUDEFROMCAPTURE — drops the strips, never the window.
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    et = max(4, sh // 270)  # ~4px at 1080p, scales with physical pixels
+    edges: list[tk.Toplevel] = []
+    try:
+        for w, h, x0, y0 in (
+            (sw, et, 0, 0),        # top
+            (sw, et, 0, sh - et),  # bottom
+            (et, sh, 0, 0),        # left
+            (et, sh, sw - et, 0),  # right
+        ):
+            strip = tk.Toplevel(root)
+            strip.overrideredirect(True)
+            strip.attributes("-topmost", True)
+            strip.attributes("-alpha", 0.0)
+            strip.configure(bg=_EDGE_COLOR)
+            strip.geometry(f"{w}x{h}+{x0}+{y0}")
+            edges.append(strip)
+        root.update_idletasks()
+        for strip in edges:
+            if not _shield(strip, require_exclude=True):
+                raise OSError("capture exclusion unavailable for edge strips")
+    except Exception:
+        for strip in edges:
+            try:
+                strip.destroy()
+            except Exception:
+                pass
+        edges = []
 
     timer_state = _TimerState()
+    edge_state = _EdgeState()
 
     import tkinter.font as tkfont
 
@@ -367,6 +515,28 @@ def _run_windows() -> int:
                 timer_state.frozen = True
         if "text" in msg:
             body.config(text=str(msg["text"]))
+        if "edge" in msg and edges:
+            want = bool(msg["edge"])
+            if want and not edge_state.on:
+                edge_state.on = True
+                edge_state.tick = 0
+                edge_state.gen += 1
+                root.after(_EDGE_TICK_MS, breathe, edge_state.gen)
+            elif not want and edge_state.on:
+                edge_state.on = False
+                for strip in edges:
+                    strip.attributes("-alpha", 0.0)
+
+    def breathe(gen: int) -> None:
+        # gen: a stale loop from before an off→on flip must die here, or two
+        # loops run the animation at double rate.
+        if not edge_state.on or gen != edge_state.gen:
+            return
+        edge_state.tick += 1
+        a = _edge_alpha(edge_state.tick)
+        for strip in edges:
+            strip.attributes("-alpha", a)
+        root.after(_EDGE_TICK_MS, breathe, gen)
 
     def tick() -> None:
         if timer_state.t0 is not None and not timer_state.frozen:

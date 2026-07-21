@@ -265,6 +265,9 @@ class PyAutoGuiAdapter(DeviceAdapter):
     # ``DeviceAdapter.settle_seconds`` for the rationale and override mechanism.
     _SETTLE_SECONDS = 1.0
 
+    # pyautogui moves the machine's real mouse/keyboard.
+    controls_user_input = True
+
     def device_info(self) -> DeviceInfo:
         # Report screenshot (physical) pixels, not pyautogui's logical points, so
         # the dimensions match the captured image and the screenshot-pixel

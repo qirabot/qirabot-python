@@ -152,6 +152,9 @@ class WindowsAdapter(DeviceAdapter):
     # Desktop UI (window transitions, scroll inertia) needs a generous floor.
     _SETTLE_SECONDS = 1.0
 
+    # SendInput injects into the machine's real mouse/keyboard.
+    controls_user_input = True
+
     # Games animate into their modifier "mode" (alt unlocking the cursor,
     # overlays fading in) over several frames; a click that arrives before the
     # transition finishes is processed as an unmodified click. Hold the
