@@ -318,6 +318,25 @@ class TestWindow:
             _ = Window(title_re="ssadasd").hwnd
         assert ei.value.code == "windows.window_not_found"
 
+    def test_delegated_windows_terminal_window_is_excluded(self, monkeypatch):
+        # Win11 default-terminal delegation: WT adopts a console it didn't
+        # spawn, so it is NOT an ancestor and GetConsoleWindow() points at
+        # the hidden ConPTY host — the visible WT window is recognized purely
+        # by its class + mirroring our console title (the real-world case
+        # where hwnd 2294946 != enumerated 2820414).
+        echoed = 'cmd.exe - qirabot desktop "..." --window-title "ssadasd"'
+        user32 = FakeUser32(
+            windows=[(2820414, echoed, True), (7, "Notepad", True)],
+            classes={2820414: "CASCADIA_HOSTING_WINDOW_CLASS"},
+        )
+        monkeypatch.setattr(win, "_user32", lambda: user32)
+        monkeypatch.setattr(win, "_own_console_hwnd", lambda: 2294946)  # hidden host
+        monkeypatch.setattr(win, "_console_title", lambda: echoed)
+        monkeypatch.setattr(win, "_ancestor_pids", lambda: set())  # WT not an ancestor
+        with pytest.raises(QirabotError) as ei:
+            _ = Window(title_re="ssadasd").hwnd
+        assert ei.value.code == "windows.window_not_found"
+
     def test_own_console_hwnd_is_zero_without_kernel32(self, monkeypatch):
         # When the kernel32 shim raises (off-Windows, test fakes) the helper
         # must degrade to 0 = "exclude nothing", never propagate.

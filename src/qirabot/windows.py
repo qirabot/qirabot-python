@@ -410,12 +410,16 @@ class Window:
                 return True
             if not console_title or t != console_title:
                 return False
-            # A conhost window (class ConsoleWindowClass) whose title equals
-            # our console title IS our console — belt and braces for hosts
-            # where GetConsoleWindow() disagrees with the enumerated handle.
-            # The echoed title embeds this exact command line, so a foreign
-            # console sharing it is not a realistic collision.
-            if _window_class(h) == "ConsoleWindowClass":
+            # A console-host window whose title equals our console title IS
+            # our console: classic conhost (ConsoleWindowClass), or Windows
+            # Terminal (CASCADIA_HOSTING_WINDOW_CLASS) — the latter covers
+            # Win11's default-terminal delegation, where WT adopts a console
+            # it didn't spawn: no WT_SESSION in our env, WT not among our
+            # ancestors, and GetConsoleWindow() pointing at the hidden ConPTY
+            # host instead of the visible window. The echoed title embeds
+            # this exact command line, so a foreign console sharing it is not
+            # a realistic collision.
+            if _window_class(h) in ("ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"):
                 return True
             if ancestors is None:
                 ancestors = _ancestor_pids()
