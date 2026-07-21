@@ -53,10 +53,11 @@ from typing import Any
 _WIDTH, _HEIGHT, _MARGIN = 340, 96, 24
 
 # Edge glow: slow breathe, never a flash — it runs for the whole task and a
-# blink rate would be hostile. Low alpha ceiling keeps screen content
-# readable straight through the strips.
+# blink rate would be hostile. The wide alpha swing is what makes it read
+# from the corner of the eye (motion beats brightness); the strips only
+# cover the outermost edge pixels, so a strong ceiling costs no legibility.
 _EDGE_COLOR = "#f5c542"  # the same amber as the "run" state dot
-_EDGE_ALPHA_LO, _EDGE_ALPHA_HI = 0.25, 0.45
+_EDGE_ALPHA_LO, _EDGE_ALPHA_HI = 0.35, 0.85
 _EDGE_PERIOD = 1.8  # seconds per breath
 _EDGE_TICK_MS = 66  # ~15 fps; only ticks while the glow is on (Windows)
 
@@ -230,7 +231,7 @@ def _run_macos() -> int:
     # to build them must never take down the progress window.
     edges: list[Any] = []
     try:
-        et = 5.0
+        et = 12.0  # points; thick enough to register in peripheral vision
         sw, sh = screen.size.width, screen.size.height
         for rect in (
             AppKit.NSMakeRect(0, sh - et, sw, et),  # top
@@ -450,7 +451,7 @@ def _run_windows() -> int:
     # display affinity requires. Any failure — including a pre-2004 Windows
     # refusing WDA_EXCLUDEFROMCAPTURE — drops the strips, never the window.
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    et = max(4, sh // 270)  # ~4px at 1080p, scales with physical pixels
+    et = max(10, sh // 90)  # ~12px at 1080p, scales with physical pixels
     edges: list[tk.Toplevel] = []
     try:
         for w, h, x0, y0 in (
