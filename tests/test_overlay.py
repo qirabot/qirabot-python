@@ -403,6 +403,59 @@ def test_client_aborts_between_steps_on_esc_hold(fake_spawn):
     assert last["state"] == "fail" and last["edge"] is False
 
 
+def test_edge_pulse_debounces_to_one_lit_stretch(fake_spawn):
+    import time as _time
+
+    ov = Overlay()
+    ov.edge_pulse(linger=0.05)
+    ov.edge_pulse(linger=0.05)  # burst: merges into the same stretch
+    deadline = _time.time() + 2.0
+    while _time.time() < deadline:
+        lines = _sent_lines(fake_spawn[0])
+        if any(m.get("edge") is False for m in lines):
+            break
+        _time.sleep(0.005)
+    lines = _sent_lines(fake_spawn[0])
+    assert [m["edge"] for m in lines] == [True, True, False]  # ONE fade-out
+    assert all("ESC" in m["hint"] for m in lines if m["edge"])
+
+
+def test_edge_pulse_yields_to_a_running_ai_glow(fake_spawn):
+    ov = Overlay()
+    ov.begin("drive", edge_glow=True)
+    ov.edge_pulse(linger=0.01)  # the run owns the glow: no-op
+    ov.finish(True, "done")
+    lines = _sent_lines(fake_spawn[0])
+    # begin's edge:true and finish's edge:false only — no pulse traffic that
+    # could switch the glow off mid-run.
+    assert [m.get("edge") for m in lines] == [True, False]
+
+
+def test_single_step_call_pulses_the_glow(fake_spawn):
+    # bot.press_key() etc. on a desktop backend inject real input before any
+    # ai() runs — the glow must cover them too, not just ai().
+    from qirabot.client import Qirabot
+
+    class _FakeAdapter:
+        controls_user_input = True
+
+        def execute(self, action_type, params):
+            pass
+
+        def screenshot(self, config=None):
+            return b""
+
+        @property
+        def current_target(self):
+            return None
+
+    bot = Qirabot(api_key="k", task_id="t", overlay=True)
+    bot._get_adapter = lambda target: _FakeAdapter()
+    bot.press_key(object(), "Enter")
+    lines = _sent_lines(fake_spawn[0])
+    assert any(m.get("edge") is True for m in lines)
+
+
 @pytest.mark.skipif(
     sys.platform in ("darwin", "win32"),
     reason="on GUI platforms the helper would open a real window",

@@ -1765,7 +1765,12 @@ class Qirabot:
         for AI actions. Best-effort: reporting off → zero overhead, and a
         failure to capture or persist the frame must never break the action
         itself — recording is a side channel, not part of the operation.
+
+        Also the one funnel every direct-drive primitive passes through, so
+        the edge-glow pulse for real-input calls lives here (before the
+        reporting-off early return — the glow is not a reporting feature).
         """
+        self._pulse_edge_glow(adapter)
         if not self._report:
             return
         try:
@@ -2106,9 +2111,24 @@ class Qirabot:
 
         return result
 
+    def _pulse_edge_glow(self, adapter: DeviceAdapter) -> None:
+        """A call is about to inject REAL mouse/keyboard input outside an
+        ai() run: flash the "being controlled" edge glow.
+
+        Debounced in Overlay so scripted bursts (click, click, type…) read
+        as one lit stretch; no-op for remote-protocol adapters and while an
+        ai() run owns the glow. Best-effort like everything overlay.
+        """
+        if self._overlay is not None and getattr(adapter, "controls_user_input", False):
+            try:
+                self._overlay.edge_pulse()
+            except Exception:
+                pass
+
     def _execute_action(self, adapter: DeviceAdapter, resp_action: dict[str, Any]) -> None:
         action_type = resp_action.get("actionType", "")
         params = resp_action.get("params", {})
+        self._pulse_edge_glow(adapter)
         adapter.execute(action_type, params)
 
     def fail(self, error_message: str = "") -> None:

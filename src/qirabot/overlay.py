@@ -86,6 +86,13 @@ class Overlay:
         # Set by the helper's {"event": "abort"} (user held ESC during
         # desktop control); read by the client between steps.
         self._abort_event = threading.Event()
+        # _send is called from the main thread AND the pulse-off timer
+        # thread; interleaved pipe writes would corrupt the line protocol.
+        self._send_lock = threading.Lock()
+        # Debounced edge glow for single-step calls (see edge_pulse).
+        self._edge_lock = threading.Lock()
+        self._edge_timer: threading.Timer | None = None
+        self._run_edge_active = False
 
     @staticmethod
     def supported() -> bool:
@@ -155,8 +162,9 @@ class Overlay:
             # ensure_ascii (the default) keeps the wire pure ASCII: the
             # helper's stdin decoding can then never corrupt CJK text, no
             # matter the locale (Windows pipes default to GBK/cp936 etc.).
-            proc.stdin.write((json.dumps(obj) + "\n").encode("ascii"))
-            proc.stdin.flush()
+            with self._send_lock:
+                proc.stdin.write((json.dumps(obj) + "\n").encode("ascii"))
+                proc.stdin.flush()
         except Exception:
             # Helper died (e.g. exit 3 on a missing GUI dep): stop trying.
             self._failed = True
@@ -189,6 +197,13 @@ class Overlay:
         (see ``abort_requested``).
         """
         self._abort_event.clear()  # a new run starts unaborted
+        with self._edge_lock:
+            # The run owns the glow now: park any single-step pulse so its
+            # fade-out timer can't switch the glow off mid-run.
+            self._run_edge_active = bool(edge_glow)
+            if self._edge_timer is not None:
+                self._edge_timer.cancel()
+                self._edge_timer = None
         payload: dict[str, Any] = {
             "title": _clip(str(instruction), _TITLE_MAX),
             "state": "run",
@@ -204,9 +219,42 @@ class Overlay:
         ``total`` adds the max-steps denominator ("step 3/20")."""
         self.set_text(_format_step(step, total))
 
+    def edge_pulse(self, linger: float = 3.0) -> None:
+        """Light the "being controlled" glow for one single-step input call
+        (bot.click / press_key / … on a desktop backend, outside ai()).
+
+        Debounced: consecutive pulses merge into one lit stretch that fades
+        ``linger`` seconds after the last one, so a scripted burst of calls
+        reads as one controlled phase instead of a flicker. No-op while an
+        ai() run owns the glow (begin(edge_glow=True) … finish()).
+        """
+        with self._edge_lock:
+            if self._run_edge_active:
+                return
+            if self._edge_timer is not None:
+                self._edge_timer.cancel()
+            self._edge_timer = threading.Timer(linger, self._edge_pulse_off)
+            self._edge_timer.daemon = True
+            self._edge_timer.start()
+        self._send({"edge": True, "hint": _EDGE_HINT})
+
+    def _edge_pulse_off(self) -> None:
+        with self._edge_lock:
+            self._edge_timer = None
+            if self._run_edge_active:
+                # begin() took over between our cancel window and this fire:
+                # the run's glow is not ours to switch off.
+                return
+        self._send({"edge": False})
+
     def finish(self, success: bool, message: str = "") -> None:
         """Show the run's final outcome (✓/✗ glyph, frozen clock); stays up
         until close(). Always turns the edge glow off — control has ended."""
+        with self._edge_lock:
+            self._run_edge_active = False
+            if self._edge_timer is not None:
+                self._edge_timer.cancel()
+                self._edge_timer = None
         payload: dict[str, Any] = {"state": "ok" if success else "fail", "edge": False}
         message = _clip(str(message), _BODY_MAX)
         if message:
@@ -229,6 +277,10 @@ class Overlay:
     def close(self, linger: float = 0.0) -> None:
         """Tear the window down; ``linger`` keeps it up that many seconds
         first, so a final finish() text is readable before it vanishes."""
+        with self._edge_lock:
+            if self._edge_timer is not None:
+                self._edge_timer.cancel()
+                self._edge_timer = None
         proc, self._proc = self._proc, None
         if proc is None:
             return

@@ -242,6 +242,12 @@ Windows versions where exclusion isn't available it simply never shows —
 glowing bars in every screenshot would blind the bot. `--no-overlay` turns
 it off together with the window.
 
+It isn't just `bot.ai()`: single-step calls (`bot.click`, `bot.press_key`,
+`bot.type_text`, …) on desktop backends inject real input too, so they
+light the glow as well — it comes on with the first call and fades a few
+seconds after the last, so a scripted burst reads as one controlled
+stretch rather than a flicker.
+
 While the glow is on, a small pill at the top of the screen reads
 "Hold ESC to stop · 长按 ESC 中止" — **hold ESC for about a second to abort
 the run**: the
