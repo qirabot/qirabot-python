@@ -26,8 +26,12 @@ The reverse direction (helper → parent, one JSON line on stdout) carries
 user-intent events: {"event": "abort"} when the user holds ESC for
 ~_ESC_HOLD_SECONDS while the edge glow is on — the parent ends the run
 between steps. The hold threshold doubles as the injected-input filter: the
-bot's own ESC presses are short taps and never reach it (Windows
-additionally drops LLKHF_INJECTED events).
+bot's own ESC presses are ~25ms taps and never reach it. Detection is
+strictly OUT of the input delivery path — macOS uses a passive NSEvent
+global monitor, Windows polls GetAsyncKeyState from the glow's animation
+loop. Never a low-level keyboard hook: one lived here briefly and its
+callback latency (sharing a thread with the glow animation) batched the
+bot's injected keystrokes into single game frames, dropping characters.
 
 Layout — title row (status glyph · title · elapsed clock) over a wrapping
 body. The parent clips every field to a hard character budget before
@@ -716,55 +720,33 @@ def _run_windows() -> int:
     timer_state = _TimerState()
     edge_state = _EdgeState()
 
-    # ESC-hold abort: a WH_KEYBOARD_LL hook feeds the detector (Tk's
-    # mainloop pumps the messages that deliver hook callbacks); the breathe
-    # loop polls expiry — it only matters while the glow is on, exactly
-    # when that loop runs. The hook observes and passes through
-    # (CallNextHookEx always); it must never eat or delay a keystroke.
+    # ESC-hold abort, by POLLING GetAsyncKeyState from the breathe loop —
+    # deliberately NOT a WH_KEYBOARD_LL hook. A low-level hook serializes
+    # EVERY keyboard event system-wide (including the bot's own SendInput
+    # stream) through this thread, which is busy animating ~21 layered
+    # windows while the glow is on; the induced stalls batched injected
+    # keystrokes into single game frames, and frame-polling games dropped
+    # characters (the v2.4.1 "trackquestinfo on" → "trackquestio"
+    # regression). Polling never touches the input delivery path, and the
+    # breathe cadence (~15 Hz) is ample for a 1s hold. Trade-off: polling
+    # can't tell injected ESC from a physical one — the hold threshold does
+    # that instead (the bot's taps are ~25ms); only a scripted
+    # press_key("esc", duration_seconds>1) could false-trigger.
     esc = _LongPress(_ESC_HOLD_SECONDS)
-    _hook_alive: list[Any] = []  # the callback must outlive this scope
-    try:
+    _VK_ESCAPE = 0x1B
 
-        class _KBDLLHOOKSTRUCT(ctypes.Structure):
-            _fields_ = [
-                ("vkCode", ctypes.c_uint32),
-                ("scanCode", ctypes.c_uint32),
-                ("flags", ctypes.c_uint32),
-                ("time", ctypes.c_uint32),
-                ("dwExtraInfo", ctypes.c_size_t),
-            ]
-
-        _WM_KEYDOWN, _WM_SYSKEYDOWN = 0x0100, 0x0104
-        _WM_KEYUP, _WM_SYSKEYUP = 0x0101, 0x0105
-        _VK_ESCAPE, _LLKHF_INJECTED = 0x1B, 0x10
-        user32.CallNextHookEx.restype = ctypes.c_ssize_t
-
-        _winfunctype = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)
-
-        def _kb_hook_py(n_code: int, w_param: int, l_param: Any) -> int:
-            try:
-                if n_code >= 0:
-                    kb = ctypes.cast(
-                        l_param, ctypes.POINTER(_KBDLLHOOKSTRUCT)
-                    ).contents
-                    # LLKHF_INJECTED: the bot's own SendInput ESC taps must
-                    # never count as the user asking to abort.
-                    if kb.vkCode == _VK_ESCAPE and not kb.flags & _LLKHF_INJECTED:
-                        if w_param in (_WM_KEYDOWN, _WM_SYSKEYDOWN):
-                            esc.down(time.monotonic())
-                        elif w_param in (_WM_KEYUP, _WM_SYSKEYUP):
-                            esc.up()
-            except Exception:
-                pass
-            return int(user32.CallNextHookEx(None, n_code, w_param, l_param))
-
-        _kb_hook = _winfunctype(
-            ctypes.c_ssize_t, ctypes.c_int, ctypes.c_size_t, ctypes.c_void_p
-        )(_kb_hook_py)
-        if user32.SetWindowsHookExW(13, _kb_hook, None, 0):  # WH_KEYBOARD_LL
-            _hook_alive.append(_kb_hook)
-    except Exception:
-        pass
+    def _poll_esc() -> None:
+        try:
+            down = bool(user32.GetAsyncKeyState(_VK_ESCAPE) & 0x8000)
+        except Exception:
+            return
+        now = time.monotonic()
+        if down:
+            esc.down(now)
+        else:
+            esc.up()
+        if esc.expired(now):
+            _emit_abort()
 
     import tkinter.font as tkfont
 
@@ -825,8 +807,7 @@ def _run_windows() -> int:
         # loops run the animation at double rate.
         if not edge_state.on or gen != edge_state.gen:
             return
-        if esc.expired(time.monotonic()):
-            _emit_abort()
+        _poll_esc()
         edge_state.tick += 1
         a = _edge_alpha(edge_state.tick)
         for strip, falloff in edges:
