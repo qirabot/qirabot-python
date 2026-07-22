@@ -41,7 +41,10 @@ All extras install cleanly together (no numpy/opencv pins anywhere): one
 ## Step 1 — CLI or SDK? Pick the invocation path
 
 Two front doors. Rule of thumb: *one instruction, a human reads the result →
-CLI; the script must branch or read values → SDK.*
+CLI; the script must branch or read values → SDK.* Judge by who consumes the
+result, not by what the task does: scraping or reporting info *for the user
+to read* is still CLI — put the ask in the goal string; `extract()` only
+earns SDK when **your code** uses the returned value.
 
 **CLI — the default for one-shot goals.** No script file to write; a live
 per-step trace, Ctrl+C → *cancelled* (exit 130), and non-zero exit on failure
