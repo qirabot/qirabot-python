@@ -65,6 +65,9 @@ qirabot models                    # list model aliases
 | `task TASK_ID` | Print a task's status, commands, and steps |
 | `screenshot TASK_ID` | Download a task screenshot |
 | `models` | List available model aliases |
+| `skill install [AGENT]` | Copy the bundled [Agent Skill](/guide/agents) into an AI agent's skills directory |
+| `skill uninstall [AGENT]` | Remove the skill installed by `skill install` |
+| `skill list` | Show known skills directories and the installed skill version |
 
 ## Global options
 
@@ -149,6 +152,18 @@ proceeds on success.
 
 **`screenshot TASK_ID`** — `-s/--step` (0 = latest), `-o/--output`,
 `-f/--force` (overwrite).
+
+**`skill install [AGENT]`** — installs the bundled
+[Agent Skill](/guide/agents) (SKILL.md, preflight script, API reference,
+starter templates), version-matched to the installed `qirabot`. `AGENT` is one
+of `agents` (the shared `.agents/skills` convention — Codex, Cursor, Gemini
+CLI, …), `claude`, `codex`, `cursor`; any other tool via `--dir PATH`.
+`--project` targets the project-level directory under the current directory
+instead of the user-level one. Rerun after `pip install -U qirabot` to
+upgrade; a directory the command didn't create is never overwritten without
+`--force`. For Claude Code the plugin marketplace remains the recommended
+install (it auto-updates). `skill uninstall` takes the same target options;
+`skill list` shows what's installed where.
 
 `--record` saves `recording.mp4` into the run dir and embeds it in the HTML
 report. What gets recorded differs per target:

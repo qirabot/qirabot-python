@@ -63,6 +63,17 @@ where = ["src"]
 # The vendored ADBKeyboard IME (GPL-2.0, see ADBKEYBOARD_LICENSE.txt) that the
 # adb adapter installs on demand for non-ASCII text input.
 "qirabot.assets" = ["*.apk", "*.txt"]
+# The bundled Agent Skill payload that `qirabot skill install` copies into an
+# agent's skills directory. Mirror of plugins/qirabot/skills/qirabot/ — edit
+# there and run scripts/sync_skill.py. The directory name is deliberately not
+# a Python identifier: templates/*.py run automation code at module top level
+# and must stay syntactically unimportable.
+"qirabot" = [
+    "skill-data/SKILL.md",
+    "skill-data/references/*.md",
+    "skill-data/scripts/*.py",
+    "skill-data/templates/*.py",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -79,6 +90,9 @@ source = ["qirabot"]
 [tool.mypy]
 python_version = "3.10"
 strict = true
+# skill-data is a data payload, not source (and its dir name is not a valid
+# module name, which mypy would hard-error on).
+exclude = ['src/qirabot/skill-data/']
 
 # The lint job installs the browser extra so the Playwright adapter + client get
 # real type-checking. The other backends (desktop/mobile/selenium) stay out of
@@ -104,3 +118,6 @@ disallow_subclassing_any = false
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+# skill-data mirrors plugins/qirabot/skills/qirabot/ byte-for-byte; a ruff
+# autofix here would drift it from the canonical copy.
+extend-exclude = ["src/qirabot/skill-data"]

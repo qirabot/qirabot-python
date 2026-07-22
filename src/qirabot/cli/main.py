@@ -16,6 +16,7 @@ from qirabot._browser import launch_browser
 from qirabot._dotenv import load_dotenv
 from qirabot._optional import extra_install_hint, package_install_hint, require
 from qirabot._transport import Transport
+from qirabot.cli.skill import skill
 from qirabot.exceptions import QirabotError
 
 
@@ -624,6 +625,10 @@ def install_browser() -> None:
     if rc != 0:
         raise click.ClickException(f"Chromium download failed (exit {rc})")
     click.echo('Chromium installed — you\'re ready: qirabot browser "..."')
+
+
+# `qirabot skill install/uninstall/list` — lives in cli/skill.py.
+cli.add_command(skill)
 
 
 def _parse_viewport(viewport: str) -> tuple[int, int]:

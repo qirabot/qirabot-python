@@ -1,4 +1,4 @@
-"""Packaging checks for bundled assets (the vendored ADBKeyboard IME)."""
+"""Packaging checks for bundled assets (ADBKeyboard IME, Agent Skill payload)."""
 
 from __future__ import annotations
 
@@ -36,3 +36,19 @@ class TestBundledApk:
         with _APK.open("rb") as f:
             actual = hashlib.sha256(f.read()).hexdigest()
         assert actual == recorded.group(1)
+
+
+_SKILL = resources.files("qirabot").joinpath("skill-data")
+
+
+@pytest.mark.skipif(not _SKILL.is_dir(), reason="skill payload not vendored in this checkout")
+class TestBundledSkill:
+    def test_payload_ships_complete(self):
+        for rel in (
+            "SKILL.md",
+            "references/REFERENCE.md",
+            "references/CLI.md",
+            "scripts/preflight.py",
+            "templates/browser.py",
+        ):
+            assert _SKILL.joinpath(rel).is_file(), rel

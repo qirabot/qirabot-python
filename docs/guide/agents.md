@@ -1,73 +1,105 @@
 ---
-title: Use with AI Agents — Claude Code Plugin & Agent-Friendly CLI
-description: Let an AI agent drive GUIs through Qirabot - the Claude Code plugin with its qirabot skill, preflight checks and starter templates, plus llms.txt and an exit-code-friendly CLI for any other agent.
+title: Use with AI Agents — Agent Skill, Claude Code Plugin & Agent-Friendly CLI
+description: Operate Qirabot through an AI agent - a pre-built Agent Skill (open standard) with preflight checks, API references and starter templates, installable via plugin marketplace, the skills CLI, or the bundled qirabot skill install command.
 ---
 
 # Use with AI Agents
 
-Qirabot isn't only a library you code against — it's a capability an AI
-agent can pick up and use. Tell your agent *"automate this signup flow and
-verify the confirmation email screen"* and let it write and run the script.
-Two ways in:
+Qirabot can be operated by an AI agent as well as called from code. A
+pre-built skill following the
+[Agent Skills open standard](https://agentskills.io) equips the agent with a
+preflight environment check, condensed SDK and CLI references, and
+per-platform starter templates. Given a natural-language automation goal, the
+agent validates the environment, selects the execution path — the CLI for
+one-shot tasks, an SDK script when the flow requires branching or returned
+values — and verifies the run's outcome. Installation depends on the agent.
 
 ## Claude Code plugin
 
-The [qirabot plugin](https://github.com/qirabot/claude-plugins) packages an
-Agent Skill that teaches Claude Code how to operate Qirabot end to end.
-Install it once:
+The [qirabot plugin](https://github.com/qirabot/claude-plugins) packages the
+skill for Claude Code's plugin marketplace:
 
 ```text
 /plugin marketplace add qirabot/claude-plugins
 /plugin install qirabot@qirabot
 ```
 
-Claude then invokes the skill automatically whenever a task involves
-automating, testing, or scraping a UI (it's also callable explicitly as
-`/qirabot:qirabot`). The skill ships with:
+Claude invokes the skill automatically whenever a task involves automating,
+testing, or scraping a UI; it can also be invoked explicitly as
+`/qirabot:qirabot`. The skill contains:
 
-- **A preflight script** — checks the Python env, backend deps, and API key
-  *before* writing any code, and prints the exact fix command for anything
-  missing. No more scripts that fail three steps in.
-- **Condensed SDK + CLI references** — the agent codes against an accurate
-  API surface instead of guessing.
+- **A preflight script** — validates the Python environment, backend
+  dependencies, and API key before any code is written, and prints the exact
+  fix command for each failing check.
+- **Condensed SDK + CLI references** — the agent codes against an accurate,
+  drift-tested API surface.
 - **Starter templates** for browser, Android (adb), iOS (WDA and Appium),
-  and bring-your-own-driver bolt-on — the agent adapts a working skeleton
-  rather than starting blank.
+  and bring-your-own-driver integration — the agent adapts a working
+  skeleton instead of generating boilerplate from scratch.
 
-The plugin contains instructions and helpers only; the `qirabot` package
-itself is installed at runtime by the preflight bootstrap.
+The plugin contains instructions and helper scripts only; the `qirabot`
+package itself is installed at runtime by the preflight bootstrap. The
+marketplace copy auto-updates with the repository's `main` branch; for a copy
+pinned to the installed SDK version, use `qirabot skill install claude`
+instead.
 
-## Any other agent (Cursor, Copilot, …)
+## Any other agent (Codex, Cursor, Copilot, …)
 
-Two properties make Qirabot easy for arbitrary agents to drive:
+**Installing the skill.** The Agent Skills format is supported by Codex,
+Cursor, Gemini CLI, and many other tools. The same skill the Claude Code
+plugin ships is bundled in the `qirabot` package:
 
-**The CLI is a natural agent tool.** One shell command runs a whole
-natural-language task — no code generation needed for one-shot jobs:
+```bash
+pip install qirabot
+qirabot skill install agents            # the shared .agents/skills convention
+qirabot skill install codex             # or: claude, cursor
+qirabot skill install --dir <path>      # any other Agent-Skills-compatible tool
+```
+
+The installed copy is version-matched to the SDK: the API reference the agent
+reads always describes the `qirabot` it runs. `--project` installs into the
+repository (`.agents/skills/`) instead of the home directory; rerun the
+command after upgrading qirabot. Details: [CLI Reference](/guide/cli).
+
+Alternatively, the [skills CLI](https://github.com/vercel-labs/skills)
+installs the same skill from the repository's `main` branch (latest
+instructions, not pinned to the installed SDK version):
+
+```bash
+npx skills add qirabot/qirabot-python
+```
+
+Independently of the skill, two properties make Qirabot straightforward for
+agents to operate:
+
+**The CLI functions as an agent tool.** A single shell command executes a
+complete natural-language task; one-shot jobs require no code generation:
 
 ```bash
 qirabot browser "Fill the signup form as Jane Doe and stop at the captcha" --url example.com
 ```
 
-Exit codes are machine-checkable (`0` pass, `1` fail, `130` interrupted),
-and every run writes an [HTML report](/advanced/reports) with per-step
-screenshots the agent (or you) can inspect when something goes wrong. All
-commands: [CLI Reference](/guide/cli).
+Exit codes are machine-checkable (`0` pass, `1` fail, `130` interrupted), and
+every run writes an [HTML report](/advanced/reports) with per-step
+screenshots for the agent or a human to inspect on failure. All commands:
+[CLI Reference](/guide/cli).
 
-**The docs are agent-readable.** Point your agent at:
+**The documentation is agent-readable.** Reference these in the agent's
+context or rules file:
 
 - `https://qirabot.com/docs/llms.txt` — index with per-page summaries
-- `https://qirabot.com/docs/llms-full.txt` — the complete docs in one file
-- every page as raw Markdown by swapping `.html` for `.md`, e.g.
+- `https://qirabot.com/docs/llms-full.txt` — the complete documentation in
+  one file
+- every page as raw Markdown by substituting `.md` for `.html`, e.g.
   `https://qirabot.com/docs/reference/methods.md`
 
-In Cursor, add them via the `@Docs` feature; in other tools, reference the
-URLs in your rules file or paste them into context.
+In Cursor, add them via the `@Docs` feature.
 
-## Why agents + vision automation fit
+## Why agents and vision automation fit
 
-An agent writing Playwright still has to guess selectors it can't see, and
-they break on the next redesign. With Qirabot the agent describes elements
-the way it reasons — in language — and the same skill covers surfaces
-code-first stacks can't reach: native mobile apps, desktop software, and
-games. See [What is Qirabot](/) and the
+An agent generating Playwright code must guess selectors it cannot observe,
+and those selectors break on the next markup change. With Qirabot the agent
+addresses elements in natural language — the modality it reasons in — and
+the same skill extends to surfaces code-first stacks cannot reach: native
+mobile apps, desktop software, and games. See [What is Qirabot](/) and the
 [platform support matrix](/reference/api#platform-support-matrix).

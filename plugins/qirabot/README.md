@@ -22,6 +22,16 @@ dependencies).
 After install the skill is available as `/qirabot:qirabot`, and Claude invokes it
 automatically when a task involves automating, testing, or scraping a UI.
 
+Not on Claude Code? The same skill ships inside the `qirabot` Python package —
+`pip install qirabot && qirabot skill install agents` (or `codex` / `cursor` /
+`--dir <path>`) copies it into any Agent-Skills-compatible tool's skills
+directory, version-matched to the installed SDK. The
+[skills CLI](https://github.com/vercel-labs/skills) works too:
+`npx skills add qirabot/qirabot-python` (point it at the main repo — this
+marketplace repo holds only the manifest, no skill files). The mirror lives at
+`src/qirabot/skill-data/`, kept in sync by `scripts/sync_skill.py` and a CI
+drift guard — edit the skill here under `skills/qirabot/`, then run the sync.
+
 ## Layout
 
 ```
