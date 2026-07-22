@@ -166,6 +166,41 @@ Works the same for Selenium, Appium, pyautogui, and the built-in device
 backends (`AdbDevice`, `WdaClient`, `Window`) — and anything else via a
 7-primitive [custom adapter](https://qirabot.com/docs/backends/custom-adapters.html).
 
+## Use with AI agents
+
+Qirabot ships a pre-built [skill](https://qirabot.com/docs/guide/agents.html)
+following the [Agent Skills open standard](https://agentskills.io), loadable
+by Claude Code, Codex, Cursor, and other compatible agents. The skill bundles
+a preflight environment check, a condensed API reference aligned with the SDK
+version, and per-platform starter templates. Given a natural-language
+automation goal, the agent validates the environment, picks the execution
+path — the CLI for one-shot tasks, an SDK script when the flow needs
+branching or returned values — and verifies the run's outcome.
+
+Any Agent-Skills-compatible tool can install the copy bundled in the pip
+package, version-matched to the installed SDK:
+
+```bash
+qirabot skill install agents        # or claude / codex / cursor / --dir <path>
+```
+
+Claude Code users should prefer the plugin marketplace (auto-updates):
+
+```text
+/plugin marketplace add qirabot/claude-plugins
+/plugin install qirabot@qirabot
+```
+
+The [skills CLI](https://github.com/vercel-labs/skills) also works,
+installing from the repository's `main` branch:
+
+```bash
+npx skills add qirabot/qirabot-python
+```
+
+The skill's reference and templates are drift-tested against the live SDK in
+CI (`tests/test_skill.py`). Details: [plugins/qirabot/README.md](plugins/qirabot/README.md).
+
 ## Domain knowledge: teach the AI your rules
 
 The model knows how to drive a UI — not your game's item names or your team's
@@ -273,30 +308,6 @@ Runnable examples live in [examples/](examples/), in three styles:
   [game/](examples/game/)
 
 See [examples/README.md](examples/README.md) for which to pick.
-
-## Agent Skill
-
-`plugins/qirabot/skills/qirabot/` is a pre-built agent skill: an AI agent
-(Claude Code, Cursor, …) loads it and handles setup, scripting, and
-verification from a natural-language automation goal. Install in Claude Code:
-
-```text
-/plugin marketplace add qirabot/claude-plugins
-/plugin install qirabot@qirabot
-```
-
-The skill's reference and templates are drift-tested against the live SDK in
-CI (`tests/test_skill.py`). Details: [plugins/qirabot/README.md](plugins/qirabot/README.md).
-
-## Migrating from 1.x (airtest)
-
-2.0 removed the airtest integration; the built-in backends are drop-in
-replacements (`AdbDevice` / `WdaClient` / `Window`), and a copyable adapter
-keeps existing airtest scripts running unchanged. Guide:
-[Custom Adapters — Migrating from Airtest](https://qirabot.com/docs/backends/custom-adapters.html#migrating-from-airtest-qirabot-1-x).
-The 1.x series lives on the [`1.x` branch](https://github.com/qirabot/qirabot-python/tree/1.x)
-in maintenance mode — `pip install "qirabot<2"` always resolves to the newest
-1.9.x patch.
 
 ## License
 

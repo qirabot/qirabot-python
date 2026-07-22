@@ -150,6 +150,31 @@ bot.close()
 
 也无需重写任何代码：将现有的 `page` / `driver` / 设备对象直接传入，即可在原有选择器脚本中混用 AI 步骤（视觉断言、动态控件、逐步脚本化过于繁琐的流程）——Playwright / Selenium / Appium / pyautogui 及内置设备后端均适用，详见[框架集成文档](https://qirabot.com/docs/zh/frameworks/playwright.html)。
 
+## 配合 AI Agent 使用
+
+Qirabot 提供符合 [Agent Skills 开放标准](https://agentskills.io)的预置 [skill](https://qirabot.com/docs/zh/guide/agents.html)，可被 Claude Code、Codex、Cursor 等 agent 加载。skill 内置 preflight 环境检查脚本、与 SDK 版本对齐的精简 API 参考，以及各平台起步模板。agent 接到自然语言的自动化目标后，先校验环境，再按任务形态选择执行路径——一次性任务直接调 CLI，需要分支逻辑或消费返回值时编写 SDK 脚本——最后核对运行结果。
+
+任意兼容 Agent Skills 的工具都可以安装 pip 包内置的副本，与本机 SDK 版本严格一致：
+
+```bash
+qirabot skill install agents        # 或 claude / codex / cursor / --dir <path>
+```
+
+Claude Code 用户推荐通过 plugin marketplace 安装（自动更新）：
+
+```text
+/plugin marketplace add qirabot/claude-plugins
+/plugin install qirabot@qirabot
+```
+
+也可以通过 [skills CLI](https://github.com/vercel-labs/skills)，从仓库 `main` 分支安装：
+
+```bash
+npx skills add qirabot/qirabot-python
+```
+
+skill 的 API 参考与模板在 CI 中与 SDK 实时接口做防漂移校验（`tests/test_skill.py`）。详见 [plugins/qirabot/README.md](plugins/qirabot/README.md)。
+
 ## 领域知识：把你的规则教给 AI
 
 模型懂得怎么操作界面，但不懂你游戏里的道具名、你团队的业务术语。把参考文本挂载到任务上，AI 每一步决策都会参考它。CLI 里用 `-k` 传文件，可重复，合计 32KB：
@@ -225,21 +250,6 @@ API、平台说明与限制：[进度悬浮窗与急停](https://qirabot.com/doc
 ## 示例
 
 可直接运行的示例在 [examples/](examples/)：pytest 集成（Playwright / Selenium / Appium / 桌面）、独立自动化脚本（爬取 / RPA / agent），以及游戏驱动（Windows 桌面游戏 + demo 视频背后的 iOS 手游脚本）。选择指南见 [examples/README.md](examples/README.md)。
-
-## Agent Skill
-
-`plugins/qirabot/skills/qirabot/` 是预置的 agent skill：AI agent（Claude Code、Cursor 等）加载后，可以从一句自然语言的自动化目标出发，自主完成环境搭建、脚本编写和验证。在 Claude Code 中安装：
-
-```text
-/plugin marketplace add qirabot/claude-plugins
-/plugin install qirabot@qirabot
-```
-
-详见 [plugins/qirabot/README.md](plugins/qirabot/README.md)。
-
-## 从 1.x（airtest）迁移
-
-2.0 移除了 airtest 集成；内置后端（`AdbDevice` / `WdaClient` / `Window`）可直接替换，同时提供一份可复制的 adapter，让现有 airtest 脚本无需改动即可继续运行。指南：[自定义 Adapter——从 Airtest 迁移](https://qirabot.com/docs/zh/backends/custom-adapters.html#从-airtest-迁移-qirabot-1-x)。1.x 系列在 [`1.x` 分支](https://github.com/qirabot/qirabot-python/tree/1.x)进入维护模式，`pip install "qirabot<2"` 始终解析到最新的 1.9.x 补丁版本。
 
 ## 许可证
 
