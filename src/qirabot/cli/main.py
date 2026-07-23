@@ -54,6 +54,7 @@ def _transport(ctx: click.Context) -> Transport:
 def _make_bot(
     ctx: click.Context,
     model: str = "",
+    thinking_level: str = "",
     language: str = "",
     report: bool = True,
     report_dir: str = "",
@@ -75,6 +76,7 @@ def _make_bot(
             timeout=ctx.obj["timeout"],
             verify_ssl=ctx.obj["verify_ssl"],
             model_alias=model,
+            thinking_level=thinking_level,
             language=language,
             task_name=task_name,
             source="cli",
@@ -290,6 +292,7 @@ def _task_options(f: _FC) -> _FC:
     )(f)
     f = _option("--max-steps", group=_TASK_GROUP, default=20, help="Max steps for AI")(f)
     f = _option("--language", "-l", group=_TASK_GROUP, default="", help="Language (e.g. zh, en)")(f)
+    f = _option("--thinking-level", group=_TASK_GROUP, default="", help="Thinking level override: minimal, low, medium or high (default: the model alias's setting)")(f)
     f = _option("--model", "-m", group=_TASK_GROUP, default="", help="Model alias")(f)
     f = _option("--name", "-n", group=_TASK_GROUP, default="", help="Task name shown in the web UI (default: derived from the instruction)")(f)
     return f
@@ -914,6 +917,7 @@ def browser(
     instruction: str,
     name: str,
     model: str,
+    thinking_level: str,
     language: str,
     max_steps: int,
     knowledge: str,
@@ -938,7 +942,8 @@ def browser(
     vp = _parse_viewport(viewport)
 
     bot = _make_bot(
-        ctx, model=model, language=language, report=report, report_dir=report_dir,
+        ctx, model=model, thinking_level=thinking_level, language=language,
+        report=report, report_dir=report_dir,
         annotate=annotate, record=record, task_name=name or _default_task_name(instruction),
         overlay=overlay,
     )
@@ -978,6 +983,7 @@ def _run_appium(
     instruction: str,
     name: str,
     model: str,
+    thinking_level: str,
     language: str,
     max_steps: int,
     appium_url: str,
@@ -1001,7 +1007,8 @@ def _run_appium(
     # leak the remote session (driver.quit() lives in the finally below, which
     # never runs if _make_bot exits before the try is entered).
     bot = _make_bot(
-        ctx, model=model, language=language, report=report, report_dir=report_dir,
+        ctx, model=model, thinking_level=thinking_level, language=language,
+        report=report, report_dir=report_dir,
         annotate=annotate, record=record, record_device=record,
         task_name=name or _default_task_name(instruction), overlay=overlay,
     )
@@ -1034,6 +1041,7 @@ def _run_direct(
     instruction: str,
     name: str,
     model: str,
+    thinking_level: str,
     language: str,
     max_steps: int,
     connect: Callable[[], Any],
@@ -1059,7 +1067,8 @@ def _run_direct(
     window instead of grabbing the full screen.
     """
     bot = _make_bot(
-        ctx, model=model, language=language, report=report, report_dir=report_dir,
+        ctx, model=model, thinking_level=thinking_level, language=language,
+        report=report, report_dir=report_dir,
         annotate=annotate, record=record, record_mjpeg_url=record_mjpeg_url,
         record_device=record_device, record_window=record_window,
         task_name=name or _default_task_name(instruction), overlay=overlay,
@@ -1114,7 +1123,7 @@ def _adb_launch_app(dev: Any, package: str, activity: str) -> None:
 @_option("--record", group="Android options", is_flag=True, help="Record the device screen to report-dir/recording.mp4 (direct engine: adb screenrecord, ffmpeg merges runs over 3 min; Appium engine: Appium's recording API)")
 @_debug_options(record=False)
 @click.pass_context
-def android(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, overlay: bool, report: bool, report_dir: str, annotate: bool) -> None:
+def android(ctx: click.Context, instruction: str, name: str, model: str, thinking_level: str, language: str, max_steps: int, knowledge: str, device: str, appium_url: str, app_package: str, app_activity: str, record: bool, overlay: bool, report: bool, report_dir: str, annotate: bool) -> None:
     """Run an AI task on an Android device (direct over adb; --appium-url for Appium).
 
     \b
@@ -1145,7 +1154,7 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
             options.app_activity = app_activity
 
         _run_appium(
-            ctx, instruction, name, model, language, max_steps, appium_url, options,
+            ctx, instruction, name, model, thinking_level, language, max_steps, appium_url, options,
             report, report_dir, annotate, record=record, knowledge=knowledge,
             overlay=overlay,
         )
@@ -1164,7 +1173,7 @@ def android(ctx: click.Context, instruction: str, name: str, model: str, languag
         return dev
 
     _run_direct(
-        ctx, instruction, name, model, language, max_steps, connect,
+        ctx, instruction, name, model, thinking_level, language, max_steps, connect,
         report, report_dir, annotate,
         record=record, record_device=record, knowledge=knowledge,
         overlay=overlay,
@@ -1234,7 +1243,7 @@ def _check_mjpeg_ready(mjpeg_url: str) -> None:
 @_option("--mjpeg-url", group="iOS options", default="", help="WDA MJPEG stream URL for --record (default: --wda-url's host on port 9100; direct engine only)")
 @_debug_options(record=False)
 @click.pass_context
-def ios(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, overlay: bool, report: bool, report_dir: str, annotate: bool) -> None:
+def ios(ctx: click.Context, instruction: str, name: str, model: str, thinking_level: str, language: str, max_steps: int, knowledge: str, wda_url: str, device: str, appium_url: str, bundle_id: str, record: bool, mjpeg_url: str, overlay: bool, report: bool, report_dir: str, annotate: bool) -> None:
     """Run an AI task on an iOS device (direct via WDA; --appium-url/--device for Appium).
 
     \b
@@ -1268,7 +1277,7 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
             options.bundle_id = bundle_id
 
         _run_appium(
-            ctx, instruction, name, model, language, max_steps, appium_url, options,
+            ctx, instruction, name, model, thinking_level, language, max_steps, appium_url, options,
             report, report_dir, annotate, record=record, knowledge=knowledge,
             overlay=overlay,
         )
@@ -1292,7 +1301,7 @@ def ios(ctx: click.Context, instruction: str, name: str, model: str, language: s
         return client
 
     _run_direct(
-        ctx, instruction, name, model, language, max_steps, connect,
+        ctx, instruction, name, model, thinking_level, language, max_steps, connect,
         report, report_dir, annotate,
         record=record, record_mjpeg_url=record_mjpeg_url, knowledge=knowledge,
         overlay=overlay,
@@ -1321,7 +1330,7 @@ def _launch_desktop_app(app: str, app_wait: float) -> None:
 @_option("--app-wait", group="Desktop options", default=2.0, type=float, help="Seconds to wait after --app launch for the window to appear")
 @_debug_options()
 @click.pass_context
-def desktop(ctx: click.Context, instruction: str, name: str, model: str, language: str, max_steps: int, knowledge: str, window_title: str, hwnd: int, ambiguous: str, app: str, app_wait: float, overlay: bool, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
+def desktop(ctx: click.Context, instruction: str, name: str, model: str, thinking_level: str, language: str, max_steps: int, knowledge: str, window_title: str, hwnd: int, ambiguous: str, app: str, app_wait: float, overlay: bool, report: bool, report_dir: str, annotate: bool, record: bool) -> None:
     """Run an AI task on the desktop (pyautogui; --window-title/--hwnd for one Windows window).
 
     \b
@@ -1372,7 +1381,7 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
         # actually starts (--record here, or QIRA_RECORD=1 from the env), and
         # then makes it follow the bound window instead of the full screen.
         _run_direct(
-            ctx, instruction, name, model, language, max_steps, connect,
+            ctx, instruction, name, model, thinking_level, language, max_steps, connect,
             report, report_dir, annotate, record=record, record_window=True,
             knowledge=knowledge, overlay=overlay,
         )
@@ -1388,7 +1397,8 @@ def desktop(ctx: click.Context, instruction: str, name: str, model: str, languag
         _launch_desktop_app(app, app_wait)
 
     bot = _make_bot(
-        ctx, model=model, language=language, report=report, report_dir=report_dir,
+        ctx, model=model, thinking_level=thinking_level, language=language,
+        report=report, report_dir=report_dir,
         annotate=annotate, record=record, task_name=name or _default_task_name(instruction),
         overlay=overlay,
     )

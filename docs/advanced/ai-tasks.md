@@ -106,9 +106,12 @@ Runnable examples:
 ```python
 bot = Qirabot(model_alias="high_quality", language="zh")   # defaults for all calls
 bot.click(page, "Login", model_alias="fast")               # override per call
+bot.verify(page, "every row shows the discounted price",
+           thinking_level="high")                          # think harder on hard calls
 ```
 
 Aliases trade cost for quality: `fast` · `balanced` · `balanced_pro` ·
-`high_quality`; leave unset for the server default. See
-[Configuration](/advanced/configuration). Deterministic single-step calls
+`high_quality`; leave unset for the server default. `thinking_level`
+(`minimal`/`low`/`medium`/`high`) scales reasoning depth within the same
+alias. See [Configuration](/advanced/configuration). Deterministic single-step calls
 are covered in the [API reference](/reference/api).

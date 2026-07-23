@@ -30,6 +30,7 @@ own.
 | `timeout` | — | `120.0` | HTTP request timeout (seconds) |
 | `verify_ssl` | — | `True` | TLS verification (set `False` for self-hosted / self-signed) |
 | `model_alias` | — | `""` | Model alias for all operations; empty = the server picks its default |
+| `thinking_level` | — | `""` | Thinking level for all operations: `minimal` / `low` / `medium` / `high`; empty = the alias's configured level ([details](#thinking-level)) |
 | `language` | — | server default | Response language, e.g. `"zh"` / `"en"` |
 | `task_name` | — | `""` | Task name (visible in dashboard) |
 | `task_id` | — | `""` | Attach to an existing server task instead of creating one |
@@ -103,6 +104,39 @@ data = bot.extract(page, "all prices in the results table",
 from `ai()` carry `input_tokens` / `output_tokens` fields — a call's spend
 is their sum. See the
 [Method Reference](/reference/methods#result-objects).
+
+## Thinking level
+
+Each alias ships with a thinking level tuned by the platform.
+`thinking_level` overrides it — same model, different reasoning depth —
+so you can scale depth to task difficulty without switching aliases:
+
+| Value | Trade-off |
+|---|---|
+| `minimal` | Fastest, cheapest — obvious targets, clean UIs |
+| `low` | Default territory for most aliases |
+| `medium` | Harder judgment calls |
+| `high` | Deepest reasoning — highest latency and thinking-token spend |
+
+```python
+bot = Qirabot(model_alias="balanced_pro")                     # alias default
+bot.verify(page, "the discount was applied to every row",
+           thinking_level="high")                             # hard call → think more
+```
+
+Same two levels as `model_alias`: the constructor sets the task-wide
+default, every action method takes a per-call override. Deeper thinking
+burns more thinking tokens (billed at the alias's thinking rate), so the
+cost-control pattern mirrors the alias one: stay low by default, raise
+only the hard calls.
+
+Two caveats:
+
+- Requires a server that knows the field — older self-hosted servers
+  silently ignore it (no error, the alias default applies).
+- The effective granularity depends on the alias's underlying model; some
+  backends merge or clamp adjacent levels, so treat the value as an intent,
+  not a guarantee of four distinct depths.
 
 `language` sets the language of AI responses (extracted text, reasoning) —
 a short tag like `"zh"` or `"en"`:

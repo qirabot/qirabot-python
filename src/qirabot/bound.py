@@ -53,6 +53,7 @@ class _BoundQirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         return self._rebind(
@@ -65,6 +66,7 @@ class _BoundQirabot:
                 wait=wait,
                 retry=retry,
                 model_alias=model_alias,
+                thinking_level=thinking_level,
                 language=language,
             )
         )
@@ -81,6 +83,7 @@ class _BoundQirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         return self._rebind(
@@ -95,6 +98,7 @@ class _BoundQirabot:
                 wait=wait,
                 retry=retry,
                 model_alias=model_alias,
+                thinking_level=thinking_level,
                 language=language,
             )
         )
@@ -108,6 +112,7 @@ class _BoundQirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         return self._rebind(
@@ -119,6 +124,7 @@ class _BoundQirabot:
                 wait=wait,
                 retry=retry,
                 model_alias=model_alias,
+                thinking_level=thinking_level,
                 language=language,
             )
         )
@@ -133,6 +139,7 @@ class _BoundQirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         return self._rebind(
@@ -145,6 +152,7 @@ class _BoundQirabot:
                 wait=wait,
                 retry=retry,
                 model_alias=model_alias,
+                thinking_level=thinking_level,
                 language=language,
             )
         )
@@ -158,6 +166,7 @@ class _BoundQirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         return self._rebind(
@@ -169,6 +178,7 @@ class _BoundQirabot:
                 wait=wait,
                 retry=retry,
                 model_alias=model_alias,
+                thinking_level=thinking_level,
                 language=language,
             )
         )
@@ -182,6 +192,7 @@ class _BoundQirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         return self._rebind(
@@ -193,6 +204,7 @@ class _BoundQirabot:
                 wait=wait,
                 retry=retry,
                 model_alias=model_alias,
+                thinking_level=thinking_level,
                 language=language,
             )
         )
@@ -203,10 +215,16 @@ class _BoundQirabot:
         *,
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> ExtractResult:
         return self._bot.extract(
-            self._target, instruction, retry=retry, model_alias=model_alias, language=language
+            self._target,
+            instruction,
+            retry=retry,
+            model_alias=model_alias,
+            thinking_level=thinking_level,
+            language=language,
         )
 
     def verify(
@@ -215,10 +233,16 @@ class _BoundQirabot:
         *,
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> VerifyResult:
         return self._bot.verify(
-            self._target, assertion, retry=retry, model_alias=model_alias, language=language
+            self._target,
+            assertion,
+            retry=retry,
+            model_alias=model_alias,
+            thinking_level=thinking_level,
+            language=language,
         )
 
     def locate(
@@ -230,6 +254,7 @@ class _BoundQirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> LocateResult:
         return self._bot.locate(
@@ -240,6 +265,7 @@ class _BoundQirabot:
             wait=wait,
             retry=retry,
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
         )
 
@@ -250,6 +276,7 @@ class _BoundQirabot:
         interval: float = 2.0,
         *,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> "_BoundQirabot":
         """Wait until ``assertion`` holds, else raise :class:`QirabotTimeoutError`.
@@ -263,6 +290,7 @@ class _BoundQirabot:
             timeout,
             interval,
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
         )
         return self
@@ -274,6 +302,7 @@ class _BoundQirabot:
         *,
         on_step: Callable[["StepResult"], None] | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
         custom_tools: list[Callable[..., Any] | dict[str, Any]] | None = None,
         exclude_tools: list[str] | None = None,
@@ -285,6 +314,7 @@ class _BoundQirabot:
             max_steps,
             on_step=on_step,
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
             custom_tools=custom_tools,
             exclude_tools=exclude_tools,

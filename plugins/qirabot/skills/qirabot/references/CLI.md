@@ -32,6 +32,7 @@ All four take the instruction as the positional argument and share:
 |---|---|---|
 | `-n/--name` | derived from the instruction (first line, ≤60 chars) | task name in the web UI |
 | `-m/--model` | server default | model alias — list them with `qirabot models` |
+| `--thinking-level` | model alias's setting | thinking override: `minimal`/`low`/`medium`/`high` (needs a backend that knows the field; older servers silently ignore it) |
 | `-l/--language` | server default | e.g. `zh`, `en` |
 | `--max-steps` | `20` | AI step budget |
 | `--report/--no-report` | report | HTML run report |

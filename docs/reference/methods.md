@@ -33,6 +33,7 @@ documented once here:
 | `wait` | `""` | Override the auto-derived presence assertion used by `timeout`. |
 | `retry` | constructor's `retry` | Per-call override of the transient-failure retry count. |
 | `model_alias` | constructor's | Per-call [model alias](/advanced/configuration#model-language) override. |
+| `thinking_level` | constructor's | Per-call [thinking level](/advanced/configuration#thinking-level) override: `minimal` / `low` / `medium` / `high`; empty = the alias's configured level. |
 | `language` | constructor's | Per-call response-language override. |
 
 ## Session & lifecycle
@@ -108,7 +109,7 @@ open a new tab (`page = bot.click(page, ...)`). All take the
 
 ```python
 click(target, locate, *, modifier="", timeout=0.0, interval=2.0, wait="",
-      retry=None, model_alias="", language="") -> target
+      retry=None, model_alias="", thinking_level="", language="") -> target
 ```
 
 `locate` is a natural-language element description (any language).
@@ -170,7 +171,7 @@ Hold a key across other actions (desktop backends only). No AI, no billing.
 
 ```python
 ai(target, instruction, max_steps=20, *, on_step=None, model_alias="",
-   language="", custom_tools=None, exclude_tools=None) -> RunResult
+   thinking_level="", language="", custom_tools=None, exclude_tools=None) -> RunResult
 ```
 
 The autonomous loop: screenshot → decide → act, until done or `max_steps`.
@@ -182,8 +183,8 @@ The autonomous loop: screenshot → decide → act, until done or `max_steps`.
 ### extract()
 
 ```python
-extract(target, instruction, *, retry=None, model_alias="", language="")
-    -> ExtractResult
+extract(target, instruction, *, retry=None, model_alias="", thinking_level="",
+        language="") -> ExtractResult
 ```
 
 Structured data straight off the screen. The return value
@@ -192,8 +193,8 @@ Structured data straight off the screen. The return value
 ### verify()
 
 ```python
-verify(target, assertion, *, retry=None, model_alias="", language="")
-    -> VerifyResult
+verify(target, assertion, *, retry=None, model_alias="", thinking_level="",
+       language="") -> VerifyResult
 ```
 
 Visual assertion. A failed check doesn't raise — the result
@@ -204,7 +205,7 @@ still raise.
 
 ```python
 locate(target, locate, *, timeout=0.0, interval=2.0, wait="",
-       retry=None, model_alias="", language="") -> LocateResult
+       retry=None, model_alias="", thinking_level="", language="") -> LocateResult
 ```
 
 Resolves a natural-language element description to coordinates **without
@@ -236,7 +237,7 @@ guaranteed, pass `timeout=` or check with `verify()` / `wait_for()` first.
 
 ```python
 wait_for(target, assertion, timeout=30.0, interval=2.0, *,
-         model_alias="", language="") -> None
+         model_alias="", thinking_level="", language="") -> None
 ```
 
 Polls `verify` semantics every `interval` seconds; returns as soon as the

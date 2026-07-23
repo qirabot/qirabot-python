@@ -96,6 +96,7 @@ proceeds on success.
 |---|---|---|
 | `-n, --name` | derived from the instruction | Task name shown in the web UI |
 | `-m, --model` | server default | Model alias (see [Configuration](/advanced/configuration)) |
+| `--thinking-level` | model alias's setting | Thinking override: `minimal` / `low` / `medium` / `high` (see [Configuration](/advanced/configuration#thinking-level)) |
 | `-l, --language` | server default | Response language, e.g. `zh`, `en` |
 | `--max-steps` | `20` | Step budget for the AI task |
 | `-k, --knowledge` | — | Knowledge file the AI consults during the task (UTF-8 text; repeatable, 32KB total). Same rules as `bot.ai(knowledge=...)`: files only, no URLs — fetch remote sources yourself first |

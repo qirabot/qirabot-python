@@ -17,6 +17,7 @@ Common constructor options (all keyword):
 | `api_key` / env `QIRA_API_KEY` | — | auth |
 | `base_url` / env `QIRA_BASE_URL` | `https://app.qirabot.com` | self-hosted/regional |
 | `model_alias` | `"balanced_pro"` | `fast` \| `balanced` \| `balanced_pro` \| `high_quality` |
+| `thinking_level` | alias's setting | `minimal` \| `low` \| `medium` \| `high` — per-task thinking override; every action method also takes a per-call `thinking_level=`. Needs a backend that knows the field (older servers silently ignore it); effective granularity depends on the alias's underlying model (some levels may be merged or clamped). |
 | `language` | `"en"` | response language tag, e.g. `"zh"`, `"en"` |
 | `task_name` | `""` | shown in dashboard / report |
 | `report` | `True` | write HTML report on close |
@@ -36,7 +37,8 @@ Common constructor options (all keyword):
 
 ```python
 result = bot.ai(target, instruction, max_steps=20, *, on_step=None, model_alias="",
-                language="", custom_tools=None, exclude_tools=None, knowledge=None)
+                thinking_level="", language="", custom_tools=None, exclude_tools=None,
+                knowledge=None)
 # result.success -> bool, result.output -> str (final answer)
 ```
 
@@ -132,7 +134,7 @@ the explicit form** `page = bot.click(page, ...)` so new-tab follows stay visibl
 ## AI-located actions (one model call each)
 
 ```python
-bot.click(target, locate, *, modifier="", timeout=0.0, interval=2.0, wait="", model_alias="", language="")
+bot.click(target, locate, *, modifier="", timeout=0.0, interval=2.0, wait="", model_alias="", thinking_level="", language="")
 bot.type_text(target, locate, text, *, press_enter=False, clear_before_typing=False, timeout=0.0, ...)
 bot.double_click(target, locate, ...)
 bot.long_press(target, locate, *, duration=2.0, timeout=0.0, ...)  # mobile only

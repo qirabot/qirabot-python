@@ -95,9 +95,12 @@ def wait_for_human(reason: str) -> str:
 ```python
 bot = Qirabot(model_alias="high_quality", language="zh")   # 全局默认
 bot.click(page, "登录", model_alias="fast")                # 或按调用覆盖
+bot.verify(page, "每一行都显示折扣价",
+           thinking_level="high")                          # 难的调用 → 多想想
 ```
 
 档位按成本换质量:`fast` · `balanced` · `balanced_pro` ·
-`high_quality`;留空使用服务器默认。详见
+`high_quality`;留空使用服务器默认。`thinking_level`
+(`minimal`/`low`/`medium`/`high`)在同一档位内伸缩推理深度。详见
 [配置](/zh/advanced/configuration)。确定性的单步调用见
 [API 参考](/zh/reference/api)。

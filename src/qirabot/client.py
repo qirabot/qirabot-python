@@ -269,6 +269,7 @@ class Qirabot:
         timeout: float = 120.0,
         verify_ssl: bool = True,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
         task_name: str = "",
         task_id: str = "",
@@ -313,6 +314,11 @@ class Qirabot:
         self._pw_instances: list[Any] = []
         self._cdp_pages: list[Any] = []
         self._model_alias = model_alias
+        # Instance-wide thinking override, sent with every /act request (the
+        # server has no task-level storage for it). "" = use the alias default.
+        # Requires a backend that knows the field; older servers silently
+        # ignore it. Granularity depends on the alias's underlying model.
+        self._thinking_level = thinking_level
         self._language = language
         self._task_name = task_name
         self._external_task = bool(task_id)
@@ -616,6 +622,7 @@ class Qirabot:
         interval: float,
         wait: str,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> None:
         """Auto-wait before an action: poll until the target looks present.
@@ -637,6 +644,7 @@ class Qirabot:
             timeout=timeout,
             interval=interval,
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
         )
 
@@ -651,6 +659,7 @@ class Qirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         """AI-powered click: locate element by description and click it.
@@ -671,7 +680,16 @@ class Qirabot:
         opened a link in a new tab, this is that new tab — reassign it
         (``page = bot.click(page, ...)``) to keep operating on the active page.
         """
-        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        self._maybe_wait(
+            target,
+            locate,
+            timeout,
+            interval,
+            wait,
+            model_alias=model_alias,
+            thinking_level=thinking_level,
+            language=language,
+        )
         adapter = self._get_adapter(target)
         params: dict[str, Any] = {"locate": locate}
         if modifier:
@@ -680,6 +698,7 @@ class Qirabot:
             target,
             action={"type": "click", "params": params},
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
             retry=retry,
         )
@@ -698,6 +717,7 @@ class Qirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         """AI-powered type: locate input field and type text.
@@ -729,7 +749,16 @@ class Qirabot:
             adapter.execute("type_text", params)  # no x/y -> focused path
             self._record_local_step(adapter, "type_text", params)
             return self._result(adapter)
-        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        self._maybe_wait(
+            target,
+            locate,
+            timeout,
+            interval,
+            wait,
+            model_alias=model_alias,
+            thinking_level=thinking_level,
+            language=language,
+        )
         params = {"locate": locate, "text": text}
         if press_enter:
             params["press_enter"] = True
@@ -739,6 +768,7 @@ class Qirabot:
             target,
             action={"type": "type_text", "params": params},
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
             retry=retry,
         )
@@ -754,6 +784,7 @@ class Qirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         """AI-powered double-click: locate element by description and double-click it.
@@ -765,12 +796,22 @@ class Qirabot:
         Returns the current target (same kind you passed in); reassign it
         (``page = bot.double_click(page, ...)``) to follow any tab switch.
         """
-        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        self._maybe_wait(
+            target,
+            locate,
+            timeout,
+            interval,
+            wait,
+            model_alias=model_alias,
+            thinking_level=thinking_level,
+            language=language,
+        )
         adapter = self._get_adapter(target)
         self._ai_action(
             target,
             action={"type": "double_click", "params": {"locate": locate}},
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
             retry=retry,
         )
@@ -787,6 +828,7 @@ class Qirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         """AI-powered long press: locate element and press-and-hold it.
@@ -801,7 +843,16 @@ class Qirabot:
 
         Returns the current target (same kind you passed in).
         """
-        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        self._maybe_wait(
+            target,
+            locate,
+            timeout,
+            interval,
+            wait,
+            model_alias=model_alias,
+            thinking_level=thinking_level,
+            language=language,
+        )
         adapter = self._get_adapter(target)
         params: dict[str, Any] = {"locate": locate}
         if duration != 2.0:
@@ -811,6 +862,7 @@ class Qirabot:
             target,
             action={"type": "long_press", "params": params},
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
             retry=retry,
         )
@@ -826,6 +878,7 @@ class Qirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         """AI-powered mouse press-and-hold: locate an element and hold the
@@ -841,12 +894,22 @@ class Qirabot:
 
         Returns the current target (same kind you passed in).
         """
-        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        self._maybe_wait(
+            target,
+            locate,
+            timeout,
+            interval,
+            wait,
+            model_alias=model_alias,
+            thinking_level=thinking_level,
+            language=language,
+        )
         adapter = self._get_adapter(target)
         self._ai_action(
             target,
             action={"type": "mouse_down", "params": {"locate": locate}},
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
             retry=retry,
         )
@@ -862,6 +925,7 @@ class Qirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> Any:
         """Release the mouse button (pairs with :meth:`mouse_down`).
@@ -878,11 +942,21 @@ class Qirabot:
             adapter.execute("mouse_up", {})
             self._record_local_step(adapter, "mouse_up")
             return self._result(adapter)
-        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        self._maybe_wait(
+            target,
+            locate,
+            timeout,
+            interval,
+            wait,
+            model_alias=model_alias,
+            thinking_level=thinking_level,
+            language=language,
+        )
         self._ai_action(
             target,
             action={"type": "mouse_up", "params": {"locate": locate}},
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
             retry=retry,
         )
@@ -921,6 +995,7 @@ class Qirabot:
         *,
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> ExtractResult:
         """Extract data from the screen using AI.
@@ -933,6 +1008,7 @@ class Qirabot:
             target,
             action={"type": "extract", "params": {"instruction": instruction}},
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
             execute_result=False,
             retry=retry,
@@ -947,6 +1023,7 @@ class Qirabot:
         *,
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> VerifyResult:
         """Verify a visual assertion.
@@ -959,6 +1036,7 @@ class Qirabot:
             target,
             action={"type": "assert", "params": {"assertion": assertion}},
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
             execute_result=False,
             retry=retry,
@@ -976,6 +1054,7 @@ class Qirabot:
         wait: str = "",
         retry: int | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> LocateResult:
         """Resolve an element description to coordinates without acting.
@@ -996,11 +1075,21 @@ class Qirabot:
         or check with :meth:`verify`/:meth:`wait_for` first when presence is
         not guaranteed.
         """
-        self._maybe_wait(target, locate, timeout, interval, wait, model_alias, language)
+        self._maybe_wait(
+            target,
+            locate,
+            timeout,
+            interval,
+            wait,
+            model_alias=model_alias,
+            thinking_level=thinking_level,
+            language=language,
+        )
         result = self._ai_action(
             target,
             action={"type": "locate", "params": {"locate": locate}},
             model_alias=model_alias,
+            thinking_level=thinking_level,
             language=language,
             execute_result=False,
             retry=retry,
@@ -1031,6 +1120,7 @@ class Qirabot:
         interval: float = 2.0,
         *,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
     ) -> None:
         """Wait until a visual condition holds, polling every ``interval`` seconds.
@@ -1042,7 +1132,13 @@ class Qirabot:
         """
         deadline = time.monotonic() + timeout
         while True:
-            met = self.verify(target, assertion, model_alias=model_alias, language=language)
+            met = self.verify(
+                target,
+                assertion,
+                model_alias=model_alias,
+                thinking_level=thinking_level,
+                language=language,
+            )
             if met:
                 return
             if time.monotonic() >= deadline:
@@ -1059,6 +1155,7 @@ class Qirabot:
         *,
         on_step: Callable[[StepResult], None] | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
         custom_tools: list[Callable[..., Any] | dict[str, Any]] | None = None,
         exclude_tools: list[str] | None = None,
@@ -1124,6 +1221,7 @@ class Qirabot:
                 max_steps,
                 on_step=on_step,
                 model_alias=model_alias,
+                thinking_level=thinking_level,
                 language=language,
                 custom_tools=custom_tools,
                 exclude_tools=exclude_tools,
@@ -1181,6 +1279,7 @@ class Qirabot:
         *,
         on_step: Callable[[StepResult], None] | None = None,
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
         custom_tools: list[Callable[..., Any] | dict[str, Any]] | None = None,
         exclude_tools: list[str] | None = None,
@@ -1231,6 +1330,9 @@ class Qirabot:
             alias = model_alias or self._model_alias
             if alias:
                 request_body["model_alias"] = alias
+            tl = thinking_level or self._thinking_level
+            if tl:
+                request_body["thinking_level"] = tl
             lang = language or self._language
             if lang:
                 request_body["language"] = lang
@@ -2046,6 +2148,7 @@ class Qirabot:
         target: Any,
         action: dict[str, Any],
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
         execute_result: bool = True,
         retry: int | None = None,
@@ -2073,6 +2176,7 @@ class Qirabot:
                 return self._ai_action_once(
                     target, action,
                     model_alias=model_alias,
+                    thinking_level=thinking_level,
                     language=language,
                     execute_result=execute_result,
                     step_seq=step_seq,
@@ -2094,6 +2198,7 @@ class Qirabot:
         target: Any,
         action: dict[str, Any],
         model_alias: str = "",
+        thinking_level: str = "",
         language: str = "",
         execute_result: bool = True,
         step_seq: int | None = None,
@@ -2112,6 +2217,9 @@ class Qirabot:
         alias = model_alias or self._model_alias
         if alias:
             request_body["model_alias"] = alias
+        tl = thinking_level or self._thinking_level
+        if tl:
+            request_body["thinking_level"] = tl
         lang = language or self._language
         if lang:
             request_body["language"] = lang
