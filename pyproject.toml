@@ -53,7 +53,11 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "mypy>=1.0.0",
-    "ruff>=0.1.0",
+    # Pinned below 0.16: ruff 0.16.0 changed import-sorting and added rules
+    # (213 new findings). CI installs whatever this spec allows, so an open
+    # bound lets a new ruff release break the release gate overnight.
+    # Bump deliberately, migrating the codebase in the same change.
+    "ruff>=0.1.0,<0.16",
 ]
 
 [tool.setuptools.packages.find]
