@@ -52,7 +52,7 @@ section { background: #fff; border: 1px solid #e3e5e8; border-radius: 10px;
           margin-bottom: 18px; overflow: hidden; }
 section > h2 { font-size: 15px; margin: 0; padding: 12px 16px; background: #fafbfc;
               border-bottom: 1px solid #eceef0; display: flex; gap: 10px; align-items: center; }
-.steps { display: grid; grid-template-columns: 48px 96px 120px 1fr 200px; gap: 0; }
+.steps { display: grid; grid-template-columns: 48px 96px 160px 1fr 200px; gap: 0; }
 .steps > div { padding: 10px 12px; border-bottom: 1px solid #f0f1f3; }
 .when { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
         color: #888; white-space: nowrap; }
@@ -60,7 +60,10 @@ section > h2 { font-size: 15px; margin: 0; padding: 12px 16px; background: #fafb
 .when a:hover { text-decoration: underline; }
 .head { font-weight: 600; color: #888; font-size: 11px; text-transform: uppercase;
         background: #fcfcfd; }
-.act { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
+/* Custom tool names (e.g. capture_lqa_frame) can exceed the fixed column;
+   underscores aren't break points, so allow breaking anywhere. */
+.act { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600;
+       overflow-wrap: anywhere; }
 .steps > div.fail-row { background: #fff5f5; }
 .steps > .act.fail-row { color: #8a1010; }
 .steps > div.warn-row { background: #fffaef; }
